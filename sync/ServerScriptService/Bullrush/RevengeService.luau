@@ -130,7 +130,7 @@ local function buildPad(lane, bounds)
 	pad.Size = Vector3.new(PAD_SIZE, PAD_THICKNESS, PAD_SIZE)
 	pad.CFrame = padCFrame(lane, bounds)
 	pad.Anchored = true
-	pad.CanCollide = true
+	pad.CanCollide = false -- walk-through button: Touched still fires without collision
 	pad.Material = Enum.Material.SmoothPlastic
 	pad.Color = PAD_BASE_COLOR
 	pad:SetAttribute("axis", lane.axis)

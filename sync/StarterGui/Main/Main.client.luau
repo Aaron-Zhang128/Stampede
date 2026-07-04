@@ -13,6 +13,8 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local SocialService = game:GetService("SocialService")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
 local gui = script.Parent
@@ -249,6 +251,30 @@ end
 local HOVER_TI = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local PRESS_TI = TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
+-- Shared UI click: clone the library's "Click" sound (SoundService.GameSFX) per
+-- press so rapid clicks overlap cleanly, route it through the SFX mixer group,
+-- and let Debris reap it. Missing/moderated sound -> silent no-op, never errors.
+local sfxGroup = SoundService:FindFirstChild("GameSFX")
+local clickTemplate = sfxGroup and sfxGroup:FindFirstChild("Click")
+local function playClick()
+	if not clickTemplate then
+		return
+	end
+	local ok, s = pcall(function()
+		return clickTemplate:Clone()
+	end)
+	if not ok or not s then
+		return
+	end
+	s.SoundGroup = sfxGroup
+	s.Volume = 0.8
+	s.Parent = SoundService
+	pcall(function()
+		s:Play()
+	end)
+	Debris:AddItem(s, 2)
+end
+
 local function addButtonFeedback(btn)
 	local scale = ensureScale(btn)
 	local base = scale.Scale
@@ -267,6 +293,10 @@ local function addButtonFeedback(btn)
 	btn.MouseButton1Up:Connect(function()
 		tween(scale, HOVER_TI, { Scale = hovering and base * 1.07 or base })
 	end)
+	-- Click SFX on a genuine activation (press+release, or gamepad/keyboard);
+	-- Activated rather than MouseButton1Down so a scroll-drag that starts on a
+	-- card button doesn't machine-gun the sound.
+	btn.Activated:Connect(playClick)
 end
 
 for _, d in ipairs(gui:GetDescendants()) do

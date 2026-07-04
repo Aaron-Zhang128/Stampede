@@ -680,14 +680,14 @@ end
 
 --==============================================================================
 -- Revenge pads: the server builds pressure pads ringing the active window
--- (see RevengeService) with a plain resting look. Locally the pads exist
--- ONLY for the eliminated: everyone else has them fully hidden and
--- non-collidable (character physics is client-owned, so a local CanCollide
--- change really does let the living walk through; the server-side Touched
--- still fires but requestThrow rejects them anyway). For the eliminated
--- viewer they glow: pulsing green READY or an amber cooldown countdown.
--- All property sets are local-only, so every player sees their own state
--- on the same shared parts.
+-- (see RevengeService) with a plain resting look. Pads are NEVER collidable
+-- (built CanCollide=false; Touched fires on intersection), so everyone walks
+-- through them - the server-side Touched still fires for the living but
+-- requestThrow rejects them. Locally the pads exist ONLY for the eliminated:
+-- everyone else has them fully hidden. For the eliminated viewer they glow:
+-- pulsing green READY or red while cooling down, and the pad you stomp
+-- sinks and springs back. All property sets are local-only, so every player
+-- sees their own state on the same shared parts.
 --==============================================================================
 
 -- Color IS the signal (no floating text): green pad = ready to stomp,
@@ -700,7 +700,6 @@ local PAD_WAIT_B = Color3.fromRGB(220, 65, 55)
 
 local function paintPad(pad: BasePart, visible: boolean, remaining: number, pulse: number)
 	pad.LocalTransparencyModifier = if visible then 0 else 1
-	pad.CanCollide = visible -- the dead stand on them; the living walk through
 	local surface = pad:FindFirstChild("PadSurface")
 	if surface and surface:IsA("SurfaceGui") then
 		surface.Enabled = visible
@@ -754,6 +753,49 @@ local function ensurePadsHook()
 			end)
 		end
 	end)
+end
+
+-- Stomp feedback: on an accepted throw the pad under you sinks and springs
+-- back. Local-only CFrame tween on the shared anchored part; the rest CFrame
+-- is remembered per pad (weak keys) so a THROW_OK landing mid-animation can't
+-- capture a sunk position and make the pad drift downward.
+local padRestCFrames = setmetatable({} :: { [BasePart]: CFrame }, { __mode = "k" })
+
+local function pressPadFeedback()
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	local padsFolder = arena and arena:FindFirstChild("RevengePads")
+	if not (hrp and hrp:IsA("BasePart") and padsFolder) then
+		return
+	end
+	-- The ack doesn't say which pad fired; the one we're standing in is it.
+	local nearest: BasePart? = nil
+	local nearestDist = 8 -- generous vs the 6-stud pad; beyond that, skip quietly
+	for _, pad in padsFolder:GetChildren() do
+		if pad:IsA("BasePart") then
+			local offset = pad.Position - hrp.Position
+			local planar = math.sqrt(offset.X * offset.X + offset.Z * offset.Z)
+			if planar < nearestDist then
+				nearest, nearestDist = pad, planar
+			end
+		end
+	end
+	if not nearest then
+		return
+	end
+	local rest = padRestCFrames[nearest] or nearest.CFrame
+	padRestCFrames[nearest] = rest
+	local down = TweenService:Create(nearest,
+		TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ CFrame = rest - Vector3.new(0, 0.5, 0) })
+	down.Completed:Once(function()
+		if nearest.Parent then
+			TweenService:Create(nearest,
+				TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+				{ CFrame = rest }):Play()
+		end
+	end)
+	down:Play()
 end
 
 --==============================================================================
@@ -1006,6 +1048,7 @@ if revengeAckRemote then
 				or (typeof(Config.REVENGE) == "table" and tonumber(Config.REVENGE.COOLDOWN))
 				or 15
 			revengeReadyAt = os.clock() + cooldown
+			pressPadFeedback() -- the pad sinks + springs back
 			playOneShot("thud", { Volume = 0.4, PlaybackSpeed = 0.9 }) -- stomp feedback
 		elseif kind == "HIT" then
 			-- The reward card comes from the server (green, via NotifyService);
