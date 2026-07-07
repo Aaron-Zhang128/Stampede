@@ -130,8 +130,10 @@ local MUSIC_LOBBY_VOL = 0.5
 local MUSIC_BATTLE_VOL = 0.55
 local MUSIC_FADE = 1.5
 
-local lobbyBed = makeBed("Game Lobby Alternate")
-local battleBed = makeBed("Theme")
+-- Track-to-slot map flipped 2026-07-03 (user: "Theme" is the calmer loop,
+-- "Game Lobby Alternate" the driving one - names in the library are misleading).
+local lobbyBed = makeBed("Theme")
+local battleBed = makeBed("Game Lobby Alternate")
 
 local currentTrack: string? = nil
 local function setMusic(which: string)

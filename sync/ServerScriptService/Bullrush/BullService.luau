@@ -44,7 +44,7 @@ local function getActiveBullsFolder(): Folder
 	return folder
 end
 
-function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill): number
+function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill, style: { throwerName: string? }?): number
 	local startPos, endPos = GridUtil.lanePath(lane, bounds)
 	local duration = (endPos - startPos).Magnitude / speed
 	local rotation = CFrame.lookAt(startPos, endPos).Rotation
@@ -52,7 +52,76 @@ function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill
 
 	local bull = BullTemplate:Clone()
 	bull:PivotTo(CFrame.lookAt(startPos, endPos))
+
+	-- Revenge bulls read as PLAYER-SENT: a red glow everyone can see, plus the
+	-- thrower's name over its head so victims know who to blame (and the
+	-- thrower can spot THEIR bull in a stampede).
+	if style then
+		local glow = Instance.new("Highlight")
+		glow.Name = "RevengeGlow"
+		glow.FillColor = Color3.fromRGB(255, 60, 40)
+		glow.FillTransparency = 0.75
+		glow.OutlineColor = Color3.fromRGB(255, 90, 60)
+		glow.OutlineTransparency = 0.2
+		glow.DepthMode = Enum.HighlightDepthMode.Occluded
+		glow.Parent = bull
+		local root = bull.PrimaryPart or bull:FindFirstChild("Root")
+		if style.throwerName and root then
+			local tag = Instance.new("BillboardGui")
+			tag.Name = "RevengeTag"
+			tag.Size = UDim2.new(0, 130, 0, 26)
+			tag.StudsOffset = Vector3.new(0, 4, 0)
+			tag.AlwaysOnTop = true
+			tag.MaxDistance = 220
+			local label = Instance.new("TextLabel")
+			label.BackgroundTransparency = 1
+			label.Size = UDim2.fromScale(1, 1)
+			label.Font = Enum.Font.GothamBlack
+			label.TextScaled = true
+			label.TextColor3 = Color3.fromRGB(255, 90, 60)
+			label.TextStrokeColor3 = Color3.fromRGB(25, 0, 0)
+			label.TextStrokeTransparency = 0.3
+			label.Text = style.throwerName .. "'s bull!"
+			label.Parent = tag
+			tag.Parent = root
+		end
+	end
+
 	bull.Parent = getActiveBullsFolder()
+
+	-- Positional hooves: the charge is HEARD coming from where the bull is,
+	-- not just felt as a flat stampede layer. Dies with the model.
+	local soundRoot = bull.PrimaryPart or bull:FindFirstChild("Root")
+	if soundRoot then
+		local gallop = Instance.new("Sound")
+		gallop.Name = "GallopLoop"
+		gallop.SoundId = "rbxassetid://3300268152" -- "horse gallopping sound" (verified loadable)
+		gallop.Looped = true
+		gallop.Volume = 0.45
+		gallop.PlaybackSpeed = math.clamp(speed / 50, 0.85, 1.25) -- faster charge, faster hooves
+		gallop.RollOffMinDistance = 15
+		gallop.RollOffMaxDistance = 200
+		gallop.Parent = soundRoot
+		gallop:Play()
+		if style then
+			-- Launch bellow for revenge bulls: a pitched-down moo reads as an
+			-- angry bull; only the first bawl of the long clip plays.
+			local bellow = Instance.new("Sound")
+			bellow.Name = "Bellow"
+			bellow.SoundId = "rbxassetid://130829741" -- "Cow moo sound effect" (verified loadable)
+			bellow.Volume = 0.9
+			bellow.PlaybackSpeed = 0.78
+			bellow.RollOffMinDistance = 25
+			bellow.RollOffMaxDistance = 350
+			bellow.Parent = soundRoot
+			bellow:Play()
+			task.delay(2.4, function()
+				if bellow.Parent then
+					bellow:Stop()
+				end
+			end)
+		end
+	end
 
 	local emitter = bull:FindFirstChild("DustEmitter", true)
 	if emitter and emitter:IsA("ParticleEmitter") then

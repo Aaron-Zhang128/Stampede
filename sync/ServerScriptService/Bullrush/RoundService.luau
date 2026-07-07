@@ -17,6 +17,7 @@ local Remotes = ReplicatedStorage.Bullrush.Remotes
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
 local NotifyService = require(script.Parent.NotifyService)
 local FriendBoostService = require(script.Parent.FriendBoostService)
+local EconomyService = require(script.Parent.EconomyService)
 
 local RoundService = {}
 
@@ -81,14 +82,16 @@ function RoundService.eliminate(player: Player, cause: string?)
 	if not deferStreakReset and isRealPlayer(player) then
 		safeData(DataHandler.SetStat, player, "Streak", 0)
 	end
-	Remotes.Eliminated:FireAllClients(player.Name, RoundService.aliveCount(), cause)
+	local remaining = RoundService.aliveCount()
+	-- Ledger: elimination order fixes placement; the final-3 bonus fires here.
+	EconomyService.noteElimination(player, remaining, RoundService.getAlive())
+	Remotes.Eliminated:FireAllClients(player.Name, remaining, cause)
 
 	-- Elimination feed (white cards, top-center stack under the shop HUD).
-	local remaining = RoundService.aliveCount()
 	NotifyService.broadcast(
 		player.Name
 			.. (if cause == "REVENGE"
-				then " was taken out by a REVENGE bull — "
+				then " was trampled by a bull — "
 				else " was eliminated — ")
 			.. (if remaining == 1 then "1 remains" else ("%d remain"):format(remaining)),
 		"white")

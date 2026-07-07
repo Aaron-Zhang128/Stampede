@@ -5,9 +5,9 @@ local Config = {}
 -- window start the round already sunken. The window then shrinks during the
 -- round per the mode's schedule.
 Config.GRID_SIZE = 9
-Config.TILE_SIZE = 8.4            -- spacing between tile centers (8-stud tiles + 0.4 gap)
-Config.TILE_PART_SIZE = 8         -- visible tile width (integer so surface studs fit exactly)
-Config.TILE_THICKNESS = 1
+Config.TILE_SIZE = 6              -- spacing between tile centers (= tile width; tiles touch) [A/B test 2026-07-04: was 8.4]
+Config.TILE_PART_SIZE = Config.TILE_SIZE -- tile width = center spacing, so tiles touch edge-to-edge
+Config.TILE_THICKNESS = 80       -- tiles are tall pillars; TOPS stay at ARENA_ORIGIN height
 Config.ARENA_ORIGIN = Vector3.new(200, 20, 200) -- grid center at tile TOP surface height
 
 Config.BULL_RIDE_HEIGHT = 2.5     -- bull Root center height above tile surface
@@ -25,6 +25,28 @@ Config.FRIEND_BOOST = {
 	PER_FRIEND = 0.5,             -- +50% money per friend in the server
 }
 
+-- Round economy: every participant banks Money for how the round went, paid in
+-- one pass at round end (EconomyService) through the awardMoney choke point,
+-- so the friend boost applies to all of it. The Summary tab itemizes the pay.
+-- Amounts below are pre-multiplier; the mode's moneyMult scales them.
+Config.ECONOMY = {
+	SURVIVAL_MONEY = 2,           -- paid per SURVIVAL_INTERVAL seconds survived
+	SURVIVAL_INTERVAL = 5,
+	PLACEMENT = { 75, 40, 20 },   -- 1st/2nd/3rd finish, non-team rounds only
+	PLACEMENT_MIN_STARTERS = 4,   -- placement + final-3 pay need this many starters
+	STAGE_BONUS = 10,             -- each arena shrink you were alive through
+	LAST3_BONUS = 15,             -- reaching the final 3 alive
+	STREAK_BONUS = 25,            -- per consecutive win, on top of MONEY_PER_WIN
+	STREAK_BONUS_CAP = 100,       -- streak bonus ceiling (hit at a 4-win streak)
+}
+
+-- Robux developer products (fill the IDs in after publishing). 0 = not
+-- configured: the client's purchase prompt fails to a red card and
+-- ProcessReceipt leaves unknown products untouched.
+Config.PRODUCTS = {
+	DOUBLE_ROUND = 0,             -- Summary tab "2x Rewards?": doubles that round's payout
+}
+
 -- Revenge bulls: eliminated participants may send a bull down a lane of the
 -- CURRENT window while the round is ACTIVE. Cooldown is server-enforced.
 Config.REVENGE = {
@@ -32,6 +54,17 @@ Config.REVENGE = {
 	MONEY_PER_HIT = 25,           -- paid to the thrower per alive player trampled
 	TELEGRAPH = 1.2,              -- lane warning before the revenge bull launches
 	SPEED = 50,                   -- studs/s, fixed (independent of the difficulty ramp)
+}
+
+-- Player-vs-player shove: PushClient puts a tap prompt over every other
+-- player during ACTIVE rounds; PushService validates and the victim's own
+-- client applies the burst (client-authoritative, same idiom as the dash).
+Config.PUSH = {
+	RANGE = 9,                    -- prompt reach in studs (server allows +6 slack)
+	SPEED = 48,                   -- horizontal knockback, studs/s (dash is 56)
+	UP = 14,                      -- upward pop so the victim briefly loses footing
+	TIME = 0.2,                   -- burst hold; ~10 studs, a bit over one tile
+	COOLDOWN = 4,                 -- seconds between shoves, per pusher
 }
 
 -- TESTING: fake players so multiplayer modes can be playtested alone. When
@@ -50,8 +83,8 @@ Config.AI_PLAYERS = {
 Config.SHRINK = {
 	TELEGRAPH = 3.0,              -- doomed tiles flash this long before dropping
 	GRACE = 1.5,                  -- seconds a player may stand out of bounds before elimination
-	SINK_DEPTH = 1.4,             -- how far dropped tiles sink
-	SINK_TIME = 0.8,              -- sink tween duration
+	SINK_DEPTH = 110,             -- pillars plunge this far; tops rest 90 below the grid, so the whole 80-stud column falls clear of the skyline
+	SINK_TIME = 1.1,              -- pillar fall duration (quad ease-in over 110 studs ~ true gravity)
 }
 
 -- Base bull difficulty: intensity = min(elapsed / rampTime, 1), every
@@ -72,6 +105,7 @@ Config.DIFFICULTY = {
 --                  whichever comes first; #times = total shrink stages
 --   rampTime       overrides DIFFICULTY.RAMP_TIME for this mode
 --   difficulty     overrides DIFFICULTY.START/FINAL wholesale (optional)
+--   moneyMult      round-earnings multiplier (harder modes pay more; default 1)
 --   teams          split players into Red/Blue; the last team with a member
 --                  standing wins as a group (every member gets the win)
 Config.MODES = {
@@ -86,12 +120,14 @@ Config.MODES = {
 		startSize = 9,
 		shrink = { times = { 40, 80, 120, 160 }, aliveFractions = { 0.8, 0.6, 0.4, 0.2 } },
 		rampTime = 170,
+		moneyMult = 1.1,
 	},
 	{
 		id = "SMALL", name = "Small Grid", weight = 2, minPlayers = 1,
 		startSize = 5,
 		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
 		rampTime = 100,
+		moneyMult = 1.15,
 		difficulty = {
 			START = { telegraph = 1.8, gap = 2.4, speed = 38, bulls = 1 },
 			FINAL = { telegraph = 1.0, gap = 0.8, speed = 56, bulls = 3 },
@@ -102,6 +138,7 @@ Config.MODES = {
 		startSize = 7,
 		shrink = { times = { 45, 90, 135 }, aliveFractions = { 0.75, 0.5, 0.25 } },
 		rampTime = 130,
+		moneyMult = 1.25,
 		difficulty = {
 			START = { telegraph = 1.8, gap = 2.6, speed = 38, bulls = 2 },
 			FINAL = { telegraph = 0.9, gap = 0.8, speed = 62, bulls = 5 },

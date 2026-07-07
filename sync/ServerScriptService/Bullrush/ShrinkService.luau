@@ -4,16 +4,18 @@
 
 	The physical grid is 9x9; each round plays in a centered window of it.
 	reset(startSize, stages) configures the round: tiles inside the window are
-	restored (checkerboard, canonical height), tiles OUTSIDE it snap to sunken
-	charcoal immediately (no telegraph - they were never in play). Stage 0 =
+	restored (checkerboard, canonical height, visible), tiles OUTSIDE it vanish
+	into the pit immediately (no telegraph - they were never in play). Stage 0 =
 	the full window; advanceTo() then trims per stage via GridUtil.boundsForStage.
 
 	advanceTo() is BLOCKING: per step it fires ArenaShrink, waits out the
-	telegraph, sinks the removed tiles (server-side position tween + charcoal
-	recolor), then waits out the sink. Sunken tiles keep CanCollide = true -
-	they are walkable dead ground; Main's out-of-bounds watcher does the
-	eliminating. The guard walls track the window too: reset() and each
-	completed stage snap them flush to the boundary tiles' outer edges.
+	telegraph, then drops the removed pillars (server-side position tween +
+	charcoal recolor) SINK_DEPTH studs - a full pillar collapse in plain view -
+	then waits out the fall. The moment a pillar lands it VANISHES
+	(Transparency 1, CanCollide off), so anyone riding one down keeps falling
+	into the void; Main's out-of-bounds watcher does the eliminating. The
+	guard walls track the window too: reset() and each completed stage snap
+	them flush to the boundary tiles' outer edges.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -97,8 +99,9 @@ function ShrinkService.getBounds(): GridUtil.Bounds
 end
 
 -- Configure the arena for a round: cancel in-flight sinks, restore every
--- window tile to canonical position / checkerboard color, snap every tile
--- OUTSIDE the window straight to sunken charcoal, stage back to 0.
+-- window tile to canonical position / checkerboard color / visible, snap
+-- every tile OUTSIDE the window straight to gone (invisible, no collision,
+-- parked in the pit), stage back to 0.
 -- newStartSize defaults to the full grid; stages defaults to 0 (no shrinking).
 function ShrinkService.reset(newStartSize: number?, stages: number?)
 	sinkGeneration += 1 -- any in-flight sink loop bails on its next frame
@@ -113,14 +116,19 @@ function ShrinkService.reset(newStartSize: number?, stages: number?)
 		for col = 1, Config.GRID_SIZE do
 			local tile = getTile(row, col)
 			if tile then
-				tile.CanCollide = true
+				-- Size enforced from Config so a thickness tweak needs no manual rebuild.
+				tile.Size = Vector3.new(Config.TILE_PART_SIZE, Config.TILE_THICKNESS, Config.TILE_PART_SIZE)
 				if GridUtil.inBounds(row, col, bounds) then
 					tile.Position = tilePartPosition(row, col)
 					tile.Color = if (row + col) % 2 == 0 then CHECKER_LIGHT else CHECKER_DARK
+					tile.Transparency = 0
+					tile.CanCollide = true
 				else
-					-- Outside the mode's window: dead ground from second zero.
+					-- Outside the mode's window: already gone from second zero.
 					tile.Position = tilePartPosition(row, col) - Vector3.new(0, Config.SHRINK.SINK_DEPTH, 0)
 					tile.Color = CHARCOAL
+					tile.Transparency = 1
+					tile.CanCollide = false
 				end
 			end
 		end
@@ -166,6 +174,14 @@ function ShrinkService.advanceTo(targetStage: number)
 			alpha *= alpha -- Quad ease-in
 			for _, item in sinking do
 				item.tile.Position = item.from - Vector3.new(0, Config.SHRINK.SINK_DEPTH * alpha, 0)
+			end
+		end
+		-- Landed: the pillar vanishes. (A reset() mid-fall bumps the generation
+		-- and restores every tile itself, so only finish the job if the fall ran out.)
+		if sinkGeneration == myGeneration then
+			for _, item in sinking do
+				item.tile.Transparency = 1
+				item.tile.CanCollide = false
 			end
 		end
 

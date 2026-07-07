@@ -7,9 +7,13 @@
 	  5. Marquees       — lucky block cards scroll their possible items
 	  6. Notifications  — server-pushed red/green/white info cards (Remotes.Notify)
 	  7. HUD counters   — Cash mirrors leaderstats.Money, Speed mirrors Humanoid.WalkSpeed
+	  8. Round summary  — Frames.Summary auto-opens at round end with the winner's
+	                      portrait, your placement, and your itemized Money payout
+	                      (Remotes.RoundSummary); "2x Rewards?" prompts a dev product
 ]]
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local SocialService = game:GetService("SocialService")
@@ -166,29 +170,46 @@ if quickButtons then
 	end)
 end
 
--- "Slow: On/Off" toggle (visual state only)
-local function wireSlowToggle(btn)
-	local on = true
-	local function apply()
+-- "Become a Bull" button (former "Slow" toggle): enters/exits the revenge
+-- bull-cam. BullrushClient owns the camera + eligibility rules and exposes a
+-- client-local bridge (ReplicatedStorage.RevengeViewBridge BindableEvent):
+-- Fire() toggles the cam; its "Eligible"/"Viewing" attributes drive the
+-- button's visibility and label. The kit's On/Off gradient pair doubles as
+-- the state look (On = ready to enter, Off = currently viewing).
+local function wireBullCamButton(btn)
+	handled[btn] = true
+	btn.Visible = false -- only eliminated players of an ACTIVE round see it
+	local function apply(viewing)
 		local label = btn:FindFirstChild("Name")
 		if label and label:IsA("TextLabel") then
-			label.Text = on and "Slow: On" or "Slow: Off"
+			label.Text = viewing and "Exit Cam" or "Become a Bull"
 		end
 		for _, d in ipairs(btn:GetDescendants()) do
 			if d:IsA("UIGradient") or d:IsA("UIStroke") then
 				if d.Name == "On" then
-					d.Enabled = on
+					d.Enabled = not viewing
 				elseif d.Name == "Off" then
-					d.Enabled = not on
+					d.Enabled = viewing
 				end
 			end
 		end
 	end
-	apply()
-	handled[btn] = true
-	btn.Activated:Connect(function()
-		on = not on
-		apply()
+	apply(false)
+	task.spawn(function()
+		local bridge = ReplicatedStorage:WaitForChild("RevengeViewBridge", 30)
+		if not (bridge and bridge:IsA("BindableEvent")) then
+			return -- BullrushClient absent; the button just stays hidden
+		end
+		local function refresh()
+			btn.Visible = bridge:GetAttribute("Eligible") == true
+			apply(bridge:GetAttribute("Viewing") == true)
+		end
+		bridge:GetAttributeChangedSignal("Eligible"):Connect(refresh)
+		bridge:GetAttributeChangedSignal("Viewing"):Connect(refresh)
+		refresh()
+		btn.Activated:Connect(function()
+			bridge:Fire()
+		end)
 	end)
 end
 
@@ -206,7 +227,7 @@ local FRAME_MAP = {
 for _, d in ipairs(SideUI:GetDescendants()) do
 	if d:IsA("GuiButton") and not handled[d] then
 		if d.Name == "Button1" then
-			wireSlowToggle(d)
+			wireBullCamButton(d)
 		elseif d.Name == "Invite" then
 			handled[d] = true
 			d.Activated:Connect(function()
@@ -251,12 +272,12 @@ end
 local HOVER_TI = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local PRESS_TI = TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
--- Shared UI click: clone the library's "Click" sound (SoundService.GameSFX) per
--- press so rapid clicks overlap cleanly, route it through the SFX mixer group,
+-- Shared UI sounds: clone the library's "Click" tick (SoundService.GameSFX) per
+-- event so rapid fires overlap cleanly, route it through the SFX mixer group,
 -- and let Debris reap it. Missing/moderated sound -> silent no-op, never errors.
 local sfxGroup = SoundService:FindFirstChild("GameSFX")
 local clickTemplate = sfxGroup and sfxGroup:FindFirstChild("Click")
-local function playClick()
+local function playUiSound(volume, pitch)
 	if not clickTemplate then
 		return
 	end
@@ -267,12 +288,21 @@ local function playClick()
 		return
 	end
 	s.SoundGroup = sfxGroup
-	s.Volume = 0.8
+	s.Volume = volume
+	s.PlaybackSpeed = pitch
 	s.Parent = SoundService
 	pcall(function()
 		s:Play()
 	end)
 	Debris:AddItem(s, 2)
+end
+-- Click = full weight; hover = the same tick pitched up and much quieter, so it
+-- reads as a light blip under the pointer rather than a second click.
+local function playClick()
+	playUiSound(0.8, 1)
+end
+local function playHover()
+	playUiSound(0.45, 1.5)
 end
 
 local function addButtonFeedback(btn)
@@ -281,6 +311,7 @@ local function addButtonFeedback(btn)
 	local hovering = false
 	btn.MouseEnter:Connect(function()
 		hovering = true
+		playHover()
 		tween(scale, HOVER_TI, { Scale = base * 1.07 })
 	end)
 	btn.MouseLeave:Connect(function()
@@ -727,4 +758,198 @@ if speedLabel then
 	if player.Character then
 		task.spawn(bindCharacter, player.Character)
 	end
+end
+
+---------------------------------------------------------------- 8) round summary
+-- Round-end recap (Frames.Summary): the server mails every REAL participant a
+-- RoundSummary payload at round end (EconomyService.settle - see the contract
+-- in GridUtil's header). The tab auto-opens with the winner's portrait + name,
+-- your own portrait + placement in the corner TinyBox, the Money you earned,
+-- and an itemized breakdown line; it auto-closes when the next round cycle
+-- starts. The kit's XP row stays hidden until an XP system exists. The
+-- "2x Rewards?" button prompts the Config.PRODUCTS.DOUBLE_ROUND dev product;
+-- the server answers a granted receipt with an { update = true } resend.
+local MarketplaceService = game:GetService("MarketplaceService")
+
+local summaryFrame = Frames:FindFirstChild("Summary")
+local summaryMain = summaryFrame and summaryFrame:FindFirstChild("Main")
+if summaryMain then
+	local seeker = summaryMain:FindFirstChild("Seeker")
+	local winnerIcon = seeker and seeker:FindFirstChild("PlayerIcon")
+	local winnerLabel = seeker and seeker:FindFirstChild("PlayerName")
+	local coinsAmount = summaryMain:FindFirstChild("CoinsAmount")
+	local xpAmount = summaryMain:FindFirstChild("XpAmount")
+	local doubleButton = summaryMain:FindFirstChild("2xRewards")
+	local tinyBox = summaryMain:FindFirstChild("TinyBox")
+	local tinyIcon = tinyBox and tinyBox:FindFirstChild("ImageLabel")
+	local tinyText = tinyBox and tinyBox:FindFirstChild("TextLabel")
+
+	-- The kit's caption labels are unnamed (" "); identify them by their
+	-- designed text before we retitle anything.
+	local xpCaption, coinsCaption
+	for _, child in ipairs(summaryMain:GetChildren()) do
+		if child:IsA("TextLabel") then
+			if child.Text == "Xp" then
+				xpCaption = child
+			elseif child.Text == "Coins" then
+				coinsCaption = child
+			end
+		end
+	end
+
+	-- One itemized line under the money row, cloned from the coins caption so
+	-- it inherits the kit's font/stroke/gradient. Built BEFORE the rows move:
+	-- it takes over the coins row's original slot.
+	local breakdown
+	if coinsCaption then
+		breakdown = coinsCaption:Clone()
+		breakdown.Name = "Breakdown"
+		local ratio = breakdown:FindFirstChildOfClass("UIAspectRatioConstraint")
+		if ratio then
+			ratio:Destroy() -- full-width line; the ratio lock would fight the resize
+		end
+		breakdown.Size = UDim2.new(0.94, 0, coinsCaption.Size.Y.Scale * 0.62, 0)
+		breakdown.Position = UDim2.new(0.5, 0, coinsCaption.Position.Y.Scale + 0.015, 0)
+		breakdown.AnchorPoint = Vector2.new(0.5, coinsCaption.AnchorPoint.Y)
+		breakdown.TextXAlignment = Enum.TextXAlignment.Center
+		breakdown.Text = ""
+		breakdown.Parent = summaryMain
+	end
+
+	-- No XP system yet: hide that row and move the money row up into its slot;
+	-- the currency in this game is Money, so say so.
+	if xpCaption and xpAmount and coinsCaption and coinsAmount then
+		xpCaption.Visible = false
+		xpAmount.Visible = false
+		coinsCaption.Position = xpCaption.Position
+		coinsAmount.Position = xpAmount.Position
+		coinsCaption.Text = "Money"
+	end
+	if winnerIcon then
+		winnerIcon.ScaleType = Enum.ScaleType.Fit -- portraits are square; don't stretch
+	end
+
+	local PLACEHOLDER_PORTRAIT = winnerIcon and winnerIcon.Image or ""
+	local defaultNameColor = winnerLabel and winnerLabel.TextColor3
+	local TEAM_NAME_COLORS = {
+		RED = Color3.fromRGB(255, 92, 74),
+		BLUE = Color3.fromRGB(96, 156, 255),
+	}
+
+	local function portrait(userId)
+		return ("rbxthumb://type=AvatarBust&id=%d&w=420&h=420"):format(userId)
+	end
+
+	local function ordinal(n)
+		local tens = n % 100
+		local suffix = "TH"
+		if tens < 11 or tens > 13 then
+			local ones = n % 10
+			suffix = if ones == 1 then "ST" elseif ones == 2 then "ND" elseif ones == 3 then "RD" else "TH"
+		end
+		return tostring(n) .. suffix
+	end
+
+	local canDouble = false
+	local productId = 0 -- filled from Config once the Bullrush folder resolves
+
+	local function populate(data)
+		if winnerIcon then
+			winnerIcon.Image = if data.winnerUserId then portrait(data.winnerUserId) else PLACEHOLDER_PORTRAIT
+		end
+		if winnerLabel then
+			if data.winnerName then
+				winnerLabel.Text = data.winnerName .. " WINS!"
+				winnerLabel.TextColor3 = TEAM_NAME_COLORS[data.teamColor] or defaultNameColor
+			else
+				winnerLabel.Text = "THE HERD WON…"
+				winnerLabel.TextColor3 = defaultNameColor
+			end
+		end
+		if tinyIcon then
+			tinyIcon.Image = portrait(player.UserId)
+		end
+		if tinyText then
+			tinyText.Text = ordinal(tonumber(data.placement) or 1)
+		end
+		if coinsAmount then
+			coinsAmount.Text = "+" .. comma(tonumber(data.total) or 0)
+		end
+		if breakdown then
+			local parts = {}
+			for _, line in ipairs(data.lines or {}) do
+				table.insert(parts, ("%s +%s"):format(tostring(line.label), comma(tonumber(line.amount) or 0)))
+			end
+			breakdown.Text = table.concat(parts, "  •  ")
+		end
+		canDouble = data.canDouble == true
+		if doubleButton then
+			doubleButton.Visible = canDouble
+		end
+	end
+
+	if doubleButton then
+		doubleButton.Visible = false
+		doubleButton.Activated:Connect(function()
+			if not canDouble then
+				return
+			end
+			if productId <= 0 then
+				-- unpublished stub: no product exists to prompt yet
+				pushNotif("2x Rewards is coming soon!", "red", 3)
+				return
+			end
+			local ok = pcall(function()
+				MarketplaceService:PromptProductPurchase(player, productId)
+			end)
+			if not ok then
+				pushNotif("Purchases aren't available right now", "red", 3)
+			end
+		end)
+	end
+
+	task.spawn(function()
+		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+		local remotes = bullrush and bullrush:FindFirstChild("Remotes")
+		local summaryRemote = remotes and remotes:FindFirstChild("RoundSummary")
+		local stateRemote = remotes and remotes:FindFirstChild("RoundState")
+		if not (summaryRemote and summaryRemote:IsA("RemoteEvent")) then
+			warn("[Main] RoundSummary remote missing; summary tab disabled")
+			return
+		end
+		local okConfig, bullrushConfig = pcall(require, bullrush:WaitForChild("Config"))
+		if okConfig and typeof(bullrushConfig) == "table" and typeof(bullrushConfig.PRODUCTS) == "table" then
+			productId = tonumber(bullrushConfig.PRODUCTS.DOUBLE_ROUND) or 0
+		end
+
+		summaryRemote.OnClientEvent:Connect(function(data)
+			if typeof(data) ~= "table" then
+				return
+			end
+			if data.update then
+				-- a "2x Rewards?" purchase landed: refresh in place, no reopen
+				if coinsAmount then
+					coinsAmount.Text = "+" .. comma(tonumber(data.total) or 0)
+				end
+				canDouble = data.canDouble == true
+				if doubleButton then
+					doubleButton.Visible = canDouble
+				end
+				return
+			end
+			populate(data)
+			if currentFrame ~= summaryFrame then
+				openFrame(summaryFrame)
+			end
+		end)
+
+		-- The recap is over once the next round cycle starts.
+		if stateRemote and stateRemote:IsA("RemoteEvent") then
+			stateRemote.OnClientEvent:Connect(function(state)
+				if (state == "INTERMISSION" or state == "ACTIVE") and currentFrame == summaryFrame then
+					closeFrame(summaryFrame)
+				end
+			end)
+		end
+	end)
 end

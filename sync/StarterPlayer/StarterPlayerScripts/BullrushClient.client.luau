@@ -3,8 +3,9 @@
 -- Presentation layer for Bullrush Grid: lane telegraphs (tile pulse, bull
 -- silhouette, rumble), charge audio, scorch + camera shake on lane clear,
 -- near-miss graze shakes from live bulls, charge-launch camera kicks,
--- elimination feedback, arena-shrink telegraph FX (with sustained ground
--- tremor), gamepad rumble + device haptics mirroring the shakes, and the
+-- elimination feedback, arena-shrink FX (doom glow, ground tremor, and
+-- a crumbling pillar collapse), gamepad rumble + device haptics mirroring
+-- the shakes, and the
 -- round HUD (including per-round MODE display and Team Rush team counts).
 -- Client-only; reads the shared contract in ReplicatedStorage.Bullrush and
 -- never touches server state. The physical arena is 9x9; each round plays a
@@ -79,9 +80,9 @@ local roundStateRemote = waitFor(remotes, "RoundState")
 -- ArenaShrink is the newest remote and deliberately OPTIONAL: if it's missing
 -- we warned above, skip shrink FX, and every other effect keeps working.
 local arenaShrinkRemote = waitFor(remotes, "ArenaShrink")
--- RevengeAck is OPTIONAL the same way: without it the revenge pads stay in
+-- RevengeAck is OPTIONAL the same way: without it the revenge markers stay in
 -- their server-painted resting look and everything else keeps working.
--- (Revenge throws are physical pressure pads — server-side, no remote.)
+-- (Revenge throws are server-side ClickDetector markers — no remote to send.)
 local revengeAckRemote = waitFor(remotes, "RevengeAck")
 local assetsFolder = waitFor(ReplicatedStorage, "BullrushAssets")
 local bullTemplate = waitFor(assetsFolder, "BullTemplate")
@@ -166,6 +167,30 @@ local function playOneShot(idKey: string, props: { [string]: any }?): Sound
 	safePlay(sound)
 	Debris:AddItem(sound, 8)
 	return sound
+end
+
+-- One-shot from the curated SoundService library (GameSFX group, same set
+-- SoundDirector uses), cloned so overlapping plays never fight. Silent no-op
+-- if the sound is missing or moderated.
+local function playLibSfx(name: string, volume: number?, pitch: number?)
+	local group = SoundService:FindFirstChild("GameSFX")
+	local tmpl = group and group:FindFirstChild(name)
+	if not (tmpl and tmpl:IsA("Sound")) then
+		return
+	end
+	local s = tmpl:Clone()
+	s.Looped = false
+	if volume then
+		s.Volume = volume
+	end
+	if pitch then
+		s.PlaybackSpeed = pitch
+	end
+	s.Parent = SoundService
+	pcall(function()
+		s:Play()
+	end)
+	Debris:AddItem(s, 8)
 end
 
 local function fadeOutAndDestroy(sound: Sound?, fadeTime: number?)
@@ -280,12 +305,51 @@ local function abandonTile(part: BasePart)
 	stopTileTween(part)
 end
 
+-- Doom glow: a neon-red slab pinned just above a doomed tile's top, fading in
+-- from invisible to a hot glow across the telegraph (quad ease-in: barely-there
+-- at first, burning by the drop). Client-only parts in fxFolder, wiped at the
+-- sink moment (or on round-reset abandon) - then the crumble takes over.
+local DOOM_COLOR = Color3.fromRGB(255, 60, 30)
+local DOOM_PEAK_TRANSPARENCY = 0.35 -- how hot the glow gets right before the drop
+local tileDooms: { [BasePart]: BasePart } = {}
+
+local function clearTileDoom(tile: BasePart)
+	local slab = tileDooms[tile]
+	if slab then
+		tileDooms[tile] = nil
+		slab:Destroy()
+	end
+end
+
+local function spawnTileDoom(tile: BasePart, telegraphTime: number)
+	clearTileDoom(tile)
+	local slab = Instance.new("Part")
+	slab.Anchored = true
+	slab.CanCollide = false
+	slab.CanQuery = false
+	slab.CanTouch = false
+	slab.CastShadow = false
+	slab.Color = DOOM_COLOR
+	slab.Material = Enum.Material.Neon
+	slab.Transparency = 1
+	slab.Size = Vector3.new(tile.Size.X, 0.1, tile.Size.Z)
+	slab.CFrame = CFrame.new(tile.Position + Vector3.new(0, tile.Size.Y / 2 + 0.06, 0))
+	slab.Parent = fxFolder
+	tileDooms[tile] = slab
+	TweenService:Create(slab, TweenInfo.new(
+		math.max(telegraphTime, 0.2),
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.In
+	), { Transparency = DOOM_PEAK_TRANSPARENCY }):Play()
+end
+
 -- Round reset safety: abandon (never restore) every outstanding shrink claim.
 -- The server restores canonical tile positions/colors at the next round start.
 local function abandonAllShrinkClaims()
 	for part in pairs(shrinkClaimed) do
 		shrinkClaimed[part] = nil
 		abandonTile(part)
+		clearTileDoom(part)
 	end
 end
 
@@ -603,6 +667,67 @@ elimText.Text = "ELIMINATED"
 elimText.ZIndex = 11
 elimText.Parent = elimOverlay
 
+-- Revenge onboarding: lands under ELIMINATED so the death screen itself
+-- teaches the comeback mechanic.
+local elimHint = Instance.new("TextLabel")
+elimHint.Name = "ElimHint"
+elimHint.AnchorPoint = Vector2.new(0.5, 0.5)
+elimHint.Position = UDim2.fromScale(0.5, 0.56)
+elimHint.Size = UDim2.new(1, -40, 0, 60)
+elimHint.BackgroundTransparency = 1
+elimHint.Font = Enum.Font.GothamBlack
+elimHint.TextSize = 26
+elimHint.TextWrapped = true
+elimHint.TextColor3 = Color3.fromRGB(120, 255, 150)
+elimHint.TextStrokeColor3 = Color3.fromRGB(0, 25, 0)
+elimHint.TextStrokeTransparency = 0.4
+elimHint.TextTransparency = 1
+elimHint.Text = "GET REVENGE — hit BECOME A BULL (or step on the lobby pad) and click a lane from above!"
+elimHint.ZIndex = 11
+elimHint.Parent = elimOverlay
+
+-- Revenge hit payoff: a big center-screen burst when YOUR bull tramples
+-- someone — the small green money card alone is easy to miss.
+local hitPopup = Instance.new("TextLabel")
+hitPopup.Name = "RevengeHitPopup"
+hitPopup.AnchorPoint = Vector2.new(0.5, 0.5)
+hitPopup.Position = UDim2.fromScale(0.5, 0.3)
+hitPopup.Size = UDim2.new(1, 0, 0, 64)
+hitPopup.BackgroundTransparency = 1
+hitPopup.Font = Enum.Font.GothamBlack
+hitPopup.TextSize = 46
+hitPopup.TextColor3 = Color3.fromRGB(120, 255, 150)
+hitPopup.TextStrokeColor3 = Color3.fromRGB(0, 25, 0)
+hitPopup.TextStrokeTransparency = 0.3
+hitPopup.TextTransparency = 1
+hitPopup.Visible = false
+hitPopup.ZIndex = 12
+hitPopup.Parent = hud
+
+local hitPopupToken = 0
+local function showHitPopup(text: string)
+	hitPopupToken += 1
+	local token = hitPopupToken
+	hitPopup.Text = text
+	hitPopup.Visible = true
+	hitPopup.TextTransparency = 0
+	hitPopup.TextSize = 24
+	TweenService:Create(hitPopup,
+		TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ TextSize = 46 }):Play()
+	task.delay(1.4, function()
+		if hitPopupToken ~= token then
+			return
+		end
+		TweenService:Create(hitPopup, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+		task.delay(0.45, function()
+			if hitPopupToken == token then
+				hitPopup.Visible = false
+			end
+		end)
+	end)
+end
+
 --==============================================================================
 -- HUD state
 --==============================================================================
@@ -618,8 +743,9 @@ local intermissionEndsAt: number? = nil
 local lastIntermissionSecond: number? = nil
 
 -- Revenge cooldown mirror (server-authoritative, from RevengeAck THROW_OK /
--- DENIED): drives the pad glow/countdown repaint below.
+-- DENIED): drives the marker glow/countdown repaint below.
 local revengeReadyAt = 0 -- os.clock() when the next throw unlocks
+local markersWereCooling = false -- edge-detects the cooldown lapping for the ready ding
 
 local elimToken = 0
 
@@ -662,14 +788,21 @@ local function showEliminatedOverlay()
 	elimOverlay.Visible = true
 	elimOverlay.BackgroundTransparency = 1
 	elimText.TextTransparency = 1
+	elimHint.TextTransparency = 1
 	TweenService:Create(elimOverlay, TweenInfo.new(0.15), { BackgroundTransparency = 0.45 }):Play()
 	TweenService:Create(elimText, TweenInfo.new(0.15), { TextTransparency = 0 }):Play()
-	task.delay(1.9, function()
+	-- The revenge hint lands a beat after the gut punch, and the overlay
+	-- holds a little longer so it can actually be read.
+	TweenService:Create(elimHint,
+		TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.5),
+		{ TextTransparency = 0 }):Play()
+	task.delay(2.6, function()
 		if elimToken ~= token then
 			return
 		end
 		TweenService:Create(elimOverlay, TweenInfo.new(0.6), { BackgroundTransparency = 1 }):Play()
 		TweenService:Create(elimText, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
+		TweenService:Create(elimHint, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
 		task.delay(0.65, function()
 			if elimToken == token then
 				elimOverlay.Visible = false
@@ -679,75 +812,129 @@ local function showEliminatedOverlay()
 end
 
 --==============================================================================
--- Revenge pads: the server builds pressure pads ringing the active window
--- (see RevengeService) with a plain resting look. Pads are NEVER collidable
--- (built CanCollide=false; Touched fires on intersection), so everyone walks
--- through them - the server-side Touched still fires for the living but
--- requestThrow rejects them. Locally the pads exist ONLY for the eliminated:
--- everyone else has them fully hidden. For the eliminated viewer they glow:
--- pulsing green READY or red while cooling down, and the pad you stomp
--- sinks and springs back. All property sets are local-only, so every player
--- sees their own state on the same shared parts.
+-- Revenge markers: the server builds clickable arrow markers ringing the
+-- active window (see RevengeService), one at each end of every row/column,
+-- each carrying a server-side ClickDetector. The eliminated click them from
+-- the overhead bull-cam (next section). Locally the markers exist ONLY for
+-- the eliminated: everyone else has them fully hidden and their click range
+-- zeroed. For the eliminated viewer they glow: pulsing green READY or red
+-- while cooling down, and the marker you fire sinks and springs back. All
+-- property sets are local-only, so every player sees their own state on the
+-- same shared parts.
 --==============================================================================
 
--- Color IS the signal (no floating text): green pad = ready to stomp,
--- red pad = cooling down. Stomp outcomes arrive as red/green Notify cards
+-- Color IS the signal (no floating text): green marker = ready to click,
+-- red marker = cooling down. Outcomes arrive as red/green Notify cards
 -- pushed by the server (RevengeService -> NotifyService).
-local PAD_READY_A = Color3.fromRGB(70, 220, 100)
-local PAD_READY_B = Color3.fromRGB(150, 255, 170)
-local PAD_WAIT_A = Color3.fromRGB(170, 40, 35)
-local PAD_WAIT_B = Color3.fromRGB(220, 65, 55)
+local MARKER_READY_A = Color3.fromRGB(70, 220, 100)
+local MARKER_READY_B = Color3.fromRGB(150, 255, 170)
+local MARKER_WAIT_A = Color3.fromRGB(170, 40, 35)
+local MARKER_WAIT_B = Color3.fromRGB(220, 65, 55)
+local MARKER_CLICK_RANGE = 512 -- mirror of the server's build value; zeroed locally when hidden/cooling
 
-local function paintPad(pad: BasePart, visible: boolean, remaining: number, pulse: number)
+local function paintMarker(pad: BasePart, visible: boolean, remaining: number, pulse: number)
 	pad.LocalTransparencyModifier = if visible then 0 else 1
-	local surface = pad:FindFirstChild("PadSurface")
-	if surface and surface:IsA("SurfaceGui") then
-		surface.Enabled = visible
+	local surface = pad:FindFirstChild("MarkerSurface")
+	local gui = if surface and surface:IsA("SurfaceGui") then surface else nil
+	if gui then
+		gui.Enabled = visible
+	end
+	-- MaxActivationDistance is a plain property: setting it locally only
+	-- affects THIS viewer, so the living can never even hover the markers.
+	local click = pad:FindFirstChildOfClass("ClickDetector")
+	if click then
+		click.MaxActivationDistance = if visible and remaining <= 0 then MARKER_CLICK_RANGE else 0
 	end
 	if not visible then
 		return
 	end
 	pad.Material = Enum.Material.Neon
+	-- Face readout (all local-only): a big countdown number + sweeping fill
+	-- bar while recharging, arrow + SEND BULL when ready — readable at a
+	-- glance instead of color-only.
+	local arrow = gui and gui:FindFirstChild("Arrow")
+	local caption = gui and gui:FindFirstChild("Caption")
+	local fill = gui and gui:FindFirstChild("CooldownFill")
+	if gui and not fill then
+		local bar = Instance.new("Frame")
+		bar.Name = "CooldownFill"
+		bar.AnchorPoint = Vector2.new(0, 1)
+		bar.Position = UDim2.fromScale(0, 1)
+		bar.Size = UDim2.fromScale(0, 0.08)
+		bar.BorderSizePixel = 0
+		bar.BackgroundColor3 = Color3.fromRGB(255, 235, 230)
+		bar.BackgroundTransparency = 0.25
+		bar.Parent = gui
+		fill = bar
+	end
 	if remaining <= 0 then
-		pad.Color = PAD_READY_A:Lerp(PAD_READY_B, pulse) -- green: stomp me
+		pad.Color = MARKER_READY_A:Lerp(MARKER_READY_B, pulse) -- green: click me
+		if arrow and arrow:IsA("TextLabel") then
+			arrow.Text = "▲"
+		end
+		if caption and caption:IsA("TextLabel") then
+			caption.Text = "SEND BULL"
+		end
+		if fill and fill:IsA("Frame") then
+			fill.Visible = false
+		end
 	else
-		pad.Color = PAD_WAIT_A:Lerp(PAD_WAIT_B, pulse * 0.4) -- red: not yet
+		pad.Color = MARKER_WAIT_A:Lerp(MARKER_WAIT_B, pulse * 0.4) -- red: not yet
+		if arrow and arrow:IsA("TextLabel") then
+			arrow.Text = tostring(math.ceil(remaining))
+		end
+		if caption and caption:IsA("TextLabel") then
+			caption.Text = "RECHARGING"
+		end
+		if fill and fill:IsA("Frame") then
+			fill.Visible = true
+			local cooldown = (typeof(Config.REVENGE) == "table" and tonumber(Config.REVENGE.COOLDOWN)) or 15
+			fill.Size = UDim2.fromScale(1 - math.clamp(remaining / cooldown, 0, 1), 0.08)
+		end
 	end
 end
 
-local function refreshRevengePads()
-	local padsFolder = arena and arena:FindFirstChild("RevengePads")
-	if not padsFolder then
+local function refreshRevengeMarkers()
+	local markersFolder = arena and arena:FindFirstChild("RevengeMarkers")
+	if not markersFolder then
 		return
 	end
 	local visible = currentState == "ACTIVE" and locallyEliminated
 	local remaining = revengeReadyAt - os.clock()
 	local pulse = 0.5 + 0.5 * math.sin(os.clock() * 5)
-	for _, pad in padsFolder:GetChildren() do
-		if pad:IsA("BasePart") then
-			paintPad(pad, visible, remaining, pulse)
+	-- Ready ding the moment the cooldown laps, so you don't have to stare at
+	-- a marker face to know your next bull is up.
+	local cooling = remaining > 0
+	if markersWereCooling and not cooling and visible then
+		playLibSfx("Confirm", 0.8, 1.15)
+	end
+	markersWereCooling = visible and cooling
+	for _, marker in markersFolder:GetChildren() do
+		if marker:IsA("BasePart") then
+			paintMarker(marker, visible, remaining, pulse)
 		end
 	end
 end
 
--- Pads replicate server-visible; hide each one the moment it arrives so the
--- living never glimpse the ring at round start (the throttled repaint alone
--- would leave a one-tick flash). The folder outlives rounds - hook it once.
-local padsHooked = false
-local function ensurePadsHook()
-	if padsHooked then
+-- Markers replicate server-visible; hide each one the moment it arrives so
+-- the living never glimpse the ring at round start (the throttled repaint
+-- alone would leave a one-tick flash). The folder outlives rounds - hook it
+-- once.
+local markersHooked = false
+local function ensureMarkersHook()
+	if markersHooked then
 		return
 	end
-	local padsFolder = arena and arena:FindFirstChild("RevengePads")
-	if not padsFolder then
+	local markersFolder = arena and arena:FindFirstChild("RevengeMarkers")
+	if not markersFolder then
 		return
 	end
-	padsHooked = true
-	padsFolder.ChildAdded:Connect(function(pad)
-		if pad:IsA("BasePart") then
-			task.defer(function() -- let the pad's guis replicate in behind it
-				if pad.Parent then
-					paintPad(pad, currentState == "ACTIVE" and locallyEliminated,
+	markersHooked = true
+	markersFolder.ChildAdded:Connect(function(marker)
+		if marker:IsA("BasePart") then
+			task.defer(function() -- let the marker's guis replicate in behind it
+				if marker.Parent then
+					paintMarker(marker, currentState == "ACTIVE" and locallyEliminated,
 						revengeReadyAt - os.clock(), 0.5)
 				end
 			end)
@@ -755,47 +942,413 @@ local function ensurePadsHook()
 	end)
 end
 
--- Stomp feedback: on an accepted throw the pad under you sinks and springs
--- back. Local-only CFrame tween on the shared anchored part; the rest CFrame
--- is remembered per pad (weak keys) so a THROW_OK landing mid-animation can't
--- capture a sunk position and make the pad drift downward.
-local padRestCFrames = setmetatable({} :: { [BasePart]: CFrame }, { __mode = "k" })
+--==============================================================================
+-- Arena base: same per-viewer trick as the markers. The base slab and the
+-- ring decor that sits on it (skirt, corner posts, hay, rocks) exist only
+-- for the eliminated, whose overhead bull-cam looks down on it (a floating
+-- grid over void reads wrong from above). Everyone else has
+-- the lot hidden -- and the slab non-collidable (character physics is
+-- client-owned, so the local CanCollide really is what the living fall
+-- through) -- leaving them a floating tile grid. All property sets are
+-- local-only. The lobby-side FencePosts are spared: they sit on the lobby
+-- floor, not the base.
+--==============================================================================
 
-local function pressPadFeedback()
-	local character = player.Character
-	local hrp = character and character:FindFirstChild("HumanoidRootPart")
-	local padsFolder = arena and arena:FindFirstChild("RevengePads")
-	if not (hrp and hrp:IsA("BasePart") and padsFolder) then
-		return
+local function refreshArenaBase()
+	local visible = currentState == "ACTIVE" and locallyEliminated
+	local base = arena:FindFirstChild("ArenaBase")
+	if base and base:IsA("BasePart") then
+		base.LocalTransparencyModifier = if visible then 0 else 1
+		base.CanCollide = visible -- the dead walk the ring; the living fall past it
 	end
-	-- The ack doesn't say which pad fired; the one we're standing in is it.
-	local nearest: BasePart? = nil
-	local nearestDist = 8 -- generous vs the 6-stud pad; beyond that, skip quietly
-	for _, pad in padsFolder:GetChildren() do
-		if pad:IsA("BasePart") then
-			local offset = pad.Position - hrp.Position
-			local planar = math.sqrt(offset.X * offset.X + offset.Z * offset.Z)
-			if planar < nearestDist then
-				nearest, nearestDist = pad, planar
+	local decor = arena:FindFirstChild("Decor")
+	if decor then
+		for _, part in decor:GetChildren() do
+			if part:IsA("BasePart") and part.Name ~= "FencePost" then
+				part.LocalTransparencyModifier = if visible then 0 else 1
 			end
 		end
 	end
-	if not nearest then
+end
+
+-- Streaming can hand the base (or its decor) back fully visible at any time;
+-- hide each arrival immediately rather than waiting for the next repaint tick.
+local baseHooked = false
+local function ensureBaseHook()
+	if baseHooked then
 		return
 	end
-	local rest = padRestCFrames[nearest] or nearest.CFrame
-	padRestCFrames[nearest] = rest
-	local down = TweenService:Create(nearest,
+	baseHooked = true
+	arena.ChildAdded:Connect(function(child)
+		if child.Name == "ArenaBase" then
+			task.defer(refreshArenaBase)
+		end
+	end)
+	local decor = arena:FindFirstChild("Decor")
+	if decor then
+		decor.ChildAdded:Connect(function()
+			task.defer(refreshArenaBase)
+		end)
+	end
+end
+
+ensureBaseHook()
+refreshArenaBase() -- hide at load; don't wait for the first repaint tick
+
+--==============================================================================
+-- Ghost players: an eliminated participant who roams the ring (or the lobby)
+-- is invisible to the living -- no distracting dead players hopping around
+-- the pads -- but stays visible to fellow eliminated viewers. Same per-viewer
+-- local painting as the pads/base. The Eliminated remote reaches every
+-- client with the victim's name, so each viewer keeps its own name set for
+-- the round. The Health > 0 guard spares the ragdolled corpse mid-fling
+-- (that's the kill's juice); only the respawned character ghosts out. A late
+-- joiner misses earlier Eliminated events and sees those ghosts -- accepted.
+--==============================================================================
+
+local eliminatedNames: { [string]: boolean } = {}
+-- character -> saved nameplate mode; entry existing = "this viewer hid it".
+-- Weak keys so despawned characters never pin memory or need cleanup.
+local ghostHidden = setmetatable(
+	{} :: { [Model]: { nameplate: Enum.HumanoidDisplayDistanceType? } },
+	{ __mode = "k" }
+)
+
+local function setCharacterHidden(character: Model, hidden: boolean)
+	if hidden then
+		local entry = ghostHidden[character]
+		if not entry then
+			entry = {}
+			ghostHidden[character] = entry
+		end
+		-- Re-sweep every call: accessories/parts may replicate in after the
+		-- first hide and would otherwise pop in visible.
+		for _, d in character:GetDescendants() do
+			if d:IsA("BasePart") or d:IsA("Decal") then
+				d.LocalTransparencyModifier = 1
+			end
+		end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid and entry.nameplate == nil then
+			entry.nameplate = humanoid.DisplayDistanceType
+			humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		end
+	else
+		local entry = ghostHidden[character]
+		if not entry then
+			return -- never hidden by us; nothing to restore
+		end
+		ghostHidden[character] = nil
+		for _, d in character:GetDescendants() do
+			if d:IsA("BasePart") or d:IsA("Decal") then
+				d.LocalTransparencyModifier = 0
+			end
+		end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid and entry.nameplate ~= nil then
+			humanoid.DisplayDistanceType = entry.nameplate
+		end
+	end
+end
+
+local function refreshGhosts()
+	for _, other in Players:GetPlayers() do
+		if other ~= player then
+			local character = other.Character
+			if character then
+				local humanoid = character:FindFirstChildOfClass("Humanoid")
+				local shouldHide = currentState == "ACTIVE"
+					and not locallyEliminated -- the dead see their own kind
+					and eliminatedNames[other.Name] == true
+					and humanoid ~= nil
+					and humanoid.Health > 0 -- corpse stays visible while it flies
+				setCharacterHidden(character, shouldHide)
+			end
+		end
+	end
+end
+
+-- Respawns hand every viewer a fresh, fully visible character; re-evaluate
+-- immediately instead of waiting for the repaint tick.
+local function watchGhostCandidate(other: Player)
+	if other == player then
+		return
+	end
+	other.CharacterAdded:Connect(function()
+		task.defer(refreshGhosts)
+	end)
+end
+for _, other in Players:GetPlayers() do
+	watchGhostCandidate(other)
+end
+Players.PlayerAdded:Connect(watchGhostCandidate)
+
+-- Click feedback: on an accepted throw the acked lane's marker sinks and
+-- springs back. Local-only CFrame tween on the shared anchored part; the
+-- rest CFrame is remembered per marker (weak keys) so a THROW_OK landing
+-- mid-animation can't capture a sunk position and make the marker drift.
+local markerRestCFrames = setmetatable({} :: { [BasePart]: CFrame }, { __mode = "k" })
+
+local function pressMarkerFeedback(lane)
+	local markersFolder = arena and arena:FindFirstChild("RevengeMarkers")
+	if not (markersFolder and isLane(lane)) then
+		return
+	end
+	local target: BasePart? = nil
+	for _, marker in markersFolder:GetChildren() do
+		if marker:IsA("BasePart")
+			and marker:GetAttribute("axis") == lane.axis
+			and marker:GetAttribute("index") == lane.index
+			and marker:GetAttribute("direction") == lane.direction
+		then
+			target = marker
+			break
+		end
+	end
+	if not target then
+		return -- a shrink refresh can race the ack; skip quietly
+	end
+	local rest = markerRestCFrames[target] or target.CFrame
+	markerRestCFrames[target] = rest
+	local down = TweenService:Create(target,
 		TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 		{ CFrame = rest - Vector3.new(0, 0.5, 0) })
 	down.Completed:Once(function()
-		if nearest.Parent then
-			TweenService:Create(nearest,
+		if target.Parent then
+			TweenService:Create(target,
 				TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
 				{ CFrame = rest }):Play()
 		end
 	end)
 	down:Play()
+end
+
+-- Lobby BullCamPad ("Become a Bull"): stepping onto it flips the overhead
+-- bull-cam on (see updateOverhead below) - purely client-side, no server
+-- script. Only meaningful while a round is ACTIVE and you're an eliminated
+-- participant, so hide it from everyone else - same visibility rule as the
+-- markers. Change-only writes; unlike the per-round marker ring this part
+-- is permanent, so the refresh must also run OUTSIDE ACTIVE to re-hide it
+-- when the round ends.
+local bullCamPadVisible: boolean? = nil -- tri-state: nil forces the first paint
+
+-- The pad lives somewhere the user parks it (currently Workspace.Lobby), so
+-- find it recursively once and cache; re-search only if it despawns.
+local bullCamPadCache: BasePart? = nil
+local function getBullCamPad(): BasePart?
+	if bullCamPadCache and bullCamPadCache.Parent then
+		return bullCamPadCache
+	end
+	local found = workspace:FindFirstChild("BullCamPad", true)
+	bullCamPadCache = if found and found:IsA("BasePart") then found else nil
+	return bullCamPadCache
+end
+
+local function refreshBullCamPad()
+	local pad = getBullCamPad()
+	if not pad then
+		return
+	end
+	local visible = currentState == "ACTIVE" and locallyEliminated
+	if bullCamPadVisible == visible then
+		return
+	end
+	bullCamPadVisible = visible
+	pad.LocalTransparencyModifier = if visible then 0 else 1
+	for _, child in pad:GetChildren() do
+		if child:IsA("Highlight") or child:IsA("BillboardGui") then
+			child.Enabled = visible
+		end
+	end
+end
+
+--==============================================================================
+-- Overhead bull-cam: eliminated participants aim revenge bulls from a fixed
+-- top-down camera that frames the CURRENT window (re-framing as it shrinks),
+-- clicking the arrow markers instead of walking the ring. Enter by stepping
+-- onto the lobby BullCamPad or via the HUD "Become a Bull" button
+-- (StarterGui.Main owns the button per the UI rule; it talks to this script
+-- through the RevengeViewBridge BindableEvent in ReplicatedStorage). The
+-- character FREEZES where it stands (character physics is client-owned, so
+-- the anchor is real) while viewing. Exit: the button again, E / gamepad B,
+-- the character somehow leaving its freeze spot (a server teleport), or the
+-- round ending.
+--==============================================================================
+
+local OVERHEAD_MARGIN = 16 -- studs beyond the window edge kept in frame (covers the marker ring)
+local OVERHEAD_DRIFT_EXIT = 8 -- freeze-spot drift that force-exits the cam (server moved us)
+
+local overheadViewing = false
+local overheadTweening = false
+local overheadFreezePos: Vector3? = nil
+local overheadSaved: { walkSpeed: number, jumpPower: number, jumpHeight: number, autoRotate: boolean }? = nil
+local wasOnBullCamPad = false
+local lastBounds: GridUtil.Bounds? = nil -- ACTIVE window, from RoundState/ArenaShrink
+
+-- StarterGui.Main's HUD button drives the cam through this bridge (client-
+-- created local instance; never replicates): Fire() toggles, attributes
+-- broadcast eligibility + viewing state back to the button.
+local viewBridge = Instance.new("BindableEvent")
+viewBridge.Name = "RevengeViewBridge"
+viewBridge:SetAttribute("Eligible", false)
+viewBridge:SetAttribute("Viewing", false)
+viewBridge.Parent = ReplicatedStorage
+
+local function updateBridgeAttributes()
+	-- SetAttribute is change-detected; equal writes fire no signals.
+	viewBridge:SetAttribute("Eligible", currentState == "ACTIVE" and locallyEliminated)
+	viewBridge:SetAttribute("Viewing", overheadViewing)
+end
+
+-- Straight-down framing of the active window plus the marker ring: height is
+-- whatever fits the tighter screen axis. Up vector is world -Z so north (row
+-- 1) reads as screen-up and the shot can never roll.
+local function overheadCFrame(): CFrame
+	local camera = workspace.CurrentCamera
+	local window = lastBounds or GridUtil.boundsForStage(0)
+	local minC = GridUtil.tileCenter(window.rowMin, window.colMin)
+	local maxC = GridUtil.tileCenter(window.rowMax, window.colMax)
+	local center = (minC + maxC) / 2
+	local halfX = (maxC.X - minC.X) / 2 + Config.TILE_SIZE / 2 + OVERHEAD_MARGIN
+	local halfZ = (maxC.Z - minC.Z) / 2 + Config.TILE_SIZE / 2 + OVERHEAD_MARGIN
+	local halfFov = math.rad((camera and camera.FieldOfView or 70) / 2)
+	local aspect = if camera and camera.ViewportSize.Y > 0
+		then camera.ViewportSize.X / camera.ViewportSize.Y
+		else 1.78
+	local height = math.max(halfZ / math.tan(halfFov), halfX / (math.tan(halfFov) * aspect))
+	local eye = Vector3.new(center.X, Config.ARENA_ORIGIN.Y + height, center.Z)
+	return CFrame.lookAt(eye, Vector3.new(center.X, Config.ARENA_ORIGIN.Y, center.Z), Vector3.new(0, 0, -1))
+end
+
+local function exitOverhead()
+	if not overheadViewing then
+		return
+	end
+	overheadViewing = false
+	overheadTweening = false
+	overheadFreezePos = nil
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if hrp and hrp:IsA("BasePart") then
+		hrp.Anchored = false
+	end
+	if humanoid and overheadSaved then
+		humanoid.WalkSpeed = overheadSaved.walkSpeed
+		humanoid.JumpPower = overheadSaved.jumpPower
+		humanoid.JumpHeight = overheadSaved.jumpHeight
+		humanoid.AutoRotate = overheadSaved.autoRotate
+	end
+	overheadSaved = nil
+	local camera = workspace.CurrentCamera
+	if camera then
+		camera.CameraType = Enum.CameraType.Custom
+		if humanoid then
+			camera.CameraSubject = humanoid
+		end
+	end
+	updateBridgeAttributes()
+end
+
+local function enterOverhead()
+	if overheadViewing then
+		return
+	end
+	if not (currentState == "ACTIVE" and locallyEliminated) then
+		return
+	end
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local camera = workspace.CurrentCamera
+	if not (hrp and hrp:IsA("BasePart") and humanoid and humanoid.Health > 0 and camera) then
+		return
+	end
+	overheadViewing = true
+	overheadFreezePos = hrp.Position
+	overheadSaved = {
+		walkSpeed = humanoid.WalkSpeed,
+		jumpPower = humanoid.JumpPower,
+		jumpHeight = humanoid.JumpHeight,
+		autoRotate = humanoid.AutoRotate,
+	}
+	humanoid.WalkSpeed = 0
+	humanoid.JumpPower = 0
+	humanoid.JumpHeight = 0
+	humanoid.AutoRotate = false
+	hrp.Anchored = true
+	camera.CameraType = Enum.CameraType.Scriptable
+	overheadTweening = true
+	local swoop = TweenService:Create(camera,
+		TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+		{ CFrame = overheadCFrame() })
+	swoop.Completed:Once(function()
+		overheadTweening = false
+	end)
+	swoop:Play()
+	playOneShot("chargeWhoosh", { Volume = 0.35, PlaybackSpeed = 1.1 })
+	updateBridgeAttributes()
+end
+
+viewBridge.Event:Connect(function()
+	if overheadViewing then
+		exitOverhead()
+	else
+		enterOverhead()
+	end
+end)
+
+-- Keyboard/gamepad exit; entry is the pad or the HUD button only.
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed or not overheadViewing then
+		return
+	end
+	if input.KeyCode == Enum.KeyCode.E or input.KeyCode == Enum.KeyCode.ButtonB then
+		exitOverhead()
+	end
+end)
+
+-- Per-tick keeper (0.25s): while viewing, enforce exit conditions and keep
+-- the camera glued to the (possibly shrunken) window; while not, watch for
+-- the character stepping onto the BullCamPad. Pad entry fires on the
+-- outside -> inside edge only, so exiting while still standing on the pad
+-- doesn't instantly re-enter.
+local function updateOverhead()
+	updateBridgeAttributes() -- safety repaint for the HUD button's state
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if overheadViewing then
+		if currentState ~= "ACTIVE" or not locallyEliminated
+			or not (hrp and humanoid and humanoid.Health > 0)
+			or (overheadFreezePos ~= nil
+				and (hrp.Position - overheadFreezePos).Magnitude > OVERHEAD_DRIFT_EXIT)
+		then
+			exitOverhead()
+			return
+		end
+		if not overheadTweening then
+			local camera = workspace.CurrentCamera
+			if camera then
+				camera.CFrame = overheadCFrame() -- tracks shrink + viewport changes
+			end
+		end
+		return
+	end
+	local onPad = false
+	if currentState == "ACTIVE" and locallyEliminated and hrp then
+		local pad = getBullCamPad()
+		if pad then
+			local offset = hrp.Position - pad.Position
+			onPad = math.abs(offset.X) <= pad.Size.X / 2 + 0.5
+				and math.abs(offset.Z) <= pad.Size.Z / 2 + 0.5
+				and offset.Y >= 0 and offset.Y <= 8
+		end
+	end
+	if onPad and not wasOnBullCamPad then
+		enterOverhead()
+	end
+	wasOnBullCamPad = onPad
 end
 
 --==============================================================================
@@ -969,12 +1522,69 @@ local function emitTileDebris(tile: BasePart)
 	Debris:AddItem(holder, 2)
 end
 
+-- Crumble-in-motion: while the server lerps a doomed pillar into the pit, a
+-- dust plume streams off the whole shaft and chips of it break away from the
+-- rim. Chips read the tile's CURRENT position at spawn, so later waves break
+-- off lower as the pillar falls; gravity and Debris handle the rest.
+local shrinkTremorGen = 0 -- invalidates a pending fall-quiet timer when a newer telegraph/fall starts
+
+local function attachSinkDust(tile: BasePart, sinkTime: number)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Name = "CrumbleDust"
+	emitter.Color = ColorSequence.new(SCORCH_COLOR)
+	emitter.Lifetime = NumberRange.new(0.5, 1.1)
+	emitter.Rate = 24
+	emitter.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.2),
+		NumberSequenceKeypoint.new(1, 3.2),
+	})
+	emitter.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.4),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	emitter.Speed = NumberRange.new(2, 5)
+	emitter.SpreadAngle = Vector2.new(60, 60)
+	emitter.Acceleration = Vector3.new(0, -12, 0)
+	emitter.Parent = tile -- local-only child of the server tile; Debris reaps it
+	task.delay(sinkTime, function()
+		emitter.Enabled = false -- landed: the shaft vanishes, the dust stops
+	end)
+	Debris:AddItem(emitter, sinkTime + 1.5)
+end
+
+local function spawnCrumbleChip(tile: BasePart, rng: Random)
+	local half = tile.Size.X / 2
+	local side = rng:NextInteger(1, 4)
+	local edge = if side == 1
+		then Vector3.new(-half, 0, rng:NextNumber(-half, half))
+		elseif side == 2 then Vector3.new(half, 0, rng:NextNumber(-half, half))
+		elseif side == 3 then Vector3.new(rng:NextNumber(-half, half), 0, -half)
+		else Vector3.new(rng:NextNumber(-half, half), 0, half)
+	local chip = Instance.new("Part")
+	chip.Size = Vector3.new(rng:NextNumber(0.5, 1.4), rng:NextNumber(0.5, 1.4), rng:NextNumber(0.5, 1.4))
+	chip.CFrame = CFrame.new(tile.Position + edge + Vector3.new(0, tile.Size.Y / 2, 0))
+		* CFrame.Angles(rng:NextNumber(0, math.pi), rng:NextNumber(0, math.pi), 0)
+	chip.Color = tile.Color
+	chip.Material = tile.Material
+	chip.CanCollide = false
+	chip.CanQuery = false
+	chip.CanTouch = false
+	chip.CastShadow = false
+	chip.AssemblyLinearVelocity = Vector3.new(edge.X, 0, edge.Z).Unit * rng:NextNumber(4, 10)
+		+ Vector3.new(0, rng:NextNumber(2, 8), 0)
+	chip.AssemblyAngularVelocity = Vector3.new(rng:NextNumber(-8, 8), rng:NextNumber(-8, 8), rng:NextNumber(-8, 8))
+	chip.Parent = fxFolder
+	Debris:AddItem(chip, 2.2)
+end
+
 -- Arena shrink: the server fires this at telegraph START; telegraphTime later
 -- it sinks the removed tiles and snaps them charcoal. We pulse the doomed
--- tiles red (danger is danger), then ABANDON our claims at the exact sink
--- moment so the replicated charcoal wins over any local tween.
+-- tiles red (danger is danger) under a doom glow that brightens toward the
+-- drop, then ABANDON our claims at the exact sink moment so the replicated
+-- charcoal wins over any local tween - and crumble each pillar (dust, rim
+-- chips, tremor, roar) for the whole fall.
 if arenaShrinkRemote then
-	arenaShrinkRemote.OnClientEvent:Connect(function(stage, _bounds, removedCells, telegraphTime)
+	arenaShrinkRemote.OnClientEvent:Connect(function(stage, shrinkBounds, removedCells, telegraphTime)
 		if tonumber(stage) == nil or typeof(removedCells) ~= "table" then
 			return
 		end
@@ -994,30 +1604,63 @@ if arenaShrinkRemote then
 					shrinkClaimed[part] = true
 					table.insert(claimed, part)
 					claimTile(part)
+					spawnTileDoom(part, sinkDelay)
 				end
 			end
 		end
 
 		playOneShot("rumble", { Volume = 0.3, PlaybackSpeed = 0.5 })
+		shrinkTremorGen += 1 -- a fresh telegraph owns the tremor now
 		tremor = TREMOR_LEVEL -- the ground trembles for the whole telegraph window
 
 		task.delay(sinkDelay, function()
-			tremor = 0 -- tremble ends exactly when the floor drops
+			-- The window officially shrinks at this moment; the bull-cam
+			-- reframes to it on its next tick. (Guarded so a round reset
+			-- during the telegraph can't smear stale bounds into the next round.)
+			if currentState == "ACTIVE" and isBounds(shrinkBounds) then
+				lastBounds = shrinkBounds
+			end
 			-- A round reset may have abandoned these already; drop live claims only.
-			local dropped = 0
+			local droppedTiles = {}
 			for _, part in ipairs(claimed) do
 				if shrinkClaimed[part] then
 					shrinkClaimed[part] = nil
 					abandonTile(part)
+					clearTileDoom(part)
 					emitTileDebris(part)
-					dropped += 1
+					table.insert(droppedTiles, part)
 				end
 			end
-			if dropped > 0 then
-				-- The server drops the tiles at this same moment; sell the impact.
-				addTrauma(0.5)
-				playOneShot("slam", { Volume = 0.4 })
-				playOneShot("thud", { Volume = 0.35, PlaybackSpeed = 0.5 })
+			if #droppedTiles == 0 then
+				tremor = 0 -- nothing actually fell; end the tremble quietly
+				return
+			end
+			-- The server starts the pillar fall at this same moment: sell the
+			-- impact, then keep the ground grumbling until the pillars land.
+			local sinkTime = (typeof(Config.SHRINK) == "table" and tonumber(Config.SHRINK.SINK_TIME)) or 1
+			addTrauma(0.5)
+			playOneShot("slam", { Volume = 0.4 })
+			playOneShot("thud", { Volume = 0.35, PlaybackSpeed = 0.5 })
+			playOneShot("rumble", { Volume = 0.5, PlaybackSpeed = 0.75 }) -- collapse roar over the fall
+			shrinkTremorGen += 1
+			local gen = shrinkTremorGen
+			tremor = TREMOR_LEVEL * 1.5
+			task.delay(sinkTime, function()
+				if shrinkTremorGen == gen then
+					tremor = 0 -- quiet only if a newer telegraph/fall hasn't taken over
+				end
+			end)
+			-- Dust off every falling shaft plus rim chips in waves, budgeted so
+			-- a MEGA ring drop (32 tiles) stays mobile-friendly.
+			local rng = Random.new()
+			local chipsPerTile = math.clamp(math.floor(140 / #droppedTiles), 3, 8)
+			for _, part in ipairs(droppedTiles) do
+				attachSinkDust(part, sinkTime)
+				for _ = 1, chipsPerTile do
+					task.delay(rng:NextNumber(0, sinkTime * 0.7), function()
+						spawnCrumbleChip(part, rng)
+					end)
+				end
 			end
 		end)
 	end)
@@ -1030,13 +1673,19 @@ eliminatedRemote.OnClientEvent:Connect(function(playerName, aliveCount, cause)
 			refreshStatus(nil)
 		end
 	end
+	if typeof(playerName) == "string" then
+		eliminatedNames[playerName] = true -- ghost them for the living
+	end
 	if playerName == player.Name then
 		locallyEliminated = true
+		refreshArenaBase() -- the ring appears the instant you fall
 		addTrauma(MAX_TRAUMA) -- trampled: the hardest hit the shake system allows
 		playHapticPulse("GameplayExplosion") -- phones etc; gamepads peak via the trauma-driven motors
 		showEliminatedOverlay()
 		playOneShot("thud", { Volume = 0.6, PlaybackSpeed = 0.5 })
+		updateBridgeAttributes() -- the HUD "Become a Bull" button appears now
 	end
+	refreshGhosts() -- hides the new ghost -- or, if WE just died, reveals them all
 	-- Other players' eliminations reach the feed as server-pushed white cards
 	-- (RoundService.eliminate -> NotifyService), not from this handler.
 end)
@@ -1048,12 +1697,23 @@ if revengeAckRemote then
 				or (typeof(Config.REVENGE) == "table" and tonumber(Config.REVENGE.COOLDOWN))
 				or 15
 			revengeReadyAt = os.clock() + cooldown
-			pressPadFeedback() -- the pad sinks + springs back
-			playOneShot("thud", { Volume = 0.4, PlaybackSpeed = 0.9 }) -- stomp feedback
+			pressMarkerFeedback(if typeof(data) == "table" then data.lane else nil) -- the marker sinks + springs back
+			playOneShot("thud", { Volume = 0.4, PlaybackSpeed = 0.9 }) -- launch feedback
+			addTrauma(0.5) -- the stomp lands: kick the thrower's camera too
+			playHapticPulse("GameplayCollision")
+			playLibSfx("Confirm", 0.9)
 		elseif kind == "HIT" then
-			-- The reward card comes from the server (green, via NotifyService);
-			-- this ack just punctuates it.
-			playOneShot("slam", { Volume = 0.3 })
+			-- Server still sends the green money card; this is the BIG payoff:
+			-- a center-screen burst + shake so a trample never goes unnoticed.
+			local victim = if typeof(data) == "table" then tostring(data.victimName or "someone") else "someone"
+			local amount = if typeof(data) == "table" then tonumber(data.amount) else nil
+			showHitPopup(if amount
+				then ("TRAMPLED %s! +%d💰"):format(victim, amount)
+				else ("TRAMPLED %s!"):format(victim))
+			addTrauma(0.35)
+			playHapticPulse("GameplayCollision")
+			playOneShot("slam", { Volume = 0.45 })
+			playOneShot("thud", { Volume = 0.35, PlaybackSpeed = 0.6 })
 		elseif kind == "DENIED" and typeof(data) == "table" then
 			-- Server-authoritative resync (e.g. we rejoined mid-cooldown and
 			-- our local timer reads READY): adopt the server's remaining time.
@@ -1096,6 +1756,13 @@ roundStateRemote.OnClientEvent:Connect(function(state, info)
 		then info.teamCounts
 		else nil
 
+	-- The ACTIVE window drives the bull-cam framing; forget it between rounds.
+	if state == "ACTIVE" and isBounds(info.bounds) then
+		lastBounds = info.bounds
+	elseif state ~= "ACTIVE" then
+		lastBounds = nil
+	end
+
 	local timeLeft = tonumber(info.timeLeft)
 	if state == "INTERMISSION" and timeLeft then
 		intermissionEndsAt = os.clock() + timeLeft
@@ -1107,11 +1774,18 @@ roundStateRemote.OnClientEvent:Connect(function(state, info)
 
 	if state ~= "ACTIVE" then
 		locallyEliminated = false -- fresh eyes (and shakes) for the next round
+		exitOverhead() -- the bull-cam never outlives the round (also unfreezes
+		-- BEFORE the server's round-end lobby teleport, so the anchored HRP
+		-- can't fight the PivotTo)
 		tremor = 0 -- no shrink telegraph survives a round transition
 		clearAllLanes() -- safety net: no lane may outlive its round
 		abandonAllShrinkClaims() -- nor may a shrink claim; server recolors at next round start
 		revengeReadyAt = 0 -- server clears cooldowns between rounds; mirror it
+		table.clear(eliminatedNames) -- the dead rejoin the visible world
 	end
+	updateBridgeAttributes() -- eligibility changes with the state
+	refreshArenaBase() -- visibility depends on state; repaint on every transition
+	refreshGhosts()
 end)
 
 --==============================================================================
@@ -1120,6 +1794,7 @@ end)
 --==============================================================================
 
 local revengeRefreshAccum = 0
+local baseRefreshAccum = 0
 
 RunService.RenderStepped:Connect(function(dt)
 	-- Local intermission countdown (display only; server events stay authoritative)
@@ -1132,18 +1807,32 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 	end
 
-	-- Revenge pad repaint (world buttons), throttled: visibility + glow +
+	-- Revenge marker repaint (world buttons), throttled: visibility + glow +
 	-- countdown are a per-viewer local paint. 0.1s keeps the ready pulse
 	-- smooth without per-frame property churn. The hook is ensured every
-	-- frame (cheap flag check) so pad spawns are hidden the instant they
+	-- frame (cheap flag check) so marker spawns are hidden the instant they
 	-- replicate, even before the first ACTIVE tick.
-	ensurePadsHook()
+	ensureMarkersHook()
 	if currentState == "ACTIVE" then
 		revengeRefreshAccum += dt
 		if revengeRefreshAccum >= 0.1 then
 			revengeRefreshAccum = 0
-			refreshRevengePads()
+			refreshRevengeMarkers()
 		end
+	end
+
+	-- Arena base + ghost repaint, throttled: cheap safety net behind the
+	-- event-driven refreshes (elimination, state changes, stream-ins,
+	-- respawns) so a missed edge can never leave the slab or a ghost in the
+	-- wrong state for more than a beat. The ghost sweep also re-hides
+	-- late-replicating accessories on already-hidden characters.
+	baseRefreshAccum += dt
+	if baseRefreshAccum >= 0.25 then
+		baseRefreshAccum = 0
+		refreshArenaBase()
+		refreshGhosts()
+		refreshBullCamPad() -- change-guarded; hides again when the round ends
+		updateOverhead() -- bull-cam exit conditions, reframing, and pad entry
 	end
 
 	updateNearMisses()

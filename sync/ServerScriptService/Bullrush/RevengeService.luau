@@ -1,23 +1,27 @@
 --[[
 	RevengeService - eliminated participants send one bull down a lane by
-	STEPPING ON a pressure pad at that lane's end, on a per-player cooldown,
-	and earn Money for every alive player their bull tramples.
+	CLICKING an arrow marker at that lane's end from the overhead bull-cam
+	(BullrushClient owns the camera), on a per-player cooldown, and earn
+	Money for every alive player their bull tramples.
 
-	Pads ring the CURRENT window - one at each end of every row and column,
-	just outside the guard walls (the bull charges INWARD from the pad you
-	step on) - and slide inward as the arena shrinks. Everyone sees them;
-	only eliminated participants of the current round can trigger them
-	(requestThrow validates, so alive players and bystanders are inert).
-	Standing on a pad re-fires automatically each time the cooldown laps.
+	Markers ring the CURRENT window - one at each end of every row and
+	column, just outside the guard walls (the bull charges INWARD from the
+	marker you click) - and slide inward as the arena shrinks. Each marker
+	carries a server-side ClickDetector, so there is no client->server
+	remote to spoof; only eliminated participants of the current round can
+	trigger them (requestThrow validates, so alive players and bystanders
+	are inert - the client also hides the markers and zeroes their click
+	range locally).
 
 	Client contract (see GridUtil header):
 	- RevengeAck:FireClient(thrower, kind, data) answers the thrower only:
-	  "THROW_OK" { cooldown }, "HIT" { victimName, amount }, "DENIED" { reason }.
-	  The client drives pad glow/countdown visuals from THROW_OK timing.
+	  "THROW_OK" { cooldown, lane }, "HIT" { victimName, amount },
+	  "DENIED" { reason }. The client drives marker glow/countdown visuals
+	  from THROW_OK timing and presses the acked lane's marker.
 
-	Main drives roundStarted()/refreshPads()/roundEnded(); throws are rejected
-	outside that window, and in-flight bulls stop killing once the round is
-	decided.
+	Main drives roundStarted()/refreshMarkers()/roundEnded(); throws are
+	rejected outside that window, and in-flight bulls stop killing once the
+	round is decided.
 ]]
 
 local Players = game:GetService("Players")
@@ -32,17 +36,19 @@ local BullService = require(script.Parent.BullService)
 local NotifyService = require(script.Parent.NotifyService)
 local RoundService = require(script.Parent.RoundService)
 local ShrinkService = require(script.Parent.ShrinkService)
+local EconomyService = require(script.Parent.EconomyService)
 
 local REQUEST_GAP = 0.3 -- silent spam guard, well inside the real cooldown
-local DENIED_ACK_GAP = 4 -- pad-standers retry every frame; one red card per card-lifetime
-local PAD_SIZE = 6 -- studs square
-local PAD_THICKNESS = 1.2
-local PAD_GAP = 1.5 -- clearance between the wall's outer face and the pad edge
-local PAD_TOP_LIFT = 0.4 -- pad top sits this far above canonical tile-top height
+local DENIED_ACK_GAP = 4 -- click-mashers on cooldown get one red card per card-lifetime
+local MARKER_SIZE = 6 -- studs square
+local MARKER_THICKNESS = 1.2
+local MARKER_GAP = 1.5 -- clearance between the wall's outer face and the marker edge
+local MARKER_TOP_LIFT = 0.4 -- marker top sits this far above canonical tile-top height
 local WALL_THICKNESS = 1 -- matches ShrinkService's guard walls
--- Server paints the resting look; the CLIENT re-paints pads locally per
--- viewer (ready pulse / countdown / inert) - see BullrushClient.
-local PAD_BASE_COLOR = Color3.fromRGB(90, 34, 30)
+local CLICK_RANGE = 512 -- clickers aim from the lobby (frozen ~150 studs out) via the overhead cam
+-- Server paints the resting look; the CLIENT re-paints markers locally per
+-- viewer (ready pulse / countdown / hidden) - see BullrushClient.
+local MARKER_BASE_COLOR = Color3.fromRGB(90, 34, 30)
 
 local RevengeService = {}
 
@@ -66,25 +72,25 @@ local function ack(thrower: Player, kind: string, data: { [string]: any })
 end
 
 --==============================================================================
--- Pressure pads
+-- Lane markers (the clickable arrows)
 --==============================================================================
 
-local function padsFolder(): Folder
+local function markersFolder(): Folder
 	local arena = Workspace:FindFirstChild("BullrushArena")
 	local parent = arena or Workspace
-	local folder = parent:FindFirstChild("RevengePads")
+	local folder = parent:FindFirstChild("RevengeMarkers")
 	if not folder then
 		folder = Instance.new("Folder")
-		folder.Name = "RevengePads"
+		folder.Name = "RevengeMarkers"
 		folder.Parent = parent
 	end
 	return folder
 end
 
--- Pad center for a lane: on the lane's center line, one wall + gap + half a
--- pad beyond the window's boundary-tile outer edge, top slightly proud of
--- tile-top height so it reads as a raised button.
-local function padCFrame(lane, bounds): CFrame
+-- Marker center for a lane: on the lane's center line, one wall + gap + half
+-- a marker beyond the window's boundary-tile outer edge, top slightly proud
+-- of tile-top height so it reads as a raised button from above.
+local function markerCFrame(lane, bounds): CFrame
 	local cross = GridUtil.laneCrossCoord(lane)
 	local minIdx, maxIdx, originAxis
 	if lane.axis == "row" then
@@ -96,55 +102,46 @@ local function padCFrame(lane, bounds): CFrame
 	end
 	local centerIndex = (Config.GRID_SIZE + 1) / 2
 	local half = Config.TILE_PART_SIZE / 2
-	local standoff = WALL_THICKNESS + PAD_GAP + PAD_SIZE / 2
+	local standoff = WALL_THICKNESS + MARKER_GAP + MARKER_SIZE / 2
 	local along
 	if lane.direction == 1 then
 		along = originAxis + (minIdx - centerIndex) * Config.TILE_SIZE - half - standoff
 	else
 		along = originAxis + (maxIdx - centerIndex) * Config.TILE_SIZE + half + standoff
 	end
-	local y = Config.ARENA_ORIGIN.Y + PAD_TOP_LIFT - PAD_THICKNESS / 2
+	local y = Config.ARENA_ORIGIN.Y + MARKER_TOP_LIFT - MARKER_THICKNESS / 2
 	local position = if lane.axis == "row"
 		then Vector3.new(along, y, cross)
 		else Vector3.new(cross, y, along)
-	-- Face the pad toward the arena so its surface arrow points inward.
+	-- Face the marker toward the arena so its surface arrow points inward.
 	local inward = if lane.axis == "row"
 		then Vector3.new(lane.direction, 0, 0)
 		else Vector3.new(0, 0, lane.direction)
 	return CFrame.lookAt(position, position + inward)
 end
 
-local function onPadTouched(lane)
-	return function(hit: BasePart)
-		local character = hit and hit:FindFirstAncestorOfClass("Model")
-		local player = character and Players:GetPlayerFromCharacter(character)
-		if player then
-			RevengeService.requestThrow(player, lane)
-		end
-	end
-end
+local function buildMarker(lane, bounds)
+	local marker = Instance.new("Part")
+	marker.Name = ("Marker_%s_%d_%d"):format(lane.axis, lane.index, lane.direction)
+	marker.Size = Vector3.new(MARKER_SIZE, MARKER_THICKNESS, MARKER_SIZE)
+	marker.CFrame = markerCFrame(lane, bounds)
+	marker.Anchored = true
+	marker.CanCollide = false
+	marker.Material = Enum.Material.SmoothPlastic
+	marker.Color = MARKER_BASE_COLOR
+	marker:SetAttribute("axis", lane.axis)
+	marker:SetAttribute("index", lane.index)
+	marker:SetAttribute("direction", lane.direction)
 
-local function buildPad(lane, bounds)
-	local pad = Instance.new("Part")
-	pad.Name = ("Pad_%s_%d_%d"):format(lane.axis, lane.index, lane.direction)
-	pad.Size = Vector3.new(PAD_SIZE, PAD_THICKNESS, PAD_SIZE)
-	pad.CFrame = padCFrame(lane, bounds)
-	pad.Anchored = true
-	pad.CanCollide = false -- walk-through button: Touched still fires without collision
-	pad.Material = Enum.Material.SmoothPlastic
-	pad.Color = PAD_BASE_COLOR
-	pad:SetAttribute("axis", lane.axis)
-	pad:SetAttribute("index", lane.index)
-	pad:SetAttribute("direction", lane.direction)
-
-	-- Big inward arrow on the top face ("gui-up" on a Top-face SurfaceGui
-	-- runs along the part's -Z look vector, which padCFrame points inward).
+	-- Big inward arrow on the top face - the face the overhead cam looks at
+	-- ("gui-up" on a Top-face SurfaceGui runs along the part's -Z look
+	-- vector, which markerCFrame points inward).
 	local surface = Instance.new("SurfaceGui")
-	surface.Name = "PadSurface"
+	surface.Name = "MarkerSurface"
 	surface.Face = Enum.NormalId.Top
 	surface.LightInfluence = 0
 	surface.AlwaysOnTop = false
-	surface.Parent = pad
+	surface.Parent = marker
 	local arrow = Instance.new("TextLabel")
 	arrow.Name = "Arrow"
 	arrow.BackgroundTransparency = 1
@@ -166,31 +163,38 @@ local function buildPad(lane, bounds)
 	caption.Text = "SEND BULL"
 	caption.Parent = surface
 
-	-- No floating text: the pad's COLOR is the signal (client paints green =
-	-- ready / red = cooldown) and stomp feedback arrives as Notify cards.
-	pad.Touched:Connect(onPadTouched(lane))
-	pad.Parent = padsFolder()
+	-- No floating text: the marker's COLOR is the signal (client paints green
+	-- = ready / red = cooldown) and outcomes arrive as Notify cards. Clicks
+	-- land server-side (MouseClick), same validation for every clicker.
+	local click = Instance.new("ClickDetector")
+	click.MaxActivationDistance = CLICK_RANGE
+	click.MouseClick:Connect(function(clicker: Player)
+		RevengeService.requestThrow(clicker, lane)
+	end)
+	click.Parent = marker
+
+	marker.Parent = markersFolder()
 end
 
-local function clearPads()
-	padsFolder():ClearAllChildren() -- also drops the Touched connections
+local function clearMarkers()
+	markersFolder():ClearAllChildren() -- also drops the MouseClick connections
 end
 
--- (Re)build the pad ring for the CURRENT window. Called at round start and
+-- (Re)build the marker ring for the CURRENT window. Called at round start and
 -- after every shrink stage; between rounds the folder stays empty.
-function RevengeService.refreshPads()
-	clearPads()
+function RevengeService.refreshMarkers()
+	clearMarkers()
 	if not enabled then
 		return
 	end
 	local bounds = ShrinkService.getBounds()
 	for row = bounds.rowMin, bounds.rowMax do
-		buildPad({ axis = "row", index = row, direction = 1 }, bounds)
-		buildPad({ axis = "row", index = row, direction = -1 }, bounds)
+		buildMarker({ axis = "row", index = row, direction = 1 }, bounds)
+		buildMarker({ axis = "row", index = row, direction = -1 }, bounds)
 	end
 	for col = bounds.colMin, bounds.colMax do
-		buildPad({ axis = "col", index = col, direction = 1 }, bounds)
-		buildPad({ axis = "col", index = col, direction = -1 }, bounds)
+		buildMarker({ axis = "col", index = col, direction = 1 }, bounds)
+		buildMarker({ axis = "col", index = col, direction = -1 }, bounds)
 	end
 end
 
@@ -201,16 +205,24 @@ end
 function RevengeService.roundStarted()
 	table.clear(cooldownUntil)
 	enabled = true
-	RevengeService.refreshPads()
+	RevengeService.refreshMarkers()
 end
 
 function RevengeService.roundEnded()
 	enabled = false
 	table.clear(cooldownUntil)
-	clearPads()
+	clearMarkers()
 end
 
--- Public (not just the pads' target) so smoke tests can call it directly.
+-- True between roundStarted() and roundEnded() — the exact window when
+-- markers accept clicks. The client's bull-cam gates on round state +
+-- elimination the same way, so "can see the board" and "markers work" can
+-- never disagree.
+function RevengeService.isEnabled(): boolean
+	return enabled
+end
+
+-- Public (not just the markers' target) so smoke tests can call it directly.
 function RevengeService.requestThrow(thrower: Player, laneData: any)
 	local now = os.clock()
 	if now - (lastRequestAt[thrower] or 0) < REQUEST_GAP then
@@ -237,16 +249,16 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 		return
 	end
 	if now < (cooldownUntil[thrower] or 0) then
-		-- Standing on a pad retries constantly; don't flood the client
+		-- Mashing a cooling marker shouldn't flood the client
 		-- (gap ≈ one card lifetime, so at most one red card shows at a time).
 		if now - (lastDeniedAt[thrower] or 0) >= DENIED_ACK_GAP then
 			lastDeniedAt[thrower] = now
 			local remaining = cooldownUntil[thrower] - now
 			NotifyService.send(thrower,
-				("Revenge bull ready in %ds"):format(math.ceil(remaining)), "red")
+				("Bull ready in %ds"):format(math.ceil(remaining)), "red")
 			ack(thrower, "DENIED", {
 				reason = "COOLDOWN",
-				remaining = remaining, -- lets a desynced client resync its pad state
+				remaining = remaining, -- lets a desynced client resync its marker state
 			})
 		end
 		return
@@ -255,7 +267,7 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 	local laneMin = if axis == "row" then bounds.rowMin else bounds.colMin
 	local laneMax = if axis == "row" then bounds.rowMax else bounds.colMax
 	if index < laneMin or index > laneMax then
-		-- a shrink can trim the lane between pad spawn and the stomp
+		-- a shrink can trim the lane between marker spawn and the click
 		NotifyService.send(thrower, "That lane is gone — the arena shrank!", "red")
 		ack(thrower, "DENIED", { reason = "BOUNDS" })
 		return
@@ -266,9 +278,9 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 
 	cooldownUntil[thrower] = now + Config.REVENGE.COOLDOWN
 	NotifyService.send(thrower,
-		("Revenge bull charging down %s %d!"):format(
+		("Bull charging down %s %d!"):format(
 			if axis == "row" then "row" else "column", index), "green")
-	ack(thrower, "THROW_OK", { cooldown = Config.REVENGE.COOLDOWN })
+	ack(thrower, "THROW_OK", { cooldown = Config.REVENGE.COOLDOWN, lane = lane })
 
 	task.spawn(function()
 		Remotes.Telegraph:FireAllClients({ lane }, Config.REVENGE.TELEGRAPH, bounds)
@@ -284,15 +296,17 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 			RoundService.eliminate(victim, "REVENGE")
 			if wasAlive and thrower.Parent ~= nil and shouldReward(thrower, victim) then
 				local paid = RoundService.awardMoney(thrower, Config.REVENGE.MONEY_PER_HIT)
+				EconomyService.noteRevenge(thrower, paid) -- shows on the Summary tab
 				NotifyService.send(thrower,
-					("+%d Money — your revenge bull hit %s!"):format(paid, victim.Name), "green")
+					("+%d Money — your bull hit %s!"):format(paid, victim.Name), "green")
 				ack(thrower, "HIT", {
 					victimName = victim.Name,
 					amount = paid,
 				})
 			end
 		end
-		BullService.charge(lane, Config.REVENGE.SPEED, bounds, RoundService.getAlive, onKill)
+		BullService.charge(lane, Config.REVENGE.SPEED, bounds, RoundService.getAlive, onKill,
+			{ throwerName = thrower.Name })
 	end)
 end
 

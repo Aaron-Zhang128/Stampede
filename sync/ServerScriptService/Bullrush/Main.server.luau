@@ -31,8 +31,12 @@ local AIService = require(script.Parent.AIService)
 local RevengeService = require(script.Parent.RevengeService)
 local NotifyService = require(script.Parent.NotifyService)
 local FriendBoostService = require(script.Parent.FriendBoostService)
+local PushService = require(script.Parent.PushService)
+local EconomyService = require(script.Parent.EconomyService)
 
 FriendBoostService.init() -- friends-in-server tracking; scales all money grants
+PushService.init() -- player-vs-player shove (prompts are made client-side in PushClient)
+EconomyService.init(RoundService.awardMoney) -- round ledger + "2x Rewards?" receipts
 
 --==============================================================================
 -- Teams (created in edit mode; ensured here so a fresh place still works)
@@ -320,7 +324,8 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 			-- running, so stragglers on doomed tiles still get eliminated.
 			NotifyService.broadcast("ARENA SHRINKING!", "red", Config.SHRINK.TELEGRAPH)
 			ShrinkService.advanceTo(targetStage)
-			RevengeService.refreshPads() -- pad ring follows the new window
+			RevengeService.refreshMarkers() -- clickable arrow ring follows the new window
+			EconomyService.noteStageSurvived(RoundService.getAlive()) -- stage bonus for the living
 			if roundDecided(soloRound, isTeams) then
 				return
 			end
@@ -434,6 +439,7 @@ while true do
 		end
 
 		RoundService.startRound(participants, isTeams)
+		EconomyService.roundStarted(participants, mode)
 		RevengeService.roundStarted()
 		setRoundState("ACTIVE", {
 			aliveCount = RoundService.aliveCount(),
@@ -465,6 +471,7 @@ while true do
 		RevengeService.roundEnded()
 
 		local aliveList = RoundService.getAlive()
+		local summaryWinner: { [string]: any } = {} -- for the Summary tab (EconomyService.settle)
 		if isTeams then
 			if #aliveList > 0 then
 				-- Whole-team victory: every member of the surviving team gets
@@ -476,6 +483,7 @@ while true do
 						if teamOf[player] == winTeam then
 							local won, paid = RoundService.awardWinner(player)
 							if won then
+								EconomyService.noteWin(player, paid)
 								NotifyService.send(player,
 									("VICTORY! +1 Win  •  +%d Money"):format(paid), "green", 6)
 							end
@@ -485,6 +493,7 @@ while true do
 					end
 				end
 				local winnerName = if winTeam == "RED" then "RED TEAM" else "BLUE TEAM"
+				summaryWinner = { winnerName = winnerName, teamColor = winTeam }
 				setRoundState("WINNER", {
 					winnerName = winnerName,
 					teamColor = winTeam,
@@ -505,15 +514,25 @@ while true do
 			local winner = aliveList[1]
 			local won, paid = RoundService.awardWinner(winner)
 			if won then
+				EconomyService.noteWin(winner, paid)
 				NotifyService.send(winner,
 					("VICTORY! +1 Win  •  +%d Money"):format(paid), "green", 6)
 			end
+			summaryWinner = {
+				winnerName = winner.Name,
+				-- bot winners are plain tables with no UserId; the client
+				-- falls back to the placeholder portrait
+				winnerUserId = if typeof(winner) == "Instance" then winner.UserId else nil,
+			}
 			setRoundState("WINNER", { winnerName = winner.Name, modeName = mode.name })
 			NotifyService.broadcast((winner.Name .. " WINS THE STAMPEDE"):upper(), "green", 5)
 		else
 			setRoundState("ROUNDOVER", { modeName = mode.name })
 			NotifyService.broadcast("The herd got everyone…", "red", 5)
 		end
+
+		-- Pay the round ledgers and open every participant's Summary tab.
+		EconomyService.settle(summaryWinner)
 
 		RoundService.cleanup()
 		if isTeams then

@@ -33,13 +33,21 @@
 	  Fired at the START of the shrink telegraph; tiles sink telegraphTime
 	  seconds later. The server recolors dropped tiles charcoal
 	  Color3.fromRGB(55, 48, 42) and restores position/color at round start.
+	- RoundSummary:FireClient(player, data: table) -- each REAL round
+	  participant at round end (EconomyService.settle). data: { winnerName:
+	  string?, winnerUserId: number?, teamColor: ("RED"|"BLUE")?, placement:
+	  number, survivalSeconds: number, lines: {{label: string, amount:
+	  number}}, total: number, canDouble: boolean }. A later resend with
+	  { update = true, total, canDouble = false } means a "2x Rewards?"
+	  purchase landed: refresh the money line, hide the 2x button.
 	- RevengeAck:FireClient(thrower, kind: string, data: table) -- to the
-	  thrower only: "THROW_OK" { cooldown }, "HIT" { victimName, amount },
+	  thrower only: "THROW_OK" { cooldown, lane }, "HIT" { victimName, amount },
 	  "DENIED" { reason: "COOLDOWN" | "BOUNDS", remaining: number? }
 	  Revenge throws have NO client->server remote: eliminated participants
-	  step on server-side pressure pads (Workspace.BullrushArena.RevengePads,
-	  built by RevengeService per window; lane in pad attributes). The client
-	  only repaints the pads locally (ready pulse / cooldown countdown).
+	  click server-side ClickDetector markers (Workspace.BullrushArena.
+	  RevengeMarkers, built by RevengeService per window; lane in marker
+	  attributes) from BullrushClient's overhead bull-cam. The client only
+	  repaints the markers locally (ready pulse / cooldown countdown).
 ]]
 
 local Config = require(script.Parent.Config)
