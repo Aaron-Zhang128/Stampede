@@ -797,23 +797,137 @@ if summaryMain then
 		end
 	end
 
-	-- One itemized line under the money row, cloned from the coins caption so
-	-- it inherits the kit's font/stroke/gradient. Built BEFORE the rows move:
-	-- it takes over the coins row's original slot.
-	local breakdown
-	if coinsCaption then
-		breakdown = coinsCaption:Clone()
-		breakdown.Name = "Breakdown"
-		local ratio = breakdown:FindFirstChildOfClass("UIAspectRatioConstraint")
-		if ratio then
-			ratio:Destroy() -- full-width line; the ratio lock would fight the resize
+	-- Money text everywhere in the recap wears the SAME style as the HUD's
+	-- bottom-left Cash counter (green gradient + dark-green stroke), copied
+	-- from that label at runtime so a future retint can't drift apart.
+	local cashStyleSource = counters and counters:FindFirstChild("Cash")
+	cashStyleSource = cashStyleSource and cashStyleSource:FindFirstChild("Amount")
+	local function paintMoneyStyle(label)
+		if not (cashStyleSource and label) then
+			return
 		end
-		breakdown.Size = UDim2.new(0.94, 0, coinsCaption.Size.Y.Scale * 0.62, 0)
-		breakdown.Position = UDim2.new(0.5, 0, coinsCaption.Position.Y.Scale + 0.015, 0)
-		breakdown.AnchorPoint = Vector2.new(0.5, coinsCaption.AnchorPoint.Y)
-		breakdown.TextXAlignment = Enum.TextXAlignment.Center
-		breakdown.Text = ""
-		breakdown.Parent = summaryMain
+		label.TextColor3 = cashStyleSource.TextColor3
+		local sourceGradient = cashStyleSource:FindFirstChildOfClass("UIGradient")
+		if sourceGradient then
+			local gradient = label:FindFirstChildOfClass("UIGradient")
+			if not gradient then
+				gradient = Instance.new("UIGradient")
+				gradient.Parent = label
+			end
+			gradient.Color = sourceGradient.Color
+			gradient.Transparency = sourceGradient.Transparency
+			gradient.Rotation = sourceGradient.Rotation
+		end
+		local sourceStroke = cashStyleSource:FindFirstChildOfClass("UIStroke")
+		local stroke = label:FindFirstChildOfClass("UIStroke")
+		if sourceStroke and stroke then
+			stroke.Color = sourceStroke.Color -- keep the label's own thickness
+		end
+	end
+
+	-- Earnings receipt: a matching dark panel hanging off the card's right
+	-- edge (the purchased card design itself stays untouched) with one row
+	-- per payout category - kit-styled label left, gold amount right.
+	-- Templates are cloned from the kit's own coins labels BEFORE any rows
+	-- move or retitle, so they inherit the font/stroke/gradient look.
+	local earningsPanel, earningsRows, rowLabelTemplate, rowAmountTemplate
+	if coinsCaption and coinsAmount then
+		earningsPanel = Instance.new("Frame")
+		earningsPanel.Name = "EarningsPanel"
+		earningsPanel.AnchorPoint = Vector2.new(0, 0.5)
+		earningsPanel.Position = UDim2.new(1.02, 0, 0.46, 0)
+		earningsPanel.Size = UDim2.new(0.44, 0, 0.66, 0)
+		earningsPanel.BackgroundColor3 = summaryMain.BackgroundColor3
+		earningsPanel.BackgroundTransparency = summaryMain.BackgroundTransparency
+		earningsPanel.Visible = false
+		for _, deco in ipairs(summaryMain:GetChildren()) do
+			if deco:IsA("UICorner") or deco:IsA("UIStroke") then
+				deco:Clone().Parent = earningsPanel
+			end
+		end
+
+		local header = coinsCaption:Clone()
+		header.Name = "Header"
+		local headerRatio = header:FindFirstChildOfClass("UIAspectRatioConstraint")
+		if headerRatio then
+			headerRatio:Destroy()
+		end
+		header.AnchorPoint = Vector2.new(0.5, 0)
+		header.Position = UDim2.new(0.5, 0, 0.04, 0)
+		header.Size = UDim2.new(0.9, 0, 0.11, 0)
+		header.TextXAlignment = Enum.TextXAlignment.Center
+		header.Text = "Earnings"
+		header.Parent = earningsPanel
+
+		earningsRows = Instance.new("Frame")
+		earningsRows.Name = "Rows"
+		earningsRows.BackgroundTransparency = 1
+		earningsRows.AnchorPoint = Vector2.new(0.5, 0)
+		earningsRows.Position = UDim2.new(0.5, 0, 0.18, 0)
+		earningsRows.Size = UDim2.new(0.86, 0, 0.78, 0)
+		earningsRows.Parent = earningsPanel
+		local rowsLayout = Instance.new("UIListLayout")
+		rowsLayout.FillDirection = Enum.FillDirection.Vertical
+		rowsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		rowsLayout.Padding = UDim.new(0.012, 0)
+		rowsLayout.Parent = earningsRows
+
+		-- white label so the gold amount pops
+		rowLabelTemplate = coinsCaption:Clone()
+		local labelGradient = rowLabelTemplate:FindFirstChildOfClass("UIGradient")
+		if labelGradient then
+			labelGradient:Destroy()
+		end
+		local labelRatio = rowLabelTemplate:FindFirstChildOfClass("UIAspectRatioConstraint")
+		if labelRatio then
+			labelRatio:Destroy()
+		end
+		rowLabelTemplate.TextColor3 = Color3.fromRGB(255, 255, 255)
+		rowLabelTemplate.TextXAlignment = Enum.TextXAlignment.Left
+		rowLabelTemplate.AnchorPoint = Vector2.new(0, 0.5)
+		rowLabelTemplate.Position = UDim2.new(0, 0, 0.5, 0)
+		rowLabelTemplate.Size = UDim2.new(0.6, 0, 1, 0)
+
+		rowAmountTemplate = coinsAmount:Clone()
+		local amountRatio = rowAmountTemplate:FindFirstChildOfClass("UIAspectRatioConstraint")
+		if amountRatio then
+			amountRatio:Destroy()
+		end
+		rowAmountTemplate.TextXAlignment = Enum.TextXAlignment.Right
+		rowAmountTemplate.AnchorPoint = Vector2.new(1, 0.5)
+		rowAmountTemplate.Position = UDim2.new(1, 0, 0.5, 0)
+		rowAmountTemplate.Size = UDim2.new(0.38, 0, 1, 0)
+
+		paintMoneyStyle(header)
+		paintMoneyStyle(rowAmountTemplate) -- rows clone the template, style included
+
+		earningsPanel.Parent = summaryFrame
+	end
+
+	local function rebuildEarnings(lines)
+		if not earningsRows then
+			return
+		end
+		for _, child in ipairs(earningsRows:GetChildren()) do
+			if child:IsA("Frame") then
+				child:Destroy()
+			end
+		end
+		earningsPanel.Visible = #lines > 0
+		for i, line in ipairs(lines) do
+			local row = Instance.new("Frame")
+			row.Name = "Row" .. i
+			row.BackgroundTransparency = 1
+			row.Size = UDim2.new(1, 0, 0.12, 0)
+			row.LayoutOrder = i
+			local label = rowLabelTemplate:Clone()
+			label.Text = tostring(line.label)
+			label.Parent = row
+			local amount = rowAmountTemplate:Clone()
+			amount.Text = "+" .. comma(tonumber(line.amount) or 0)
+			amount.Parent = row
+			row.Parent = earningsRows
+		end
 	end
 
 	-- No XP system yet: hide that row and move the money row up into its slot;
@@ -824,6 +938,8 @@ if summaryMain then
 		coinsCaption.Position = xpCaption.Position
 		coinsAmount.Position = xpAmount.Position
 		coinsCaption.Text = "Money"
+		paintMoneyStyle(coinsCaption)
+		paintMoneyStyle(coinsAmount)
 	end
 	if winnerIcon then
 		winnerIcon.ScaleType = Enum.ScaleType.Fit -- portraits are square; don't stretch
@@ -875,13 +991,7 @@ if summaryMain then
 		if coinsAmount then
 			coinsAmount.Text = "+" .. comma(tonumber(data.total) or 0)
 		end
-		if breakdown then
-			local parts = {}
-			for _, line in ipairs(data.lines or {}) do
-				table.insert(parts, ("%s +%s"):format(tostring(line.label), comma(tonumber(line.amount) or 0)))
-			end
-			breakdown.Text = table.concat(parts, "  •  ")
-		end
+		rebuildEarnings(data.lines or {})
 		canDouble = data.canDouble == true
 		if doubleButton then
 			doubleButton.Visible = canDouble

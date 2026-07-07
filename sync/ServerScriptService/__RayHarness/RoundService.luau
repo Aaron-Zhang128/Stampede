@@ -1,0 +1,1 @@
+return { isEliminatedParticipant = function() return false end, isAlive = function() return true end, getAlive = function() return {} end, eliminate = function() end, awardMoney = function(_, n) return n end }

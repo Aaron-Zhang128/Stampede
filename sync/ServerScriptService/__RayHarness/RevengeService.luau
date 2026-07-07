@@ -71,7 +71,7 @@ end
 -- bots in AIService); only real Players can receive remote acks.
 local function ack(thrower: Player, kind: string, data: { [string]: any })
 	if typeof(thrower) == "Instance" then
-		Remotes.RevengeAck:FireClient(thrower, kind, data)
+		print(thrower, kind, data)
 	end
 end
 
@@ -117,20 +117,11 @@ local function markerCFrame(lane, bounds): CFrame
 	local position = if lane.axis == "row"
 		then Vector3.new(along, y, cross)
 		else Vector3.new(cross, y, along)
-	-- FIXED world orientation: on an unrotated part the Top-face gui-up runs
-	-- along world -Z, which is also the overhead cam's screen-up, so the
-	-- caption reads upright on every edge (a rotated part mirrors/sideways
-	-- the text). Only the ARROW GLYPH rotates to point inward (buildMarker).
-	return CFrame.new(position)
-end
-
--- Screen rotation that points the "▲" glyph down the lane's travel direction
--- (gui-up is world -Z / north, so +X east = 90, +Z south = 180, -X west = 270).
-local function arrowRotation(lane): number
-	if lane.axis == "row" then
-		return if lane.direction == 1 then 90 else 270
-	end
-	return if lane.direction == 1 then 180 else 0
+	-- Face the marker toward the arena so its surface arrow points inward.
+	local inward = if lane.axis == "row"
+		then Vector3.new(lane.direction, 0, 0)
+		else Vector3.new(0, 0, lane.direction)
+	return CFrame.lookAt(position, position + inward)
 end
 
 local function buildMarker(lane, bounds)
@@ -146,12 +137,12 @@ local function buildMarker(lane, bounds)
 	marker:SetAttribute("index", lane.index)
 	marker:SetAttribute("direction", lane.direction)
 
-	-- Button face on the top - the face the overhead cam looks at. A rounded,
-	-- outlined PLATE frame is the button body: the client recolors plate +
-	-- part per viewer state, tints the white glyphs with green/red text
-	-- gradients, and scales the plate on hover (UIScale "HoverScale"). The
-	-- part is world-aligned so text reads upright; the arrow alone rotates
-	-- to point down the lane.
+	-- Button face on the top - the face the overhead cam looks at ("gui-up"
+	-- on a Top-face SurfaceGui runs along the part's -Z look vector, which
+	-- markerCFrame points inward). A rounded, outlined PLATE frame is the
+	-- button body: the client recolors plate + part per viewer state, tints
+	-- the white glyphs with green/red text gradients, and scales the plate on
+	-- hover (UIScale "HoverScale").
 	local surface = Instance.new("SurfaceGui")
 	surface.Name = "MarkerSurface"
 	surface.Face = Enum.NormalId.Top
@@ -207,8 +198,7 @@ local function buildMarker(lane, bounds)
 		label.Parent = plate
 		return label
 	end
-	local arrow = addGlyph("Arrow", "▲", 0.02, 0.6)
-	arrow.Rotation = arrowRotation(lane)
+	addGlyph("Arrow", "▲", 0.02, 0.6)
 	addGlyph("Caption", "SEND BULL", 0.64, 0.26)
 
 	-- No floating text: the marker's COLOR is the signal (client paints green
@@ -331,7 +321,7 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 	ack(thrower, "THROW_OK", { cooldown = Config.REVENGE.COOLDOWN, lane = lane })
 
 	task.spawn(function()
-		Remotes.Telegraph:FireAllClients({ lane }, Config.REVENGE.TELEGRAPH, bounds)
+		print({ lane }, Config.REVENGE.TELEGRAPH, bounds)
 		task.wait(Config.REVENGE.TELEGRAPH)
 		if not enabled then
 			return -- round was decided during the telegraph

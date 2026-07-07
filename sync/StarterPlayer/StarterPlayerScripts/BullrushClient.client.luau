@@ -434,11 +434,19 @@ local function spawnSilhouette(entry, warnTime: number)
 	for _, desc in ipairs(ghost:GetDescendants()) do
 		if desc:IsA("BasePart") then
 			desc.CastShadow = false
+			-- Ghosts park right at lane starts, beside the revenge markers:
+			-- never let them soak up the bull-cam's click rays.
+			desc.CanQuery = false
+			desc.CanTouch = false
 			if desc ~= ghost.PrimaryPart and desc.Name ~= "Root" then
 				desc.Color = SILHOUETTE_COLOR
 				desc.Material = Enum.Material.SmoothPlastic
 				desc.Transparency = 0.55
 			end
+		elseif desc:IsA("SurfaceAppearance") then
+			-- The bison's baked texture overrides part Color, which would
+			-- leave the ghost fully opaque-looking; strip it so the tint reads.
+			desc:Destroy()
 		elseif desc:IsA("ParticleEmitter") then
 			desc.Enabled = false
 		end
@@ -830,7 +838,35 @@ local MARKER_READY_A = Color3.fromRGB(70, 220, 100)
 local MARKER_READY_B = Color3.fromRGB(150, 255, 170)
 local MARKER_WAIT_A = Color3.fromRGB(170, 40, 35)
 local MARKER_WAIT_B = Color3.fromRGB(220, 65, 55)
+local MARKER_PLATE_COLOR = Color3.fromRGB(26, 22, 20) -- dark leather button face
 local MARKER_CLICK_RANGE = 512 -- mirror of the server's build value; zeroed locally when hidden/cooling
+
+-- The glyphs are white; these vertical ramps tint them per state — the same
+-- hot-highlight -> saturated-mid -> deep-shade style as the notif cards.
+local GLYPH_READY = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(215, 255, 225)),
+	ColorSequenceKeypoint.new(0.45, Color3.fromRGB(110, 255, 145)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 150, 70)),
+})
+local GLYPH_WAIT = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 215, 210)),
+	ColorSequenceKeypoint.new(0.45, Color3.fromRGB(255, 110, 95)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 30, 25)),
+})
+
+local function tintGlyph(label: Instance?, ramp: ColorSequence)
+	if not (label and label:IsA("TextLabel")) then
+		return
+	end
+	local tint = label:FindFirstChild("Tint")
+	if not (tint and tint:IsA("UIGradient")) then
+		tint = Instance.new("UIGradient")
+		tint.Name = "Tint"
+		tint.Rotation = 90
+		tint.Parent = label
+	end
+	tint.Color = ramp
+end
 
 local function paintMarker(pad: BasePart, visible: boolean, remaining: number, pulse: number)
 	pad.LocalTransparencyModifier = if visible then 0 else 1
@@ -849,49 +885,105 @@ local function paintMarker(pad: BasePart, visible: boolean, remaining: number, p
 		return
 	end
 	pad.Material = Enum.Material.Neon
-	-- Face readout (all local-only): a big countdown number + sweeping fill
-	-- bar while recharging, arrow + SEND BULL when ready — readable at a
-	-- glance instead of color-only.
-	local arrow = gui and gui:FindFirstChild("Arrow")
-	local caption = gui and gui:FindFirstChild("Caption")
-	local fill = gui and gui:FindFirstChild("CooldownFill")
-	if gui and not fill then
+	-- Face readout (all local-only): the dark PLATE frame is the button body
+	-- (state shows in its pulsing rim, the gradient-tinted glyphs, and the
+	-- neon part sides — not a flood-filled face, matching the notif-card
+	-- style). While recharging: big countdown number + sweeping fill bar;
+	-- ready: arrow + SEND BULL.
+	local plate = gui and gui:FindFirstChild("Plate")
+	if not (plate and plate:IsA("Frame")) then
+		return
+	end
+	local arrow = plate:FindFirstChild("Arrow")
+	local caption = plate:FindFirstChild("Caption")
+	local rim = plate:FindFirstChild("Rim")
+	local fill = plate:FindFirstChild("CooldownFill")
+	if not fill then
 		local bar = Instance.new("Frame")
 		bar.Name = "CooldownFill"
-		bar.AnchorPoint = Vector2.new(0, 1)
-		bar.Position = UDim2.fromScale(0, 1)
-		bar.Size = UDim2.fromScale(0, 0.08)
+		bar.AnchorPoint = Vector2.new(0.5, 1)
+		bar.Position = UDim2.fromScale(0.5, 0.96)
+		bar.Size = UDim2.fromScale(0, 0.07)
 		bar.BorderSizePixel = 0
-		bar.BackgroundColor3 = Color3.fromRGB(255, 235, 230)
-		bar.BackgroundTransparency = 0.25
-		bar.Parent = gui
+		bar.BackgroundColor3 = Color3.fromRGB(255, 240, 235)
+		bar.BackgroundTransparency = 0.15
+		local barCorner = Instance.new("UICorner")
+		barCorner.CornerRadius = UDim.new(0.5, 0)
+		barCorner.Parent = bar
+		bar.Parent = plate
 		fill = bar
 	end
+	plate.BackgroundColor3 = MARKER_PLATE_COLOR
+	local stateColor
 	if remaining <= 0 then
-		pad.Color = MARKER_READY_A:Lerp(MARKER_READY_B, pulse) -- green: click me
+		stateColor = MARKER_READY_A:Lerp(MARKER_READY_B, pulse) -- green: click me
 		if arrow and arrow:IsA("TextLabel") then
 			arrow.Text = "▲"
 		end
 		if caption and caption:IsA("TextLabel") then
 			caption.Text = "SEND BULL"
 		end
-		if fill and fill:IsA("Frame") then
+		tintGlyph(arrow, GLYPH_READY)
+		tintGlyph(caption, GLYPH_READY)
+		if fill:IsA("Frame") then
 			fill.Visible = false
 		end
 	else
-		pad.Color = MARKER_WAIT_A:Lerp(MARKER_WAIT_B, pulse * 0.4) -- red: not yet
+		stateColor = MARKER_WAIT_A:Lerp(MARKER_WAIT_B, pulse * 0.4) -- red: not yet
 		if arrow and arrow:IsA("TextLabel") then
 			arrow.Text = tostring(math.ceil(remaining))
 		end
 		if caption and caption:IsA("TextLabel") then
 			caption.Text = "RECHARGING"
 		end
-		if fill and fill:IsA("Frame") then
+		tintGlyph(arrow, GLYPH_WAIT)
+		tintGlyph(caption, GLYPH_WAIT)
+		if fill:IsA("Frame") then
 			fill.Visible = true
 			local cooldown = (typeof(Config.REVENGE) == "table" and tonumber(Config.REVENGE.COOLDOWN)) or 15
-			fill.Size = UDim2.fromScale(1 - math.clamp(remaining / cooldown, 0, 1), 0.08)
+			fill.Size = UDim2.fromScale((1 - math.clamp(remaining / cooldown, 0, 1)) * 0.9, 0.07)
 		end
 	end
+	if rim and rim:IsA("UIStroke") then
+		rim.Color = stateColor -- the rim pulses with the state
+	end
+	pad.Color = stateColor -- neon sides glow the state color from any angle
+end
+
+-- Hover feel (local-only): the plate grows and blips when your cursor finds
+-- a clickable marker. ClickDetector hover events fire on the client too, and
+-- the click range is zeroed unless the marker is visible + ready, so these
+-- never fire for the living or during cooldown.
+local markerHoverHooked = setmetatable({} :: { [BasePart]: boolean }, { __mode = "k" })
+
+local function hookMarkerHover(marker: BasePart)
+	if markerHoverHooked[marker] then
+		return
+	end
+	markerHoverHooked[marker] = true
+	task.defer(function() -- let the marker's gui/detector replicate in behind it
+		if not marker.Parent then
+			return
+		end
+		local click = marker:FindFirstChildOfClass("ClickDetector")
+		local surface = marker:FindFirstChild("MarkerSurface")
+		local plate = surface and surface:FindFirstChild("Plate")
+		local scale = plate and plate:FindFirstChild("HoverScale")
+		if not (click and scale and scale:IsA("UIScale")) then
+			return
+		end
+		click.MouseHoverEnter:Connect(function()
+			TweenService:Create(scale,
+				TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ Scale = 1.09 }):Play()
+			playLibSfx("Click", 0.35, 1.5) -- same hover blip the shop buttons use
+		end)
+		click.MouseHoverLeave:Connect(function()
+			TweenService:Create(scale,
+				TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ Scale = 1 }):Play()
+		end)
+	end)
 end
 
 local function refreshRevengeMarkers()
@@ -912,6 +1004,7 @@ local function refreshRevengeMarkers()
 	for _, marker in markersFolder:GetChildren() do
 		if marker:IsA("BasePart") then
 			paintMarker(marker, visible, remaining, pulse)
+			hookMarkerHover(marker) -- weak-set no-op after the first call
 		end
 	end
 end
@@ -936,6 +1029,7 @@ local function ensureMarkersHook()
 				if marker.Parent then
 					paintMarker(marker, currentState == "ACTIVE" and locallyEliminated,
 						revengeReadyAt - os.clock(), 0.5)
+					hookMarkerHover(marker)
 				end
 			end)
 		end
@@ -1200,23 +1294,37 @@ local function updateBridgeAttributes()
 	viewBridge:SetAttribute("Viewing", overheadViewing)
 end
 
--- Straight-down framing of the active window plus the marker ring: height is
+-- Straight-down framing of the active window plus the marker ring: the eye
+-- must fit BOTH the ground plane (window + margin) and the raised marker
+-- plane (markers float above the guard walls so clicks can't be occluded --
+-- MARKER_PLANE_LIFT mirrors RevengeService's MARKER_HOVER). Height is
 -- whatever fits the tighter screen axis. Up vector is world -Z so north (row
 -- 1) reads as screen-up and the shot can never roll.
+local MARKER_PLANE_LIFT = 17 -- mirror of RevengeService MARKER_HOVER
+local MARKER_RING_REACH = 11.5 -- wall 1 + gap 1.5 + full 6-stud marker + 3 pad, beyond the tile edge
+
 local function overheadCFrame(): CFrame
 	local camera = workspace.CurrentCamera
 	local window = lastBounds or GridUtil.boundsForStage(0)
 	local minC = GridUtil.tileCenter(window.rowMin, window.colMin)
 	local maxC = GridUtil.tileCenter(window.rowMax, window.colMax)
 	local center = (minC + maxC) / 2
-	local halfX = (maxC.X - minC.X) / 2 + Config.TILE_SIZE / 2 + OVERHEAD_MARGIN
-	local halfZ = (maxC.Z - minC.Z) / 2 + Config.TILE_SIZE / 2 + OVERHEAD_MARGIN
 	local halfFov = math.rad((camera and camera.FieldOfView or 70) / 2)
 	local aspect = if camera and camera.ViewportSize.Y > 0
 		then camera.ViewportSize.X / camera.ViewportSize.Y
 		else 1.78
-	local height = math.max(halfZ / math.tan(halfFov), halfX / (math.tan(halfFov) * aspect))
-	local eye = Vector3.new(center.X, Config.ARENA_ORIGIN.Y + height, center.Z)
+	-- eye height that fits a half-extent (x, z) plane sitting at planeY
+	local function fitPlane(halfX: number, halfZ: number, planeY: number): number
+		return planeY + math.max(halfZ / math.tan(halfFov), halfX / (math.tan(halfFov) * aspect))
+	end
+	local coreX = (maxC.X - minC.X) / 2 + Config.TILE_SIZE / 2
+	local coreZ = (maxC.Z - minC.Z) / 2 + Config.TILE_SIZE / 2
+	local eyeY = math.max(
+		fitPlane(coreX + OVERHEAD_MARGIN, coreZ + OVERHEAD_MARGIN, Config.ARENA_ORIGIN.Y),
+		fitPlane(coreX + MARKER_RING_REACH, coreZ + MARKER_RING_REACH,
+			Config.ARENA_ORIGIN.Y + MARKER_PLANE_LIFT)
+	)
+	local eye = Vector3.new(center.X, eyeY, center.Z)
 	return CFrame.lookAt(eye, Vector3.new(center.X, Config.ARENA_ORIGIN.Y, center.Z), Vector3.new(0, 0, -1))
 end
 

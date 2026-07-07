@@ -1,0 +1,1 @@
+local S = { bounds = { rowMin = 2, rowMax = 8, colMin = 2, colMax = 8 } } function S.getBounds() return S.bounds end return S

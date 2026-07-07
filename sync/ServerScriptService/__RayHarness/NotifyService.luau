@@ -1,0 +1,1 @@
+return { send = function() end, broadcast = function() end }

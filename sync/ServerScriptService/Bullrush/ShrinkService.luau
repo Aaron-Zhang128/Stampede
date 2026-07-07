@@ -81,6 +81,9 @@ local function updateWalls(b: GridUtil.Bounds)
 		if wall then
 			wall.Size = Vector3.new(sizeX, wall.Size.Y, sizeZ)
 			wall.Position = Vector3.new(x, wall.Position.Y, z)
+			-- Pure physics fence: must never soak up mouse rays, or the
+			-- bull-cam's clicks can't reach the revenge markers just outside.
+			wall.CanQuery = false
 		end
 	end
 

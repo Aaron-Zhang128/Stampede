@@ -147,86 +147,36 @@
             {
               "name": "BullTemplate",
               "className": "Model",
-              "guid": "15182",
+              "guid": "3470190",
               "children": [
                 {
                   "name": "Body",
-                  "className": "Part",
-                  "guid": "16633",
+                  "className": "MeshPart",
+                  "guid": "3470192",
                   "children": [
                     {
                       "name": "DustAttachment",
                       "className": "Attachment",
-                      "guid": "11963",
+                      "guid": "3470195",
                       "children": [
                         {
                           "name": "DustEmitter",
                           "className": "ParticleEmitter",
-                          "guid": "16652"
+                          "guid": "3470196"
                         }
                       ]
+                    },
+                    {
+                      "name": "SurfaceAppearance",
+                      "className": "SurfaceAppearance",
+                      "guid": "3470194"
                     }
                   ]
                 },
                 {
-                  "name": "EyeLeft",
-                  "className": "Part",
-                  "guid": "16638"
-                },
-                {
-                  "name": "EyeRight",
-                  "className": "Part",
-                  "guid": "16639"
-                },
-                {
-                  "name": "Head",
-                  "className": "Part",
-                  "guid": "16634"
-                },
-                {
-                  "name": "HornLeft",
-                  "className": "Part",
-                  "guid": "16637"
-                },
-                {
-                  "name": "HornRight",
-                  "className": "Part",
-                  "guid": "16636"
-                },
-                {
-                  "name": "LegBackLeft",
-                  "className": "Part",
-                  "guid": "16643"
-                },
-                {
-                  "name": "LegBackRight",
-                  "className": "Part",
-                  "guid": "16642"
-                },
-                {
-                  "name": "LegFrontLeft",
-                  "className": "Part",
-                  "guid": "16641"
-                },
-                {
-                  "name": "LegFrontRight",
-                  "className": "Part",
-                  "guid": "16640"
-                },
-                {
                   "name": "Root",
                   "className": "Part",
-                  "guid": "16632"
-                },
-                {
-                  "name": "Snout",
-                  "className": "Part",
-                  "guid": "16635"
-                },
-                {
-                  "name": "Tail",
-                  "className": "Part",
-                  "guid": "16644"
+                  "guid": "3470191"
                 }
               ]
             }
@@ -779,6 +729,61 @@
           ]
         },
         {
+          "name": "__RayHarness",
+          "className": "Folder",
+          "guid": "4510675",
+          "children": [
+            {
+              "name": "BullService",
+              "className": "ModuleScript",
+              "guid": "4510676",
+              "filePaths": [
+                "sync/ServerScriptService/__RayHarness/BullService.luau"
+              ]
+            },
+            {
+              "name": "EconomyService",
+              "className": "ModuleScript",
+              "guid": "4510682",
+              "filePaths": [
+                "sync/ServerScriptService/__RayHarness/EconomyService.luau"
+              ]
+            },
+            {
+              "name": "NotifyService",
+              "className": "ModuleScript",
+              "guid": "4510678",
+              "filePaths": [
+                "sync/ServerScriptService/__RayHarness/NotifyService.luau"
+              ]
+            },
+            {
+              "name": "RevengeService",
+              "className": "ModuleScript",
+              "guid": "4510686",
+              "filePaths": [
+                "sync/ServerScriptService/__RayHarness/RevengeService.luau"
+              ]
+            },
+            {
+              "name": "RoundService",
+              "className": "ModuleScript",
+              "guid": "4510680",
+              "filePaths": [
+                "sync/ServerScriptService/__RayHarness/RoundService.luau"
+              ]
+            },
+            {
+              "name": "ShrinkService",
+              "className": "ModuleScript",
+              "guid": "4510684",
+              "filePaths": [
+                "sync/ServerScriptService/__RayHarness/ShrinkService.luau"
+              ]
+            }
+          ]
+        },
+        {
           "name": "Bullrush",
           "className": "Folder",
           "guid": "13406",
@@ -927,6 +932,92 @@
       "className": "ServerStorage",
       "guid": "16684",
       "children": [
+        {
+          "name": "BullTemplate_OldBull",
+          "className": "Model",
+          "guid": "15182",
+          "children": [
+            {
+              "name": "Body",
+              "className": "Part",
+              "guid": "16633",
+              "children": [
+                {
+                  "name": "DustAttachment",
+                  "className": "Attachment",
+                  "guid": "11963",
+                  "children": [
+                    {
+                      "name": "DustEmitter",
+                      "className": "ParticleEmitter",
+                      "guid": "16652"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "EyeLeft",
+              "className": "Part",
+              "guid": "16638"
+            },
+            {
+              "name": "EyeRight",
+              "className": "Part",
+              "guid": "16639"
+            },
+            {
+              "name": "Head",
+              "className": "Part",
+              "guid": "16634"
+            },
+            {
+              "name": "HornLeft",
+              "className": "Part",
+              "guid": "16637"
+            },
+            {
+              "name": "HornRight",
+              "className": "Part",
+              "guid": "16636"
+            },
+            {
+              "name": "LegBackLeft",
+              "className": "Part",
+              "guid": "16643"
+            },
+            {
+              "name": "LegBackRight",
+              "className": "Part",
+              "guid": "16642"
+            },
+            {
+              "name": "LegFrontLeft",
+              "className": "Part",
+              "guid": "16641"
+            },
+            {
+              "name": "LegFrontRight",
+              "className": "Part",
+              "guid": "16640"
+            },
+            {
+              "name": "Root",
+              "className": "Part",
+              "guid": "16632"
+            },
+            {
+              "name": "Snout",
+              "className": "Part",
+              "guid": "16635"
+            },
+            {
+              "name": "Tail",
+              "className": "Part",
+              "guid": "16644"
+            }
+          ]
+        },
         {
           "name": "CowboyRigged_source",
           "className": "Model",
@@ -44427,6 +44518,2265 @@
               "guid": "15750"
             },
             {
+              "name": "RevengeMarkers",
+              "className": "Folder",
+              "guid": "3745870",
+              "children": [
+                {
+                  "name": "Marker_col_2_-1",
+                  "className": "Part",
+                  "guid": "4510868",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510879"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510869",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510870",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510875",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511056"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510876"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510877",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511057"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510878"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510874"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510872"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510871"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510873"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_2_1",
+                  "className": "Part",
+                  "guid": "4510856",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510867"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510857",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510858",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510863",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511054"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510864"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510865",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511055"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510866"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510862"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510860"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510859"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510861"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_3_-1",
+                  "className": "Part",
+                  "guid": "4510892",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510903"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510893",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510894",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510899",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511060"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510900"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510901",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511061"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510902"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510898"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510896"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510895"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510897"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_3_1",
+                  "className": "Part",
+                  "guid": "4510880",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510891"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510881",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510882",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510887",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511058"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510888"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510889",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511059"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510890"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510886"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510884"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510883"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510885"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_4_-1",
+                  "className": "Part",
+                  "guid": "4510916",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510927"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510917",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510918",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510923",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511064"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510924"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510925",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511065"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510926"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510922"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510920"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510919"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510921"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_4_1",
+                  "className": "Part",
+                  "guid": "4510904",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510915"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510905",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510906",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510911",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511062"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510912"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510913",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511063"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510914"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510910"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510908"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510907"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510909"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_5_-1",
+                  "className": "Part",
+                  "guid": "4510940",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510951"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510941",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510942",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510947",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511068"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510948"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510949",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511069"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510950"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510946"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510944"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510943"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510945"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_5_1",
+                  "className": "Part",
+                  "guid": "4510928",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510939"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510929",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510930",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510935",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511066"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510936"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510937",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511067"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510938"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510934"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510932"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510931"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510933"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_6_-1",
+                  "className": "Part",
+                  "guid": "4510964",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510975"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510965",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510966",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510971",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511072"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510972"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510973",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511073"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510974"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510970"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510968"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510967"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510969"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_6_1",
+                  "className": "Part",
+                  "guid": "4510952",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510963"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510953",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510954",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510959",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511070"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510960"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510961",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511071"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510962"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510958"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510956"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510955"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510957"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_7_-1",
+                  "className": "Part",
+                  "guid": "4510988",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510999"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510989",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510990",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510995",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511076"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510996"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510997",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511077"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510998"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510994"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510992"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510991"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510993"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_7_1",
+                  "className": "Part",
+                  "guid": "4510976",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510987"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510977",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510978",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510983",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511074"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510984"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510985",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511075"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510986"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510982"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510980"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510979"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510981"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_8_-1",
+                  "className": "Part",
+                  "guid": "4511012",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4511023"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4511013",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4511014",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4511019",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511080"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4511020"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4511021",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511081"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4511022"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4511018"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4511016"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4511015"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4511017"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_col_8_1",
+                  "className": "Part",
+                  "guid": "4511000",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4511011"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4511001",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4511002",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4511007",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511078"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4511008"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4511009",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511079"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4511010"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4511006"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4511004"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4511003"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4511005"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_2_-1",
+                  "className": "Part",
+                  "guid": "4510700",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510711"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510701",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510702",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510707",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511026"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510708"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510709",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511027"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510710"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510706"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510704"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510703"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510705"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_2_1",
+                  "className": "Part",
+                  "guid": "4510688",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510699"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510689",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510690",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510695",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511024"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510696"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510697",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511025"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510698"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510694"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510692"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510691"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510693"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_3_-1",
+                  "className": "Part",
+                  "guid": "4510724",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510735"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510725",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510726",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510731",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511030"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510732"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510733",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511031"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510734"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510730"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510728"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510727"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510729"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_3_1",
+                  "className": "Part",
+                  "guid": "4510712",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510723"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510713",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510714",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510719",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511028"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510720"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510721",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511029"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510722"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510718"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510716"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510715"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510717"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_4_-1",
+                  "className": "Part",
+                  "guid": "4510748",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510759"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510749",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510750",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510755",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511034"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510756"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510757",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511035"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510758"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510754"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510752"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510751"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510753"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_4_1",
+                  "className": "Part",
+                  "guid": "4510736",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510747"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510737",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510738",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510743",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511032"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510744"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510745",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511033"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510746"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510742"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510740"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510739"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510741"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_5_-1",
+                  "className": "Part",
+                  "guid": "4510772",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510783"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510773",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510774",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510779",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511040"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510780"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510781",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511041"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510782"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510778"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510776"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510775"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510777"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_5_1",
+                  "className": "Part",
+                  "guid": "4510760",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510771"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510761",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510762",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510767",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511036"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510768"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510769",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511037"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510770"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "CooldownFill",
+                              "className": "Frame",
+                              "guid": "4511038",
+                              "children": [
+                                {
+                                  "name": "UICorner",
+                                  "className": "UICorner",
+                                  "guid": "4511039"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510766"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510764"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510763"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510765"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_6_-1",
+                  "className": "Part",
+                  "guid": "4510796",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510807"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510797",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510798",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510803",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511044"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510804"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510805",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511045"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510806"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510802"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510800"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510799"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510801"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_6_1",
+                  "className": "Part",
+                  "guid": "4510784",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510795"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510785",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510786",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510791",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511042"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510792"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510793",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511043"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510794"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510790"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510788"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510787"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510789"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_7_-1",
+                  "className": "Part",
+                  "guid": "4510820",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510831"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510821",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510822",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510827",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511048"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510828"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510829",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511049"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510830"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510826"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510824"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510823"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510825"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_7_1",
+                  "className": "Part",
+                  "guid": "4510808",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510819"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510809",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510810",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510815",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511046"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510816"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510817",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511047"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510818"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510814"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510812"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510811"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510813"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_8_-1",
+                  "className": "Part",
+                  "guid": "4510844",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510855"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510845",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510846",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510851",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511052"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510852"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510853",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511053"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510854"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510850"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510848"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510847"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510849"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "Marker_row_8_1",
+                  "className": "Part",
+                  "guid": "4510832",
+                  "children": [
+                    {
+                      "name": "ClickDetector",
+                      "className": "ClickDetector",
+                      "guid": "4510843"
+                    },
+                    {
+                      "name": "MarkerSurface",
+                      "className": "SurfaceGui",
+                      "guid": "4510833",
+                      "children": [
+                        {
+                          "name": "Plate",
+                          "className": "Frame",
+                          "guid": "4510834",
+                          "children": [
+                            {
+                              "name": "Arrow",
+                              "className": "TextLabel",
+                              "guid": "4510839",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511050"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510840"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "Caption",
+                              "className": "TextLabel",
+                              "guid": "4510841",
+                              "children": [
+                                {
+                                  "name": "Tint",
+                                  "className": "UIGradient",
+                                  "guid": "4511051"
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "4510842"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "HoverScale",
+                              "className": "UIScale",
+                              "guid": "4510838"
+                            },
+                            {
+                              "name": "Rim",
+                              "className": "UIStroke",
+                              "guid": "4510836"
+                            },
+                            {
+                              "name": "UICorner",
+                              "className": "UICorner",
+                              "guid": "4510835"
+                            },
+                            {
+                              "name": "UIGradient",
+                              "className": "UIGradient",
+                              "guid": "4510837"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
               "name": "Tiles",
               "className": "Folder",
               "guid": "13101",
@@ -46680,6 +49030,32 @@
               "name": "Texture",
               "className": "Texture",
               "guid": "17599"
+            }
+          ]
+        },
+        {
+          "name": "Meshy_AI_Blocky_Bison_0707192404_texture",
+          "className": "Model",
+          "guid": "3157074",
+          "children": [
+            {
+              "name": "Node0_Node",
+              "className": "Model",
+              "guid": "3157075",
+              "children": [
+                {
+                  "name": "Node0",
+                  "className": "MeshPart",
+                  "guid": "3157073",
+                  "children": [
+                    {
+                      "name": "SurfaceAppearance",
+                      "className": "SurfaceAppearance",
+                      "guid": "3157076"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         },
