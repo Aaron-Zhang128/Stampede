@@ -33,10 +33,14 @@ local NotifyService = require(script.Parent.NotifyService)
 local FriendBoostService = require(script.Parent.FriendBoostService)
 local PushService = require(script.Parent.PushService)
 local EconomyService = require(script.Parent.EconomyService)
+local BullRollService = require(script.Parent.BullRollService)
+local SpinService = require(script.Parent.SpinService)
 
 FriendBoostService.init() -- friends-in-server tracking; scales all money grants
 PushService.init() -- player-vs-player shove (prompts are made client-side in PushClient)
 EconomyService.init(RoundService.awardMoney) -- round ledger + "2x Rewards?" receipts
+BullRollService.init() -- bull roll/equip backend; registers its Robux-roll receipts
+SpinService.init() -- fortune wheel: free-spin clock + Robux spin receipts
 
 --==============================================================================
 -- Teams (created in edit mode; ensured here so a fresh place still works)
@@ -312,6 +316,11 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 	local difficulty = mode.difficulty or Config.DIFFICULTY
 	local rampTime = mode.rampTime or Config.DIFFICULTY.RAMP_TIME
 	local wave = 0
+	-- Bulls stay "airborne" across waves: the next telegraph goes up while
+	-- the previous wave is still charging, so pressure never fully drops.
+	local airborne = 0
+	local MAX_AIRBORNE = 10 -- brake if short gaps outrun bull run time
+	local occupied: { [string]: number } = {} -- laneKey -> bulls in flight there
 	while true do
 		wave += 1
 		if roundDecided(soloRound, isTeams) then
@@ -320,11 +329,15 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 
 		local targetStage = desiredStage(roundStart, mode)
 		if targetStage > ShrinkService.getStage() then
+			-- Let in-flight bulls clear first: the shrink is the round's
+			-- breather, and bulls shouldn't cross tiles as they fall away.
+			while airborne > 0 do
+				task.wait(0.05)
+			end
 			-- Blocking: telegraph + sink per step. The bounds watcher keeps
 			-- running, so stragglers on doomed tiles still get eliminated.
 			NotifyService.broadcast("ARENA SHRINKING!", "red", Config.SHRINK.TELEGRAPH)
 			ShrinkService.advanceTo(targetStage)
-			RevengeService.refreshMarkers() -- clickable arrow ring follows the new window
 			EconomyService.noteStageSurvived(RoundService.getAlive()) -- stage bonus for the living
 			if roundDecided(soloRound, isTeams) then
 				return
@@ -333,7 +346,7 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 
 		local bounds = ShrinkService.getBounds()
 		local intensity = math.min((os.clock() - roundStart) / rampTime, 1)
-		local waveData = WaveDirector.getWave(intensity, bounds, difficulty)
+		local waveData = WaveDirector.getWave(intensity, bounds, difficulty, occupied)
 
 		setRoundState("ACTIVE", {
 			aliveCount = RoundService.aliveCount(),
@@ -353,10 +366,13 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 		AIService.onTelegraph(lanes, waveData.telegraph, bounds)
 		task.wait(waveData.telegraph)
 
-		-- Each bull charges in its own thread (BullService.charge blocks);
-		-- `pending` gates the wave until every thread finishes.
-		local pending = #waveData.bulls
+		-- Each bull charges in its own thread (BullService.charge blocks).
+		-- No barrier: the gap starts while these bulls are still running,
+		-- so back-to-back waves overlap instead of waiting for a clear grid.
 		for _, bull in waveData.bulls do
+			local key = bull.lane.axis .. bull.lane.index
+			airborne += 1
+			occupied[key] = (occupied[key] or 0) + 1
 			task.spawn(function()
 				if bull.delay > 0 then
 					task.wait(bull.delay)
@@ -365,19 +381,20 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 				-- once the round is decided; charging bulls finish their run.
 				if not roundDecided(soloRound, isTeams) then
 					BullService.charge(bull.lane, waveData.speed, bounds,
-						RoundService.getAlive, RoundService.eliminate)
+						RoundService.getAliveCached, RoundService.eliminate)
 				end
-				pending -= 1
+				airborne -= 1
+				-- nil (not 0) when the lane empties: WaveDirector's exclusion
+				-- set treats any present key as occupied.
+				local left = occupied[key] - 1
+				occupied[key] = if left > 0 then left else nil
 			end)
 		end
-		while pending > 0 do
+
+		task.wait(waveData.gap)
+		while airborne >= MAX_AIRBORNE do
 			task.wait(0.05)
 		end
-
-		if roundDecided(soloRound, isTeams) then
-			return
-		end
-		task.wait(waveData.gap)
 	end
 end
 

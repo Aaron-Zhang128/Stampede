@@ -41,13 +41,29 @@
 	  { update = true, total, canDouble = false } means a "2x Rewards?"
 	  purchase landed: refresh the money line, hide the 2x button.
 	- RevengeAck:FireClient(thrower, kind: string, data: table) -- to the
-	  thrower only: "THROW_OK" { cooldown, lane }, "HIT" { victimName, amount },
+	  thrower only: "THROW_OK" { cooldown, lane, bullId }, "HIT"
+	  { victimName, amount },
 	  "DENIED" { reason: "COOLDOWN" | "BOUNDS", remaining: number? }
-	  Revenge throws have NO client->server remote: eliminated participants
-	  click server-side ClickDetector markers (Workspace.BullrushArena.
-	  RevengeMarkers, built by RevengeService per window; lane in marker
-	  attributes) from BullrushClient's overhead bull-cam. The client only
-	  repaints the markers locally (ready pulse / cooldown countdown).
+	- RevengeThrow:FireServer(lane) -- an eliminated participant sends a
+	  revenge bull down the lane it selected from the overhead bull-cam
+	  (arrow keys / HUD arrows cycle a ring of every lane entry point; see
+	  BullrushClient). RevengeService re-validates everything server-side,
+	  so spoofing it earns nothing. The bull launched is the thrower's
+	  EQUIPPED bull (see BullRoll below): catalog speed, not REVENGE.SPEED.
+
+	Bull roll system (BullRollService; catalog data shared in
+	ReplicatedStorage.Bullrush.BullCatalog):
+	- BullRoll:FireServer() -- spend Config.BULLS.ROLL_COST Money on one
+	  catalog roll. Robux rolls are NOT sent here: the client prompts
+	  Config.PRODUCTS.BULL_ROLL / BULL_ROLL_10 via MarketplaceService and
+	  the receipt grants the rolls server-side.
+	- BullEquip:FireServer(bullId) -- equip an owned bull.
+	- BullAck:FireClient(player, kind: string, data: table) -- to the
+	  caller only: "ROLLED" { results: {{bullId, rarity, isNew, refund}},
+	  money: new balance, source: "MONEY" | "ROBUX" }, "EQUIPPED" { bullId },
+	  "DENIED" { reason: "NO_MONEY" | "DATA_NOT_LOADED" | "NOT_OWNED" | "BAD_ID" }
+	  Owned bulls replicate as player attributes: Bulls (JSON {bullId=true})
+	  + EquippedBull -- the UI reads those, no fetch remote needed.
 ]]
 
 local Config = require(script.Parent.Config)

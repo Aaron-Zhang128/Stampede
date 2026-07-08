@@ -117,7 +117,7 @@ local function dash()
 
 	lastDashAt = os.clock()
 	dashing = true
-	playWhoosh(1.4, 0.45)
+	playWhoosh(1.4, 0.315)
 	fovKick()
 	attachTrail(root)
 
@@ -130,7 +130,7 @@ local function dash()
 			dashing = false
 			task.delay(math.max(COOLDOWN - (os.clock() - lastDashAt), 0), function()
 				if aliveParts() then
-					playWhoosh(2.1, 0.12) -- soft "ready again" ping
+					playWhoosh(2.1, 0.084) -- soft "ready again" ping
 				end
 			end)
 			return

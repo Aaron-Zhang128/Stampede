@@ -23,6 +23,18 @@ function DataHandler.GetDefaultProfile()
 		-- One-time starter-task state (StarterTaskService). Persists (no reset); old saves
 		-- start empty and existing chair-owners get buy_chair pre-seeded on load.
 		StarterTasks = {progress = {}, claimed = {}},
+
+		-- Bull roll system (BullRollService): everyone owns + equips the free
+		-- starter; the load merge keeps this default for old saves, so
+		-- existing players get the starter granted on their next join.
+		Bulls = {STARTER = true},   -- stored as {bullId = true}, like Chairs/Trails
+		EquippedBull = "STARTER",
+
+		-- Fortune wheel (SpinService): banked spins + when the last free spin
+		-- accrued. LastFreeSpin=0 means a free spin banks immediately on the
+		-- next join (new players and old saves alike get one on first sight).
+		Spins = 0,
+		LastFreeSpin = 0,
 	}
 end
 
@@ -108,6 +120,34 @@ function DataHandler.SetEquippedTrail(player, trailId)
 	if not profile then return end
 	profile.EquippedTrail = trailId
 	player:SetAttribute("EquippedTrail", trailId)
+end
+
+-- Bulls inventory helpers -- Bulls is a dictionary {bullId = true}, same shape
+-- as Chairs/Trails. The catalog (names/rarities/speeds) lives in
+-- ReplicatedStorage.Bullrush.BullCatalog; RevengeService launches the equipped
+-- bull's speed. The EquippedBull attribute replicates for the client UI.
+function DataHandler.AddBull(player, bullId)
+	local profile = DataHandler.Profiles[player.UserId]
+	if not profile then return end
+	profile.Bulls[bullId] = true
+end
+
+function DataHandler.HasBull(player, bullId)
+	local profile = DataHandler.Profiles[player.UserId]
+	if not profile then return false end
+	return profile.Bulls[bullId] == true
+end
+
+function DataHandler.GetEquippedBull(player)
+	local profile = DataHandler.Profiles[player.UserId]
+	return profile and profile.EquippedBull or "STARTER"
+end
+
+function DataHandler.SetEquippedBull(player, bullId)
+	local profile = DataHandler.Profiles[player.UserId]
+	if not profile then return end
+	profile.EquippedBull = bullId
+	player:SetAttribute("EquippedBull", bullId)
 end
 
 return DataHandler

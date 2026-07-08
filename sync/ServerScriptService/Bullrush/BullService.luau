@@ -18,8 +18,10 @@ local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local GridUtil = require(ReplicatedStorage.Bullrush.GridUtil)
+local BullCatalog = require(ReplicatedStorage.Bullrush.BullCatalog)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
 local BullTemplate = ReplicatedStorage.BullrushAssets.BullTemplate
+local BullModels = ReplicatedStorage.BullrushAssets:FindFirstChild("Bulls")
 
 local RagdollService = require(script.Parent.RagdollService)
 
@@ -44,13 +46,30 @@ local function getActiveBullsFolder(): Folder
 	return folder
 end
 
-function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill, style: { throwerName: string? }?): number
+-- The model charged down the lane: the bull's catalog modelName (per-rarity
+-- tier skins in ReplicatedStorage.BullrushAssets.Bulls, same Root+Body build
+-- as BullTemplate), or BullTemplate for wave bulls / commons / missing models.
+local function templateFor(bullId: string?): Model
+	if bullId then
+		local def = BullCatalog.get(bullId)
+		local modelName = def and def.modelName
+		local model = if modelName and BullModels then BullModels:FindFirstChild(modelName) else nil
+		if model and model:IsA("Model") then
+			return model
+		end
+	end
+	return BullTemplate
+end
+
+-- style.bullId: the thrower's equipped BullCatalog id (revenge throws only) —
+-- picks the model via templateFor above.
+function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string? }?): number
 	local startPos, endPos = GridUtil.lanePath(lane, bounds)
 	local duration = (endPos - startPos).Magnitude / speed
 	local rotation = CFrame.lookAt(startPos, endPos).Rotation
 	local crossCoord = GridUtil.laneCrossCoord(lane)
 
-	local bull = BullTemplate:Clone()
+	local bull = templateFor(style and style.bullId):Clone()
 	bull:PivotTo(CFrame.lookAt(startPos, endPos))
 
 	-- Revenge bulls read as PLAYER-SENT: a red glow everyone can see, plus the
@@ -97,7 +116,7 @@ function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill
 		gallop.Name = "GallopLoop"
 		gallop.SoundId = "rbxassetid://3300268152" -- "horse gallopping sound" (verified loadable)
 		gallop.Looped = true
-		gallop.Volume = 0.45
+		gallop.Volume = 0.315
 		gallop.PlaybackSpeed = math.clamp(speed / 50, 0.85, 1.25) -- faster charge, faster hooves
 		gallop.RollOffMinDistance = 15
 		gallop.RollOffMaxDistance = 200
@@ -109,7 +128,7 @@ function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill
 			local bellow = Instance.new("Sound")
 			bellow.Name = "Bellow"
 			bellow.SoundId = "rbxassetid://130829741" -- "Cow moo sound effect" (verified loadable)
-			bellow.Volume = 0.9
+			bellow.Volume = 0.63
 			bellow.PlaybackSpeed = 0.78
 			bellow.RollOffMinDistance = 25
 			bellow.RollOffMaxDistance = 350

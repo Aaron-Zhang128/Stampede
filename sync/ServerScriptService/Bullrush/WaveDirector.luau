@@ -1,9 +1,13 @@
 --[[
 	WaveDirector - pure wave generation. No Workspace/Remote access.
 
-	WaveDirector.getWave(intensity, bounds, difficulty?) ->
+	WaveDirector.getWave(intensity, bounds, difficulty?, excluded?) ->
 		{ telegraph = seconds, gap = seconds, speed = studs/s,
 		  bulls = { { lane = lane, delay = seconds }, ... } }
+
+	excluded = optional { [axis .. index]: true } set of lanes to avoid —
+	Main passes lanes that still have a bull in flight so overlapping waves
+	don't double-book a lane (best-effort: ignored if picks run dry).
 
 	intensity = 0..1 round progress (Main computes elapsed / rampTime,
 	clamped here as well); telegraph/gap/speed/bull count each lerp
@@ -82,11 +86,12 @@ local function validate(bulls, bounds)
 		"WaveDirector: wave covers an entire axis")
 end
 
-function WaveDirector.getWave(intensity: number, bounds, difficulty)
+function WaveDirector.getWave(intensity: number, bounds, difficulty, excluded)
 	assert(type(intensity) == "number",
 		"WaveDirector.getWave: intensity must be a number")
 	intensity = math.clamp(intensity, 0, 1)
 	difficulty = difficulty or Config.DIFFICULTY
+	excluded = excluded or {}
 
 	local START = difficulty.START
 	local FINAL = difficulty.FINAL
@@ -112,7 +117,9 @@ function WaveDirector.getWave(intensity: number, bounds, difficulty)
 		end
 		local lane = randomLane(axis, bounds)
 		local key = lane.axis .. lane.index
-		if not used[key] then -- reject duplicates, re-roll
+		-- Occupied lanes are avoided only while picks are plentiful; past 25
+		-- attempts the exclusion is dropped so a wave always materializes.
+		if not used[key] and not (excluded[key] and attempts <= 25) then
 			used[key] = true
 			perAxis[axis] += 1
 			local delay = if #bulls == 0 then 0 else math.random() * 0.4

@@ -98,6 +98,8 @@ Players.PlayerAdded:Connect(function(player)
 	player:SetAttribute("EquippedChair", profile.EquippedChair or "None")
 	player:SetAttribute("Trails", HttpService:JSONEncode(profile.Trails or {}))
 	player:SetAttribute("EquippedTrail", profile.EquippedTrail or "None")
+	player:SetAttribute("Bulls", HttpService:JSONEncode(profile.Bulls or {}))
+	player:SetAttribute("EquippedBull", profile.EquippedBull or "STARTER")
 	player:SetAttribute("GroupRewardClaimed", profile.GroupRewardClaimed or false)
 
 	-- Leaderstats: only Money and Wins are shown in the player list (column order

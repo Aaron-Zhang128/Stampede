@@ -80,10 +80,12 @@ local roundStateRemote = waitFor(remotes, "RoundState")
 -- ArenaShrink is the newest remote and deliberately OPTIONAL: if it's missing
 -- we warned above, skip shrink FX, and every other effect keeps working.
 local arenaShrinkRemote = waitFor(remotes, "ArenaShrink")
--- RevengeAck is OPTIONAL the same way: without it the revenge markers stay in
--- their server-painted resting look and everything else keeps working.
--- (Revenge throws are server-side ClickDetector markers — no remote to send.)
+-- RevengeAck / RevengeThrow are OPTIONAL the same way: without them the
+-- revenge lane-select controls stay inert and everything else keeps working.
+-- (RevengeThrow is created by RevengeService at server boot, so it can land
+-- in the folder a beat after join — hence the same generous waitFor.)
 local revengeAckRemote = waitFor(remotes, "RevengeAck")
+local revengeThrowRemote = waitFor(remotes, "RevengeThrow")
 local assetsFolder = waitFor(ReplicatedStorage, "BullrushAssets")
 local bullTemplate = waitFor(assetsFolder, "BullTemplate")
 local arena = waitFor(workspace, "BullrushArena")
@@ -434,8 +436,8 @@ local function spawnSilhouette(entry, warnTime: number)
 	for _, desc in ipairs(ghost:GetDescendants()) do
 		if desc:IsA("BasePart") then
 			desc.CastShadow = false
-			-- Ghosts park right at lane starts, beside the revenge markers:
-			-- never let them soak up the bull-cam's click rays.
+			-- Ghosts park right at lane starts: keep them out of every
+			-- raycast (mouse picking, camera occlusion) — they're pure FX.
 			desc.CanQuery = false
 			desc.CanTouch = false
 			if desc ~= ghost.PrimaryPart and desc.Name ~= "Root" then
@@ -469,7 +471,7 @@ local function spawnSilhouette(entry, warnTime: number)
 	TweenService:Create(
 		rumble,
 		TweenInfo.new(math.max(warnTime, 0.1), Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-		{ Volume = 0.4 }
+		{ Volume = 0.28 }
 	):Play()
 end
 
@@ -648,52 +650,6 @@ local statusSizeCap = Instance.new("UITextSizeConstraint")
 statusSizeCap.MaxTextSize = 20
 statusSizeCap.Parent = statusLabel
 
--- Full-screen elimination overlay
-local elimOverlay = Instance.new("Frame")
-elimOverlay.Name = "ElimOverlay"
-elimOverlay.Size = UDim2.fromScale(1, 1)
-elimOverlay.BackgroundColor3 = Color3.fromRGB(12, 4, 4)
-elimOverlay.BackgroundTransparency = 1
-elimOverlay.BorderSizePixel = 0
-elimOverlay.Visible = false
-elimOverlay.ZIndex = 10
-elimOverlay.Parent = hud
-
-local elimText = Instance.new("TextLabel")
-elimText.Name = "ElimText"
-elimText.AnchorPoint = Vector2.new(0.5, 0.5)
-elimText.Position = UDim2.fromScale(0.5, 0.42)
-elimText.Size = UDim2.new(1, 0, 0, 110)
-elimText.BackgroundTransparency = 1
-elimText.Font = Enum.Font.GothamBlack
-elimText.TextSize = 72
-elimText.TextColor3 = Color3.fromRGB(235, 55, 45)
-elimText.TextStrokeColor3 = Color3.fromRGB(20, 0, 0)
-elimText.TextStrokeTransparency = 0.4
-elimText.TextTransparency = 1
-elimText.Text = "ELIMINATED"
-elimText.ZIndex = 11
-elimText.Parent = elimOverlay
-
--- Revenge onboarding: lands under ELIMINATED so the death screen itself
--- teaches the comeback mechanic.
-local elimHint = Instance.new("TextLabel")
-elimHint.Name = "ElimHint"
-elimHint.AnchorPoint = Vector2.new(0.5, 0.5)
-elimHint.Position = UDim2.fromScale(0.5, 0.56)
-elimHint.Size = UDim2.new(1, -40, 0, 60)
-elimHint.BackgroundTransparency = 1
-elimHint.Font = Enum.Font.GothamBlack
-elimHint.TextSize = 26
-elimHint.TextWrapped = true
-elimHint.TextColor3 = Color3.fromRGB(120, 255, 150)
-elimHint.TextStrokeColor3 = Color3.fromRGB(0, 25, 0)
-elimHint.TextStrokeTransparency = 0.4
-elimHint.TextTransparency = 1
-elimHint.Text = "GET REVENGE — hit BECOME A BULL (or step on the lobby pad) and click a lane from above!"
-elimHint.ZIndex = 11
-elimHint.Parent = elimOverlay
-
 -- Revenge hit payoff: a big center-screen burst when YOUR bull tramples
 -- someone — the small green money card alone is easy to miss.
 local hitPopup = Instance.new("TextLabel")
@@ -751,11 +707,9 @@ local intermissionEndsAt: number? = nil
 local lastIntermissionSecond: number? = nil
 
 -- Revenge cooldown mirror (server-authoritative, from RevengeAck THROW_OK /
--- DENIED): drives the marker glow/countdown repaint below.
+-- DENIED): drives the SEND BULL button countdown (bridge attributes) below.
 local revengeReadyAt = 0 -- os.clock() when the next throw unlocks
-local markersWereCooling = false -- edge-detects the cooldown lapping for the ready ding
-
-local elimToken = 0
+local revengeWasCooling = false -- edge-detects the cooldown lapping for the ready ding
 
 -- Validates the Team Rush counts table the server sends in ACTIVE updates.
 local function isTeamCounts(counts): boolean
@@ -790,254 +744,97 @@ local function refreshStatus(timeLeft: number?)
 	end
 end
 
-local function showEliminatedOverlay()
-	elimToken += 1
-	local token = elimToken
-	elimOverlay.Visible = true
-	elimOverlay.BackgroundTransparency = 1
-	elimText.TextTransparency = 1
-	elimHint.TextTransparency = 1
-	TweenService:Create(elimOverlay, TweenInfo.new(0.15), { BackgroundTransparency = 0.45 }):Play()
-	TweenService:Create(elimText, TweenInfo.new(0.15), { TextTransparency = 0 }):Play()
-	-- The revenge hint lands a beat after the gut punch, and the overlay
-	-- holds a little longer so it can actually be read.
-	TweenService:Create(elimHint,
-		TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.5),
-		{ TextTransparency = 0 }):Play()
-	task.delay(2.6, function()
-		if elimToken ~= token then
-			return
-		end
-		TweenService:Create(elimOverlay, TweenInfo.new(0.6), { BackgroundTransparency = 1 }):Play()
-		TweenService:Create(elimText, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
-		TweenService:Create(elimHint, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
-		task.delay(0.65, function()
-			if elimToken == token then
-				elimOverlay.Visible = false
-			end
-		end)
-	end)
-end
-
 --==============================================================================
--- Revenge markers: the server builds clickable arrow markers ringing the
--- active window (see RevengeService), one at each end of every row/column,
--- each carrying a server-side ClickDetector. The eliminated click them from
--- the overhead bull-cam (next section). Locally the markers exist ONLY for
--- the eliminated: everyone else has them fully hidden and their click range
--- zeroed. For the eliminated viewer they glow: pulsing green READY or red
--- while cooling down, and the marker you fire sinks and springs back. All
--- property sets are local-only, so every player sees their own state on the
--- same shared parts.
+-- Revenge lane selection — tile tint layer. While the overhead bull-cam is up
+-- (see below), the eliminated cycle a clockwise ring of every lane entry
+-- point around the ACTIVE window; the selected lane's tiles tint green with
+-- the ENTRY tile brightest (that's where the bull spawns). Selection state +
+-- inputs live with the bull-cam sections below; this layer only owns the ring
+-- math and the tile colors. Danger claims (red pulses) always outrank the
+-- selection tint: claimed tiles are skipped here, and since claimTile pulses
+-- from the startup originals, the 0.1s repaint tick just re-asserts the tint
+-- on whatever is unclaimed.
 --==============================================================================
 
--- Color IS the signal (no floating text): green marker = ready to click,
--- red marker = cooling down. Outcomes arrive as red/green Notify cards
--- pushed by the server (RevengeService -> NotifyService).
-local MARKER_READY_A = Color3.fromRGB(70, 220, 100)
-local MARKER_READY_B = Color3.fromRGB(150, 255, 170)
-local MARKER_WAIT_A = Color3.fromRGB(170, 40, 35)
-local MARKER_WAIT_B = Color3.fromRGB(220, 65, 55)
-local MARKER_PLATE_COLOR = Color3.fromRGB(26, 22, 20) -- dark leather button face
-local MARKER_CLICK_RANGE = 512 -- mirror of the server's build value; zeroed locally when hidden/cooling
+local SELECT_COLOR = Color3.fromRGB(70, 200, 100)
+local SELECT_ENTRY_COLOR = Color3.fromRGB(180, 255, 200) -- the bull spawns off this edge
 
--- The glyphs are white; these vertical ramps tint them per state — the same
--- hot-highlight -> saturated-mid -> deep-shade style as the notif cards.
-local GLYPH_READY = ColorSequence.new({
-	ColorSequenceKeypoint.new(0, Color3.fromRGB(215, 255, 225)),
-	ColorSequenceKeypoint.new(0.45, Color3.fromRGB(110, 255, 145)),
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 150, 70)),
-})
-local GLYPH_WAIT = ColorSequence.new({
-	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 215, 210)),
-	ColorSequenceKeypoint.new(0.45, Color3.fromRGB(255, 110, 95)),
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 30, 25)),
-})
+local selectionRing: { GridUtil.Lane } = {} -- clockwise entry points, screen order
+local selectionIndex = 0 -- 0 = nothing selected yet this session
+local selectionTinted: { [BasePart]: boolean } = {}
 
-local function tintGlyph(label: Instance?, ramp: ColorSequence)
-	if not (label and label:IsA("TextLabel")) then
-		return
+-- Clockwise ring in SCREEN order under the bull-cam (screen-up = north = row
+-- rowMin): top edge left->right, right edge top->bottom, bottom edge
+-- right->left, left edge bottom->top. direction points the bull INTO the
+-- window, so the ring covers both ends of every row and column — the same
+-- lane set the old clickable marker ring offered.
+local function buildSelectionRing(window: GridUtil.Bounds): { GridUtil.Lane }
+	local ring = {}
+	for col = window.colMin, window.colMax do
+		table.insert(ring, { axis = "col", index = col, direction = 1 }) -- north edge, heading south
 	end
-	local tint = label:FindFirstChild("Tint")
-	if not (tint and tint:IsA("UIGradient")) then
-		tint = Instance.new("UIGradient")
-		tint.Name = "Tint"
-		tint.Rotation = 90
-		tint.Parent = label
+	for row = window.rowMin, window.rowMax do
+		table.insert(ring, { axis = "row", index = row, direction = -1 }) -- east edge, heading west
 	end
-	tint.Color = ramp
+	for col = window.colMax, window.colMin, -1 do
+		table.insert(ring, { axis = "col", index = col, direction = -1 }) -- south edge, heading north
+	end
+	for row = window.rowMax, window.rowMin, -1 do
+		table.insert(ring, { axis = "row", index = row, direction = 1 }) -- west edge, heading east
+	end
+	return ring
 end
 
-local function paintMarker(pad: BasePart, visible: boolean, remaining: number, pulse: number)
-	pad.LocalTransparencyModifier = if visible then 0 else 1
-	local surface = pad:FindFirstChild("MarkerSurface")
-	local gui = if surface and surface:IsA("SurfaceGui") then surface else nil
-	if gui then
-		gui.Enabled = visible
+-- "ROW 3 →" — the arrow is the bull's on-screen travel direction.
+local function selectionLaneText(lane: GridUtil.Lane?): string
+	if not lane then
+		return ""
 	end
-	-- MaxActivationDistance is a plain property: setting it locally only
-	-- affects THIS viewer, so the living can never even hover the markers.
-	local click = pad:FindFirstChildOfClass("ClickDetector")
-	if click then
-		click.MaxActivationDistance = if visible and remaining <= 0 then MARKER_CLICK_RANGE else 0
-	end
-	if not visible then
-		return
-	end
-	pad.Material = Enum.Material.Neon
-	-- Face readout (all local-only): the dark PLATE frame is the button body
-	-- (state shows in its pulsing rim, the gradient-tinted glyphs, and the
-	-- neon part sides — not a flood-filled face, matching the notif-card
-	-- style). While recharging: big countdown number + sweeping fill bar;
-	-- ready: arrow + SEND BULL.
-	local plate = gui and gui:FindFirstChild("Plate")
-	if not (plate and plate:IsA("Frame")) then
-		return
-	end
-	local arrow = plate:FindFirstChild("Arrow")
-	local caption = plate:FindFirstChild("Caption")
-	local rim = plate:FindFirstChild("Rim")
-	local fill = plate:FindFirstChild("CooldownFill")
-	if not fill then
-		local bar = Instance.new("Frame")
-		bar.Name = "CooldownFill"
-		bar.AnchorPoint = Vector2.new(0.5, 1)
-		bar.Position = UDim2.fromScale(0.5, 0.96)
-		bar.Size = UDim2.fromScale(0, 0.07)
-		bar.BorderSizePixel = 0
-		bar.BackgroundColor3 = Color3.fromRGB(255, 240, 235)
-		bar.BackgroundTransparency = 0.15
-		local barCorner = Instance.new("UICorner")
-		barCorner.CornerRadius = UDim.new(0.5, 0)
-		barCorner.Parent = bar
-		bar.Parent = plate
-		fill = bar
-	end
-	plate.BackgroundColor3 = MARKER_PLATE_COLOR
-	local stateColor
-	if remaining <= 0 then
-		stateColor = MARKER_READY_A:Lerp(MARKER_READY_B, pulse) -- green: click me
-		if arrow and arrow:IsA("TextLabel") then
-			arrow.Text = "▲"
-		end
-		if caption and caption:IsA("TextLabel") then
-			caption.Text = "SEND BULL"
-		end
-		tintGlyph(arrow, GLYPH_READY)
-		tintGlyph(caption, GLYPH_READY)
-		if fill:IsA("Frame") then
-			fill.Visible = false
-		end
+	local arrow
+	if lane.axis == "row" then
+		arrow = if lane.direction == 1 then "→" else "←"
 	else
-		stateColor = MARKER_WAIT_A:Lerp(MARKER_WAIT_B, pulse * 0.4) -- red: not yet
-		if arrow and arrow:IsA("TextLabel") then
-			arrow.Text = tostring(math.ceil(remaining))
-		end
-		if caption and caption:IsA("TextLabel") then
-			caption.Text = "RECHARGING"
-		end
-		tintGlyph(arrow, GLYPH_WAIT)
-		tintGlyph(caption, GLYPH_WAIT)
-		if fill:IsA("Frame") then
-			fill.Visible = true
-			local cooldown = (typeof(Config.REVENGE) == "table" and tonumber(Config.REVENGE.COOLDOWN)) or 15
-			fill.Size = UDim2.fromScale((1 - math.clamp(remaining / cooldown, 0, 1)) * 0.9, 0.07)
-		end
+		arrow = if lane.direction == 1 then "↓" else "↑"
 	end
-	if rim and rim:IsA("UIStroke") then
-		rim.Color = stateColor -- the rim pulses with the state
-	end
-	pad.Color = stateColor -- neon sides glow the state color from any angle
+	return ("%s %d %s"):format(if lane.axis == "row" then "ROW" else "COL", lane.index, arrow)
 end
 
--- Hover feel (local-only): the plate grows and blips when your cursor finds
--- a clickable marker. ClickDetector hover events fire on the client too, and
--- the click range is zeroed unless the marker is visible + ready, so these
--- never fire for the living or during cooldown.
-local markerHoverHooked = setmetatable({} :: { [BasePart]: boolean }, { __mode = "k" })
-
-local function hookMarkerHover(marker: BasePart)
-	if markerHoverHooked[marker] then
-		return
-	end
-	markerHoverHooked[marker] = true
-	task.defer(function() -- let the marker's gui/detector replicate in behind it
-		if not marker.Parent then
-			return
-		end
-		local click = marker:FindFirstChildOfClass("ClickDetector")
-		local surface = marker:FindFirstChild("MarkerSurface")
-		local plate = surface and surface:FindFirstChild("Plate")
-		local scale = plate and plate:FindFirstChild("HoverScale")
-		if not (click and scale and scale:IsA("UIScale")) then
-			return
-		end
-		click.MouseHoverEnter:Connect(function()
-			TweenService:Create(scale,
-				TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-				{ Scale = 1.09 }):Play()
-			playLibSfx("Click", 0.35, 1.5) -- same hover blip the shop buttons use
-		end)
-		click.MouseHoverLeave:Connect(function()
-			TweenService:Create(scale,
-				TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-				{ Scale = 1 }):Play()
-		end)
-	end)
-end
-
-local function refreshRevengeMarkers()
-	local markersFolder = arena and arena:FindFirstChild("RevengeMarkers")
-	if not markersFolder then
-		return
-	end
-	local visible = currentState == "ACTIVE" and locallyEliminated
-	local remaining = revengeReadyAt - os.clock()
-	local pulse = 0.5 + 0.5 * math.sin(os.clock() * 5)
-	-- Ready ding the moment the cooldown laps, so you don't have to stare at
-	-- a marker face to know your next bull is up.
-	local cooling = remaining > 0
-	if markersWereCooling and not cooling and visible then
-		playLibSfx("Confirm", 0.8, 1.15)
-	end
-	markersWereCooling = visible and cooling
-	for _, marker in markersFolder:GetChildren() do
-		if marker:IsA("BasePart") then
-			paintMarker(marker, visible, remaining, pulse)
-			hookMarkerHover(marker) -- weak-set no-op after the first call
+-- Re-asserted every repaint tick (and immediately on selection moves);
+-- active=false clears everything. Direct color sets, no tweens — the claim
+-- system's tweens must never be fought, only deferred to: a claimed tile
+-- keeps its danger pulse, and when the claim lapses the next tick re-tints.
+local function paintSelectionTint(active: boolean, window: GridUtil.Bounds?)
+	local wanted: { [BasePart]: Color3 } = {}
+	local lane = if active then selectionRing[selectionIndex] else nil
+	if lane then
+		for i, cell in ipairs(GridUtil.laneTiles(lane, window)) do
+			local part = tileParts[cell.row .. "_" .. cell.col]
+			if part then
+				wanted[part] = if i == 1 then SELECT_ENTRY_COLOR else SELECT_COLOR
+			end
 		end
 	end
-end
-
--- Markers replicate server-visible; hide each one the moment it arrives so
--- the living never glimpse the ring at round start (the throttled repaint
--- alone would leave a one-tick flash). The folder outlives rounds - hook it
--- once.
-local markersHooked = false
-local function ensureMarkersHook()
-	if markersHooked then
-		return
-	end
-	local markersFolder = arena and arena:FindFirstChild("RevengeMarkers")
-	if not markersFolder then
-		return
-	end
-	markersHooked = true
-	markersFolder.ChildAdded:Connect(function(marker)
-		if marker:IsA("BasePart") then
-			task.defer(function() -- let the marker's guis replicate in behind it
-				if marker.Parent then
-					paintMarker(marker, currentState == "ACTIVE" and locallyEliminated,
-						revengeReadyAt - os.clock(), 0.5)
-					hookMarkerHover(marker)
-				end
-			end)
+	for part in pairs(selectionTinted) do
+		if not wanted[part] then
+			selectionTinted[part] = nil
+			-- only restore what nothing else owns; a live claim keeps its pulse
+			if not tileRefCount[part] then
+				stopTileTween(part)
+				part.Color = originalColors[part]
+			end
 		end
-	end)
+	end
+	for part, color in pairs(wanted) do
+		selectionTinted[part] = true
+		if not tileRefCount[part] then
+			stopTileTween(part) -- a lapsing scorch-restore would repaint over us
+			part.Color = color
+		end
+	end
 end
 
 --==============================================================================
--- Arena base: same per-viewer trick as the markers. The base slab and the
+-- Arena base: per-viewer local painting. The base slab and the
 -- ring decor that sits on it (skirt, corner posts, hay, rocks) exist only
 -- for the eliminated, whose overhead bull-cam looks down on it (a floating
 -- grid over void reads wrong from above). Everyone else has
@@ -1177,51 +974,10 @@ for _, other in Players:GetPlayers() do
 end
 Players.PlayerAdded:Connect(watchGhostCandidate)
 
--- Click feedback: on an accepted throw the acked lane's marker sinks and
--- springs back. Local-only CFrame tween on the shared anchored part; the
--- rest CFrame is remembered per marker (weak keys) so a THROW_OK landing
--- mid-animation can't capture a sunk position and make the marker drift.
-local markerRestCFrames = setmetatable({} :: { [BasePart]: CFrame }, { __mode = "k" })
-
-local function pressMarkerFeedback(lane)
-	local markersFolder = arena and arena:FindFirstChild("RevengeMarkers")
-	if not (markersFolder and isLane(lane)) then
-		return
-	end
-	local target: BasePart? = nil
-	for _, marker in markersFolder:GetChildren() do
-		if marker:IsA("BasePart")
-			and marker:GetAttribute("axis") == lane.axis
-			and marker:GetAttribute("index") == lane.index
-			and marker:GetAttribute("direction") == lane.direction
-		then
-			target = marker
-			break
-		end
-	end
-	if not target then
-		return -- a shrink refresh can race the ack; skip quietly
-	end
-	local rest = markerRestCFrames[target] or target.CFrame
-	markerRestCFrames[target] = rest
-	local down = TweenService:Create(target,
-		TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{ CFrame = rest - Vector3.new(0, 0.5, 0) })
-	down.Completed:Once(function()
-		if target.Parent then
-			TweenService:Create(target,
-				TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-				{ CFrame = rest }):Play()
-		end
-	end)
-	down:Play()
-end
-
 -- Lobby BullCamPad ("Become a Bull"): stepping onto it flips the overhead
 -- bull-cam on (see updateOverhead below) - purely client-side, no server
 -- script. Only meaningful while a round is ACTIVE and you're an eliminated
--- participant, so hide it from everyone else - same visibility rule as the
--- markers. Change-only writes; unlike the per-round marker ring this part
+-- participant, so hide it from everyone else. Change-only writes; this part
 -- is permanent, so the refresh must also run OUTSIDE ACTIVE to re-hide it
 -- when the round ends.
 local bullCamPadVisible: boolean? = nil -- tri-state: nil forces the first paint
@@ -1259,7 +1015,8 @@ end
 --==============================================================================
 -- Overhead bull-cam: eliminated participants aim revenge bulls from a fixed
 -- top-down camera that frames the CURRENT window (re-framing as it shrinks),
--- clicking the arrow markers instead of walking the ring. Enter by stepping
+-- picking a lane with the arrow keys / HUD arrows (see the lane-selection
+-- sections) instead of walking the ring. Enter by stepping
 -- onto the lobby BullCamPad or via the HUD "Become a Bull" button
 -- (StarterGui.Main owns the button per the UI rule; it talks to this script
 -- through the RevengeViewBridge BindableEvent in ReplicatedStorage). The
@@ -1269,7 +1026,7 @@ end
 -- round ending.
 --==============================================================================
 
-local OVERHEAD_MARGIN = 16 -- studs beyond the window edge kept in frame (covers the marker ring)
+local OVERHEAD_MARGIN = 16 -- studs beyond the window edge kept in frame (context ground)
 local OVERHEAD_DRIFT_EXIT = 8 -- freeze-spot drift that force-exits the cam (server moved us)
 
 local overheadViewing = false
@@ -1294,14 +1051,10 @@ local function updateBridgeAttributes()
 	viewBridge:SetAttribute("Viewing", overheadViewing)
 end
 
--- Straight-down framing of the active window plus the marker ring: the eye
--- must fit BOTH the ground plane (window + margin) and the raised marker
--- plane (markers float above the guard walls so clicks can't be occluded --
--- MARKER_PLANE_LIFT mirrors RevengeService's MARKER_HOVER). Height is
--- whatever fits the tighter screen axis. Up vector is world -Z so north (row
--- 1) reads as screen-up and the shot can never roll.
-local MARKER_PLANE_LIFT = 17 -- mirror of RevengeService MARKER_HOVER
-local MARKER_RING_REACH = 11.5 -- wall 1 + gap 1.5 + full 6-stud marker + 3 pad, beyond the tile edge
+-- Straight-down framing of the active window plus a margin of surrounding
+-- ground: height is whatever fits the tighter screen axis. Up vector is
+-- world -Z so north (row rowMin) reads as screen-up and the shot can never
+-- roll — the lane-selection ring's screen ordering depends on exactly this.
 
 local function overheadCFrame(): CFrame
 	local camera = workspace.CurrentCamera
@@ -1319,11 +1072,7 @@ local function overheadCFrame(): CFrame
 	end
 	local coreX = (maxC.X - minC.X) / 2 + Config.TILE_SIZE / 2
 	local coreZ = (maxC.Z - minC.Z) / 2 + Config.TILE_SIZE / 2
-	local eyeY = math.max(
-		fitPlane(coreX + OVERHEAD_MARGIN, coreZ + OVERHEAD_MARGIN, Config.ARENA_ORIGIN.Y),
-		fitPlane(coreX + MARKER_RING_REACH, coreZ + MARKER_RING_REACH,
-			Config.ARENA_ORIGIN.Y + MARKER_PLANE_LIFT)
-	)
+	local eyeY = fitPlane(coreX + OVERHEAD_MARGIN, coreZ + OVERHEAD_MARGIN, Config.ARENA_ORIGIN.Y)
 	local eye = Vector3.new(center.X, eyeY, center.Z)
 	return CFrame.lookAt(eye, Vector3.new(center.X, Config.ARENA_ORIGIN.Y, center.Z), Vector3.new(0, 0, -1))
 end
@@ -1394,27 +1143,142 @@ local function enterOverhead()
 		overheadTweening = false
 	end)
 	swoop:Play()
-	playOneShot("chargeWhoosh", { Volume = 0.35, PlaybackSpeed = 1.1 })
+	playOneShot("chargeWhoosh", { Volume = 0.245, PlaybackSpeed = 1.1 })
 	updateBridgeAttributes()
 end
 
-viewBridge.Event:Connect(function()
-	if overheadViewing then
+--==============================================================================
+-- Revenge lane selection — state + inputs. While the bull-cam is up, ◀ ▶
+-- (Left/Right arrow keys, gamepad d-pad, or the HUD arrow buttons via the
+-- bridge) walk the clockwise ring built above; "send" (the HUD SEND BULL
+-- button) fires the RevengeThrow remote. The server re-validates everything
+-- (eliminated participant, cooldown, bounds), so all of this is pure UX.
+--==============================================================================
+
+local selectionBoundsKey = "" -- rebuild-detects window changes (round start + shrinks)
+
+local function selectionWindow(): GridUtil.Bounds
+	return lastBounds or GridUtil.boundsForStage(0)
+end
+
+local function announceSelection()
+	viewBridge:SetAttribute("SelectionText", selectionLaneText(selectionRing[selectionIndex]))
+end
+
+-- (Re)build the ring for the current window, keeping the selection on the
+-- same lane if it survived the shrink — else the nearest surviving lane on
+-- the same edge (axis + direction).
+local function refreshSelectionRing()
+	local window = selectionWindow()
+	local key = ("%d_%d_%d_%d"):format(window.rowMin, window.rowMax, window.colMin, window.colMax)
+	if key == selectionBoundsKey then
+		return
+	end
+	selectionBoundsKey = key
+	local previous = selectionRing[selectionIndex]
+	selectionRing = buildSelectionRing(window)
+	if selectionIndex ~= 0 then
+		selectionIndex = math.clamp(selectionIndex, 1, #selectionRing)
+	end
+	if previous then
+		local bestDistance = math.huge
+		for i, lane in ipairs(selectionRing) do
+			if lane.axis == previous.axis and lane.direction == previous.direction then
+				local distance = math.abs(lane.index - previous.index)
+				if distance < bestDistance then
+					bestDistance, selectionIndex = distance, i
+				end
+			end
+		end
+	end
+	announceSelection()
+end
+
+local function cycleSelection(step: number)
+	if not overheadViewing then
+		return
+	end
+	refreshSelectionRing()
+	local count = #selectionRing
+	if count == 0 then
+		return
+	end
+	selectionIndex = (math.max(selectionIndex, 1) - 1 + step) % count + 1
+	announceSelection()
+	paintSelectionTint(true, selectionWindow()) -- instant; don't wait for the tick
+	playLibSfx("Click", 0.35, 1.35) -- same blip the shop buttons use
+end
+
+local function sendSelectedBull()
+	if not (overheadViewing and revengeThrowRemote) then
+		return
+	end
+	refreshSelectionRing()
+	local lane = selectionRing[selectionIndex]
+	if not lane then
+		return
+	end
+	-- Cooldown is NOT gated here: the server throttles mashers and answers
+	-- with a red "Bull ready in Ns" card, which doubles as a resync.
+	revengeThrowRemote:FireServer({ axis = lane.axis, index = lane.index, direction = lane.direction })
+end
+
+-- One bridge, two jobs: no command = the HUD "Become a Bull" button toggling
+-- the cam (the original contract); "left"/"right"/"send" = the lane controls.
+viewBridge.Event:Connect(function(command)
+	if command == "left" then
+		cycleSelection(-1)
+	elseif command == "right" then
+		cycleSelection(1)
+	elseif command == "send" then
+		sendSelectedBull()
+	elseif overheadViewing then
 		exitOverhead()
 	else
 		enterOverhead()
 	end
 end)
 
--- Keyboard/gamepad exit; entry is the pad or the HUD button only.
+-- Keyboard/gamepad: arrows move the selection, E / gamepad B exits; entry is
+-- the pad or the HUD button only.
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed or not overheadViewing then
 		return
 	end
 	if input.KeyCode == Enum.KeyCode.E or input.KeyCode == Enum.KeyCode.ButtonB then
 		exitOverhead()
+	elseif input.KeyCode == Enum.KeyCode.Left or input.KeyCode == Enum.KeyCode.DPadLeft then
+		cycleSelection(-1)
+	elseif input.KeyCode == Enum.KeyCode.Right or input.KeyCode == Enum.KeyCode.DPadRight then
+		cycleSelection(1)
 	end
 end)
+
+-- The 0.1s repaint tick: the ring follows the shrinking window, the selected
+-- lane's tint re-asserts over lapsed danger claims, and the bridge mirrors
+-- the cooldown for the HUD SEND BULL button (integer seconds; SetAttribute
+-- is change-detected so equal writes are free).
+local function refreshRevengeSelection()
+	local active = overheadViewing and currentState == "ACTIVE" and locallyEliminated
+	if active then
+		refreshSelectionRing()
+		if selectionIndex == 0 and #selectionRing > 0 then
+			-- first-ever entry: start mid-top-edge, dead center of the screen
+			local window = selectionWindow()
+			selectionIndex = math.max(1, math.ceil((window.colMax - window.colMin + 1) / 2))
+			announceSelection()
+		end
+	end
+	paintSelectionTint(active, selectionWindow())
+	local remaining = math.max(0, revengeReadyAt - os.clock())
+	local cooling = remaining > 0
+	local eliminated = currentState == "ACTIVE" and locallyEliminated
+	if revengeWasCooling and not cooling and eliminated then
+		playLibSfx("Confirm", 0.8, 1.15) -- ready ding: your next bull is up
+	end
+	revengeWasCooling = cooling and eliminated
+	viewBridge:SetAttribute("ReadyIn", math.ceil(remaining))
+end
 
 -- Per-tick keeper (0.25s): while viewing, enforce exit conditions and keep
 -- the camera glued to the (possibly shrunken) window; while not, watch for
@@ -1505,7 +1369,7 @@ local function updateNearMisses()
 					local closeness = 1
 						- math.clamp((track.minDist - GRAZE_DEADLY) / (GRAZE_RANGE - GRAZE_DEADLY), 0, 1)
 					addTrauma(0.35 + 0.45 * closeness)
-					playOneShot("chargeWhoosh", { Volume = 0.2 + 0.35 * closeness, PlaybackSpeed = 1.25 })
+					playOneShot("chargeWhoosh", { Volume = 0.14 + 0.245 * closeness, PlaybackSpeed = 1.25 })
 					if closeness >= 0.5 then
 						-- Phone-class devices buzz only on REALLY close shaves;
 						-- gamepads already rumble via the trauma-driven motors.
@@ -1561,8 +1425,8 @@ chargeStartRemote.OnClientEvent:Connect(function(lane, duration, bounds)
 		end
 	end
 
-	playOneShot("chargeWhoosh", { Volume = 0.5, PlaybackSpeed = 0.85 })
-	local stampede = makeSound("rumble", { Volume = 0.45, Looped = true, PlaybackSpeed = 1.2 }, SoundService)
+	playOneShot("chargeWhoosh", { Volume = 0.35, PlaybackSpeed = 0.85 })
+	local stampede = makeSound("rumble", { Volume = 0.315, Looped = true, PlaybackSpeed = 1.2 }, SoundService)
 	entry.chargeSound = stampede
 	safePlay(stampede)
 	task.delay(chargeTime + 0.25, function()
@@ -1592,8 +1456,8 @@ laneClearedRemote.OnClientEvent:Connect(function(lane)
 	if dist and dist <= SHAKE_RANGE then
 		local closeness = 1 - dist / SHAKE_RANGE -- 0 at the edge, 1 on the line
 		addTrauma(0.55 + 0.45 * closeness)
-		playOneShot("slam", { Volume = 0.35 + 0.25 * closeness })
-		playOneShot("thud", { Volume = 0.3 + 0.2 * closeness, PlaybackSpeed = 0.55 })
+		playOneShot("slam", { Volume = 0.245 + 0.175 * closeness })
+		playOneShot("thud", { Volume = 0.21 + 0.14 * closeness, PlaybackSpeed = 0.55 })
 	end
 end)
 
@@ -1717,7 +1581,7 @@ if arenaShrinkRemote then
 			end
 		end
 
-		playOneShot("rumble", { Volume = 0.3, PlaybackSpeed = 0.5 })
+		playOneShot("rumble", { Volume = 0.21, PlaybackSpeed = 0.5 })
 		shrinkTremorGen += 1 -- a fresh telegraph owns the tremor now
 		tremor = TREMOR_LEVEL -- the ground trembles for the whole telegraph window
 
@@ -1747,9 +1611,9 @@ if arenaShrinkRemote then
 			-- impact, then keep the ground grumbling until the pillars land.
 			local sinkTime = (typeof(Config.SHRINK) == "table" and tonumber(Config.SHRINK.SINK_TIME)) or 1
 			addTrauma(0.5)
-			playOneShot("slam", { Volume = 0.4 })
-			playOneShot("thud", { Volume = 0.35, PlaybackSpeed = 0.5 })
-			playOneShot("rumble", { Volume = 0.5, PlaybackSpeed = 0.75 }) -- collapse roar over the fall
+			playOneShot("slam", { Volume = 0.28 })
+			playOneShot("thud", { Volume = 0.245, PlaybackSpeed = 0.5 })
+			playOneShot("rumble", { Volume = 0.35, PlaybackSpeed = 0.75 }) -- collapse roar over the fall
 			shrinkTremorGen += 1
 			local gen = shrinkTremorGen
 			tremor = TREMOR_LEVEL * 1.5
@@ -1789,8 +1653,7 @@ eliminatedRemote.OnClientEvent:Connect(function(playerName, aliveCount, cause)
 		refreshArenaBase() -- the ring appears the instant you fall
 		addTrauma(MAX_TRAUMA) -- trampled: the hardest hit the shake system allows
 		playHapticPulse("GameplayExplosion") -- phones etc; gamepads peak via the trauma-driven motors
-		showEliminatedOverlay()
-		playOneShot("thud", { Volume = 0.6, PlaybackSpeed = 0.5 })
+		playOneShot("thud", { Volume = 0.42, PlaybackSpeed = 0.5 })
 		updateBridgeAttributes() -- the HUD "Become a Bull" button appears now
 	end
 	refreshGhosts() -- hides the new ghost -- or, if WE just died, reveals them all
@@ -1805,8 +1668,7 @@ if revengeAckRemote then
 				or (typeof(Config.REVENGE) == "table" and tonumber(Config.REVENGE.COOLDOWN))
 				or 15
 			revengeReadyAt = os.clock() + cooldown
-			pressMarkerFeedback(if typeof(data) == "table" then data.lane else nil) -- the marker sinks + springs back
-			playOneShot("thud", { Volume = 0.4, PlaybackSpeed = 0.9 }) -- launch feedback
+			playOneShot("thud", { Volume = 0.28, PlaybackSpeed = 0.9 }) -- launch feedback
 			addTrauma(0.5) -- the stomp lands: kick the thrower's camera too
 			playHapticPulse("GameplayCollision")
 			playLibSfx("Confirm", 0.9)
@@ -1820,8 +1682,8 @@ if revengeAckRemote then
 				else ("TRAMPLED %s!"):format(victim))
 			addTrauma(0.35)
 			playHapticPulse("GameplayCollision")
-			playOneShot("slam", { Volume = 0.45 })
-			playOneShot("thud", { Volume = 0.35, PlaybackSpeed = 0.6 })
+			playOneShot("slam", { Volume = 0.315 })
+			playOneShot("thud", { Volume = 0.245, PlaybackSpeed = 0.6 })
 		elseif kind == "DENIED" and typeof(data) == "table" then
 			-- Server-authoritative resync (e.g. we rejoined mid-cooldown and
 			-- our local timer reads READY): adopt the server's remaining time.
@@ -1915,18 +1777,14 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 	end
 
-	-- Revenge marker repaint (world buttons), throttled: visibility + glow +
-	-- countdown are a per-viewer local paint. 0.1s keeps the ready pulse
-	-- smooth without per-frame property churn. The hook is ensured every
-	-- frame (cheap flag check) so marker spawns are hidden the instant they
-	-- replicate, even before the first ACTIVE tick.
-	ensureMarkersHook()
-	if currentState == "ACTIVE" then
-		revengeRefreshAccum += dt
-		if revengeRefreshAccum >= 0.1 then
-			revengeRefreshAccum = 0
-			refreshRevengeMarkers()
-		end
+	-- Revenge lane-select repaint, throttled to 0.1s: selection tint, ring
+	-- rebuilds after shrinks, and the HUD cooldown mirror. Runs in EVERY
+	-- round state (not just ACTIVE) so a round ending mid-view clears the
+	-- lane tint within a tick.
+	revengeRefreshAccum += dt
+	if revengeRefreshAccum >= 0.1 then
+		revengeRefreshAccum = 0
+		refreshRevengeSelection()
 	end
 
 	-- Arena base + ghost repaint, throttled: cheap safety net behind the

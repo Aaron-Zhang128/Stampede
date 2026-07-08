@@ -27,6 +27,15 @@ local connections: { RBXScriptConnection } = {}
 local startCount = 0
 local deferStreakReset = false
 
+-- Alive-set fast paths. aliveCountValue is kept in lockstep with `alive` so
+-- aliveCount() is O(1) instead of walking the dict (it's polled many times per
+-- wave). aliveListCache backs getAliveCached() for the per-frame bull kill loop:
+-- it's rebuilt only when membership changes (aliveDirty), so 60fps × N-bulls
+-- polling costs zero allocations between eliminations.
+local aliveCountValue = 0
+local aliveListCache: { Player } = {}
+local aliveDirty = true
+
 -- Bots (see AIService) duck-type Player as plain tables. They flow through
 -- the alive set like anyone else but must never touch persistent data.
 local function isRealPlayer(player): boolean
@@ -47,6 +56,9 @@ function RoundService.startRound(participants: { Player }, deferStreaks: boolean
 	startCount = #participants
 	deferStreakReset = deferStreaks == true
 	for _, player in participants do
+		if not alive[player] then
+			aliveCountValue += 1
+		end
 		alive[player] = true
 		participantSet[player] = true
 		local character = player.Character
@@ -58,6 +70,7 @@ function RoundService.startRound(participants: { Player }, deferStreaks: boolean
 			end))
 		end
 	end
+	aliveDirty = true
 	table.insert(connections, Players.PlayerRemoving:Connect(function(player)
 		RoundService.eliminate(player)
 	end))
@@ -70,6 +83,8 @@ function RoundService.eliminate(player: Player, cause: string?)
 		return
 	end
 	alive[player] = nil
+	aliveCountValue -= 1
+	aliveDirty = true
 
 	-- Bull hits kill the character; Health = 0 re-triggers Died ->
 	-- eliminate, which is a no-op now that the player left the alive set.
@@ -139,6 +154,8 @@ function RoundService.resetStreak(player: Player)
 	end
 end
 
+-- Fresh, caller-owned copy: safe to hold onto or mutate. Use this for anything
+-- that isn't a per-frame poll (bounds watcher, round-end settlement, ...).
 function RoundService.getAlive(): { Player }
 	local list = {}
 	for player in alive do
@@ -147,12 +164,24 @@ function RoundService.getAlive(): { Player }
 	return list
 end
 
-function RoundService.aliveCount(): number
-	local count = 0
-	for _ in alive do
-		count += 1
+-- SHARED, READ-ONLY alive list rebuilt only when membership changes. For the
+-- per-frame bull kill loop (BullService), which polls every Heartbeat per bull
+-- and never mutates the result. Callers MUST NOT modify or retain it across a
+-- membership change. Eliminations mark it dirty, so a mid-charge death still
+-- drops out on the next Heartbeat.
+function RoundService.getAliveCached(): { Player }
+	if aliveDirty then
+		table.clear(aliveListCache)
+		for player in alive do
+			table.insert(aliveListCache, player)
+		end
+		aliveDirty = false
 	end
-	return count
+	return aliveListCache
+end
+
+function RoundService.aliveCount(): number
+	return aliveCountValue
 end
 
 -- Number of players the round started with (0 outside a round).
@@ -171,6 +200,9 @@ function RoundService.cleanup()
 	table.clear(connections)
 	table.clear(alive)
 	table.clear(participantSet)
+	table.clear(aliveListCache)
+	aliveCountValue = 0
+	aliveDirty = true
 	startCount = 0
 	deferStreakReset = false
 end

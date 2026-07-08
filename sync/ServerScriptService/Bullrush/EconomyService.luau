@@ -229,10 +229,25 @@ function EconomyService.settle(winnerInfo: { [string]: any })
 end
 
 --==============================================================================
--- "2x Rewards?" dev product
+-- Dev products: registered handlers + the built-in "2x Rewards?"
 --==============================================================================
 
+-- Other services sell products too (BullRollService's Robux rolls), but this
+-- module owns the game's single ProcessReceipt - they register here instead.
+-- Handlers get (receipt, player?) and return a ProductPurchaseDecision.
+local productHandlers: { [number]: (receipt: any, player: Player?) -> Enum.ProductPurchaseDecision } = {}
+
+function EconomyService.registerProduct(productId: number, handler: (receipt: any, player: Player?) -> Enum.ProductPurchaseDecision)
+	if productId ~= 0 then -- 0 = not configured yet (place unpublished)
+		productHandlers[productId] = handler
+	end
+end
+
 local function onReceipt(receipt)
+	local handler = productHandlers[receipt.ProductId]
+	if handler then
+		return handler(receipt, Players:GetPlayerByUserId(receipt.PlayerId))
+	end
 	if Config.PRODUCTS.DOUBLE_ROUND == 0
 		or receipt.ProductId ~= Config.PRODUCTS.DOUBLE_ROUND
 	then

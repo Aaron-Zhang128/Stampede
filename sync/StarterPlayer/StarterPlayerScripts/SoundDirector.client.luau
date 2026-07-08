@@ -126,8 +126,8 @@ local function makeBed(name: string): Sound?
 	return bed
 end
 
-local MUSIC_LOBBY_VOL = 0.5
-local MUSIC_BATTLE_VOL = 0.55
+local MUSIC_LOBBY_VOL = 0.35
+local MUSIC_BATTLE_VOL = 0.385
 local MUSIC_FADE = 1.5
 
 -- Track-to-slot map flipped 2026-07-03 (user: "Theme" is the calmer loop,
@@ -156,7 +156,7 @@ end
 -- Final-two heartbeat: routed to the SFX group so it sits with the tension FX,
 -- not the music mix.
 local HEARTBEAT_AT = 2
-local HEARTBEAT_VOL = 0.55
+local HEARTBEAT_VOL = 0.385
 
 local heartbeatBed = makeBed("Heartbeat")
 if heartbeatBed and sfxGroup then
@@ -221,31 +221,31 @@ roundStateRemote.OnClientEvent:Connect(function(state, info)
 		-- Mode reveal sting once on entry (the server re-sends INTERMISSION
 		-- every second as it counts down).
 		if previousState ~= "INTERMISSION" then
-			playSfx("Reveal", 0.8)
+			playSfx("Reveal", 0.56)
 		end
 		-- Final three ticks, rising on the last one.
 		local t = tonumber(info.timeLeft)
 		if t == 3 or t == 2 then
-			playSfx("Ticker", 1.0, 1.0)
+			playSfx("Ticker", 0.7, 1.0)
 		elseif t == 1 then
-			playSfx("Ticker", 1.0, 1.3)
+			playSfx("Ticker", 0.7, 1.3)
 		end
 	elseif state == "ACTIVE" then
 		-- Kickoff whoosh, only on a real intermission->active handoff (never on
 		-- a mid-round join).
 		if previousState == "INTERMISSION" then
-			playSfx("Spin_Start", 0.8)
+			playSfx("Spin_Start", 0.56)
 		end
 		setHeartbeat(tonumber(info.aliveCount))
 	elseif state == "WINNER" then
 		setHeartbeat(0) -- duel's over
-		playSfx("winner!", 1.0)
+		playSfx("winner!", 0.7)
 		if localWon(info) then
-			playSfx("Cash", 1.0)
+			playSfx("Cash", 0.7)
 		end
 	elseif state == "ROUNDOVER" then
 		setHeartbeat(0)
-		playSfx("Lose sound effects", 0.8)
+		playSfx("Lose sound effects", 0.56)
 	elseif state == "WAITING" then
 		setHeartbeat(0)
 	end
@@ -258,7 +258,7 @@ end)
 -- heartbeat as the field narrows to a duel.
 eliminatedRemote.OnClientEvent:Connect(function(playerName, aliveCount)
 	if playerName == player.Name then
-		playSfx("C Hitsound", 0.85)
+		playSfx("C Hitsound", 0.595)
 	end
 	setHeartbeat(tonumber(aliveCount))
 end)
@@ -267,7 +267,7 @@ end)
 if revengeAckRemote then
 	revengeAckRemote.OnClientEvent:Connect(function(kind)
 		if kind == "HIT" then
-			playSfx("Cash", 1.0)
+			playSfx("Cash", 0.7)
 		end
 	end)
 end

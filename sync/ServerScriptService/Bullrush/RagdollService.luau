@@ -73,7 +73,7 @@ local function impactBurst(position: Vector3)
 	emitter.Parent = part
 	local sound = Instance.new("Sound")
 	sound.SoundId = "rbxassetid://" .. IMPACT_SOUND_ID
-	sound.Volume = 0.9
+	sound.Volume = 0.63
 	sound.PlaybackSpeed = 0.75
 	sound.RollOffMaxDistance = 140
 	sound.Parent = part

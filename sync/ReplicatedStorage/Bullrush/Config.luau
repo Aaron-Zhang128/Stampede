@@ -45,6 +45,39 @@ Config.ECONOMY = {
 -- ProcessReceipt leaves unknown products untouched.
 Config.PRODUCTS = {
 	DOUBLE_ROUND = 0,             -- Summary tab "2x Rewards?": doubles that round's payout
+	BULL_ROLL = 0,                -- 1 bull roll for Robux (BullRollService)
+	BULL_ROLL_10 = 0,             -- 10 bull rolls for Robux
+	SPIN_1 = 0,                   -- 1 fortune-wheel spin (SpinService); UI prices it 99 R$
+	SPIN_10 = 0,                  -- 10 fortune-wheel spins; UI prices it 699 R$
+}
+
+-- Fortune wheel (Frames.Spinner UI + the lobby wheel model): one free spin
+-- banked every FREE_SPIN_INTERVAL, more via the SPIN_1/SPIN_10 products.
+-- REWARDS is indexed by UI slice (Wheel.Spin.<i>); the client paints each
+-- slice's label + chance from this table so the wheel can never lie about
+-- its odds. weights sum to 100. kind:
+--   money  grants amount (raw - a prize, not round earnings, so no boosts)
+--   bull   grants bullId from BullCatalog; already owned -> consolation Money
+--   spin   grants amount spins back (the "free respin" slice)
+Config.SPINNER = {
+	FREE_SPIN_INTERVAL = 12 * 3600,  -- a free spin banks twice a day
+	SPIN_DURATION = 6,            -- seconds of wheel animation (classic decelerate)
+	REWARDS = {
+		{ kind = "bull",  bullId = "LA_VACCA", label = "La Vacca", weight = 4, consolation = 400 },
+		{ kind = "money", amount = 100,  label = "+100",     weight = 30 },
+		{ kind = "money", amount = 250,  label = "+250",     weight = 22 },
+		{ kind = "money", amount = 2000, label = "JACKPOT",  weight = 5 },
+		{ kind = "spin",  amount = 1,    label = "+1 Spin",  weight = 15 },
+		{ kind = "money", amount = 500,  label = "+500",     weight = 24 },
+	},
+}
+
+-- Bull rolls: players spend Money to roll the shared BullCatalog
+-- (ReplicatedStorage.Bullrush.BullCatalog - rarities, weights, speeds); the
+-- EQUIPPED bull's speed replaces REVENGE.SPEED on the bull-cam throw.
+-- Duplicate pulls refund ROLL_COST * rarity.dupeRefund Money.
+Config.BULLS = {
+	ROLL_COST = 200,              -- Money per roll (~2 decent rounds of earnings)
 }
 
 -- Revenge bulls: eliminated participants may send a bull down a lane of the
@@ -91,9 +124,9 @@ Config.SHRINK = {
 -- parameter lerps START -> FINAL. Modes may override rampTime and/or the
 -- whole START/FINAL pair (see MODES below).
 Config.DIFFICULTY = {
-	RAMP_TIME = 150,
-	START = { telegraph = 1.8, gap = 2.4, speed = 38, bulls = 1 },
-	FINAL = { telegraph = 1.0, gap = 0.8, speed = 60, bulls = 4 },
+	RAMP_TIME = 90,
+	START = { telegraph = 1.4, gap = 1.3, speed = 44, bulls = 2 },
+	FINAL = { telegraph = 0.9, gap = 0.55, speed = 62, bulls = 4 },
 }
 
 -- Game modes. Main picks one per round: weighted random among modes whose
@@ -112,44 +145,44 @@ Config.MODES = {
 	{
 		id = "CLASSIC", name = "Classic", weight = 3, minPlayers = 1,
 		startSize = 7,
-		shrink = { times = { 45, 90, 135 }, aliveFractions = { 0.75, 0.5, 0.25 } },
-		rampTime = 150,
+		shrink = { times = { 30, 60, 90 }, aliveFractions = { 0.75, 0.5, 0.25 } },
+		rampTime = 90,
 	},
 	{
 		id = "MEGA", name = "Mega Grid", weight = 2, minPlayers = 1,
 		startSize = 9,
-		shrink = { times = { 40, 80, 120, 160 }, aliveFractions = { 0.8, 0.6, 0.4, 0.2 } },
-		rampTime = 170,
+		shrink = { times = { 30, 60, 90, 115 }, aliveFractions = { 0.8, 0.6, 0.4, 0.2 } },
+		rampTime = 105,
 		moneyMult = 1.1,
 	},
 	{
 		id = "SMALL", name = "Small Grid", weight = 2, minPlayers = 1,
 		startSize = 5,
-		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
-		rampTime = 100,
+		shrink = { times = { 25, 50 }, aliveFractions = { 0.6, 0.3 } },
+		rampTime = 60,
 		moneyMult = 1.15,
 		difficulty = {
-			START = { telegraph = 1.8, gap = 2.4, speed = 38, bulls = 1 },
-			FINAL = { telegraph = 1.0, gap = 0.8, speed = 56, bulls = 3 },
+			START = { telegraph = 1.4, gap = 1.3, speed = 40, bulls = 2 },
+			FINAL = { telegraph = 0.9, gap = 0.55, speed = 56, bulls = 3 },
 		},
 	},
 	{
 		id = "STAMPEDE", name = "Stampede", weight = 2, minPlayers = 1,
 		startSize = 7,
-		shrink = { times = { 45, 90, 135 }, aliveFractions = { 0.75, 0.5, 0.25 } },
-		rampTime = 130,
+		shrink = { times = { 30, 60, 90 }, aliveFractions = { 0.75, 0.5, 0.25 } },
+		rampTime = 75,
 		moneyMult = 1.25,
 		difficulty = {
-			START = { telegraph = 1.8, gap = 2.6, speed = 38, bulls = 2 },
-			FINAL = { telegraph = 0.9, gap = 0.8, speed = 62, bulls = 5 },
+			START = { telegraph = 1.4, gap = 1.4, speed = 44, bulls = 2 },
+			FINAL = { telegraph = 0.85, gap = 0.5, speed = 62, bulls = 5 },
 		},
 	},
 	{
 		id = "TEAMS", name = "Team Rush", weight = 2, minPlayers = 2,
 		teams = true,
 		startSize = 7,
-		shrink = { times = { 45, 90, 135 }, aliveFractions = { 0.75, 0.5, 0.25 } },
-		rampTime = 150,
+		shrink = { times = { 30, 60, 90 }, aliveFractions = { 0.75, 0.5, 0.25 } },
+		rampTime = 90,
 	},
 }
 
