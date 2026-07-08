@@ -77,7 +77,6 @@ end
 -- Late joiners get the current state so their HUD syncs; they are never
 -- added to a round in progress (LobbySpawn handles their placement).
 Players.PlayerAdded:Connect(function(player)
-	NotifyService.broadcast(player.DisplayName .. " joined the stampede", "white")
 	Remotes.RoundState:FireClient(player, currentState, currentInfo)
 	task.delay(3, function() -- re-fire in case their LocalScript wasn't listening yet
 		if player.Parent then

@@ -6,7 +6,8 @@
 	reset(startSize, stages) configures the round: tiles inside the window are
 	restored (checkerboard, canonical height, visible), tiles OUTSIDE it vanish
 	into the pit immediately (no telegraph - they were never in play). Stage 0 =
-	the full window; advanceTo() then trims per stage via GridUtil.boundsForStage.
+	the full window; advanceTo() then peels one full outer ring per stage via
+	GridUtil.boundsForStage.
 
 	advanceTo() is BLOCKING: per step it fires ArenaShrink, waits out the
 	telegraph, then drops the removed pillars (server-side position tween +
@@ -110,7 +111,9 @@ function ShrinkService.reset(newStartSize: number?, stages: number?)
 	sinkGeneration += 1 -- any in-flight sink loop bails on its next frame
 
 	startSize = newStartSize or Config.GRID_SIZE
-	maxStage = stages or 0
+	-- Each stage peels a full outer ring (side length -2); never let the
+	-- window shrink below 3x3, whatever the mode's schedule says.
+	maxStage = math.min(stages or 0, math.floor((startSize - 3) / 2))
 	stage = 0
 	bounds = GridUtil.boundsForStage(0, startSize)
 	updateWalls(bounds)

@@ -117,7 +117,7 @@ Config.SHRINK = {
 	TELEGRAPH = 3.0,              -- doomed tiles flash this long before dropping
 	GRACE = 1.5,                  -- seconds a player may stand out of bounds before elimination
 	SINK_DEPTH = 110,             -- pillars plunge this far; tops rest 90 below the grid, so the whole 80-stud column falls clear of the skyline
-	SINK_TIME = 1.1,              -- pillar fall duration (quad ease-in over 110 studs ~ true gravity)
+	SINK_TIME = 1.6,              -- pillar fall duration (quad ease-in; slower than true gravity for a readable crumble)
 }
 
 -- Base bull difficulty: intensity = min(elapsed / rampTime, 1), every
@@ -135,7 +135,9 @@ Config.DIFFICULTY = {
 --   startSize      side length of the starting window (odd, <= GRID_SIZE)
 --   shrink.times   stage i fires at times[i] seconds into the round...
 --   shrink.aliveFractions  ...OR when alive/starters <= aliveFractions[i],
---                  whichever comes first; #times = total shrink stages
+--                  whichever comes first; #times = total shrink stages.
+--                  Each stage peels one full outer ring (side length -2);
+--                  ShrinkService caps stages so the window never dips below 3x3
 --   rampTime       overrides DIFFICULTY.RAMP_TIME for this mode
 --   difficulty     overrides DIFFICULTY.START/FINAL wholesale (optional)
 --   moneyMult      round-earnings multiplier (harder modes pay more; default 1)
@@ -145,20 +147,20 @@ Config.MODES = {
 	{
 		id = "CLASSIC", name = "Classic", weight = 3, minPlayers = 1,
 		startSize = 7,
-		shrink = { times = { 30, 60, 90 }, aliveFractions = { 0.75, 0.5, 0.25 } },
+		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
 		rampTime = 90,
 	},
 	{
 		id = "MEGA", name = "Mega Grid", weight = 2, minPlayers = 1,
 		startSize = 9,
-		shrink = { times = { 30, 60, 90, 115 }, aliveFractions = { 0.8, 0.6, 0.4, 0.2 } },
+		shrink = { times = { 30, 65, 100 }, aliveFractions = { 0.75, 0.5, 0.25 } },
 		rampTime = 105,
 		moneyMult = 1.1,
 	},
 	{
 		id = "SMALL", name = "Small Grid", weight = 2, minPlayers = 1,
 		startSize = 5,
-		shrink = { times = { 25, 50 }, aliveFractions = { 0.6, 0.3 } },
+		shrink = { times = { 35 }, aliveFractions = { 0.45 } },
 		rampTime = 60,
 		moneyMult = 1.15,
 		difficulty = {
@@ -169,7 +171,7 @@ Config.MODES = {
 	{
 		id = "STAMPEDE", name = "Stampede", weight = 2, minPlayers = 1,
 		startSize = 7,
-		shrink = { times = { 30, 60, 90 }, aliveFractions = { 0.75, 0.5, 0.25 } },
+		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
 		rampTime = 75,
 		moneyMult = 1.25,
 		difficulty = {
@@ -181,7 +183,7 @@ Config.MODES = {
 		id = "TEAMS", name = "Team Rush", weight = 2, minPlayers = 2,
 		teams = true,
 		startSize = 7,
-		shrink = { times = { 30, 60, 90 }, aliveFractions = { 0.75, 0.5, 0.25 } },
+		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
 		rampTime = 90,
 	},
 }

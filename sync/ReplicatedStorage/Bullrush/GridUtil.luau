@@ -101,30 +101,20 @@ end
 
 -- Active window for a shrink stage. startSize (default GRID_SIZE) is the
 -- side length of the stage-0 window, centered in the physical grid (both
--- must be odd so the offset is an integer). Each subsequent stage trims one
--- row AND one col, alternating sides starting with the MAX side, e.g.
--- startSize 7 in the 9x9 grid:
---   stage 0 = { 2, 8, 2, 8 }, stage 1 = { 2, 7, 2, 7 },
---   stage 2 = { 3, 7, 3, 7 }, stage 3 = { 3, 6, 3, 6 }
+-- must be odd so the offset is an integer). Each subsequent stage peels one
+-- full OUTER RING: all four bounds move in by 1, so the window stays
+-- centered and its side length drops by 2, e.g. startSize 7 in the 9x9 grid:
+--   stage 0 = { 2, 8, 2, 8 } (7x7), stage 1 = { 3, 7, 3, 7 } (5x5),
+--   stage 2 = { 4, 6, 4, 6 } (3x3)
 function GridUtil.boundsForStage(stage: number, startSize: number?): Bounds
 	local size = startSize or GRID_SIZE
 	local offset = math.floor((GRID_SIZE - size) / 2)
-	local bounds = {
-		rowMin = 1 + offset,
-		rowMax = GRID_SIZE - offset,
-		colMin = 1 + offset,
-		colMax = GRID_SIZE - offset,
+	return {
+		rowMin = 1 + offset + stage,
+		rowMax = GRID_SIZE - offset - stage,
+		colMin = 1 + offset + stage,
+		colMax = GRID_SIZE - offset - stage,
 	}
-	for step = 1, stage do
-		if step % 2 == 1 then
-			bounds.rowMax -= 1
-			bounds.colMax -= 1
-		else
-			bounds.rowMin += 1
-			bounds.colMin += 1
-		end
-	end
-	return bounds
 end
 
 -- Whether tile (row, col) lies inside the active window.

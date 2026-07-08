@@ -5,7 +5,9 @@
 	  3. Button feel    — hover grow + press squash on every button
 	  4. Ambient life   — floating lucky blocks, breathing starbursts, swaying SALE!/header icons, pulsing "!"
 	  5. Marquees       — lucky block cards scroll their possible items
-	  6. Notifications  — server-pushed red/green/white info cards (Remotes.Notify)
+	  6. Notifications  — server-pushed red/green/white info cards (Remotes.Notify);
+	                      plus the elimination side feed on the right edge — head
+	                      shot + red ELIMINATED per victim (Remotes.Eliminated)
 	  7. HUD counters   — Cash mirrors leaderstats.Money, Speed mirrors Humanoid.WalkSpeed
 	  8. Round summary  — Frames.Summary auto-opens once you're back in the lobby
 	                      with the winner's portrait, your placement, and your
@@ -715,6 +717,134 @@ task.spawn(function()
 	end)
 end)
 
+-- Elimination side feed: eliminations skip the notif card stack and show on
+-- the right edge instead — just the victim's head shot and red ELIMINATED
+-- lettering, newest on top. Lives in notifGui so panels can't cover it.
+local ELIM_LIFETIME = 3
+local ELIM_MAX = 6
+
+local elimStack = Instance.new("Frame")
+elimStack.Name = "ElimStack"
+elimStack.AnchorPoint = Vector2.new(1, 0.5)
+elimStack.Position = UDim2.new(1, -10, 0.45, 0)
+elimStack.Size = UDim2.new(0, 230, 0, 320)
+elimStack.BackgroundTransparency = 1
+elimStack.Parent = notifGui
+
+local elimLayout = Instance.new("UIListLayout")
+elimLayout.FillDirection = Enum.FillDirection.Vertical
+elimLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+elimLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+elimLayout.SortOrder = Enum.SortOrder.LayoutOrder
+elimLayout.Padding = UDim.new(0, 6)
+elimLayout.Parent = elimStack
+
+local elimCounter = 0
+
+local function pushElim(playerName)
+	elimCounter += 1
+	local row = Instance.new("Frame")
+	row.Name = "Elim" .. elimCounter
+	row.LayoutOrder = -elimCounter -- newest on top
+	row.Size = UDim2.new(1, 0, 0, 44)
+	row.BackgroundTransparency = 1
+
+	-- Head banner: the victim's avatar head shot, on the LEFT of the row
+	-- (ELIMINATED lettering right-aligned beside it). Bots aren't real
+	-- players (no UserId to thumbnail), so their rows are lettering only.
+	local victim = Players:FindFirstChild(playerName)
+	local head
+	if victim and victim:IsA("Player") and victim.UserId > 0 then
+		head = Instance.new("ImageLabel")
+		head.Name = "Head"
+		head.AnchorPoint = Vector2.new(0, 0.5)
+		head.Position = UDim2.new(0, 0, 0.5, 0)
+		head.Size = UDim2.new(0, 40, 0, 40)
+		head.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+		head.BackgroundTransparency = 0.25
+		head.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=48&h=48"):format(victim.UserId)
+		local headCorner = Instance.new("UICorner")
+		headCorner.CornerRadius = UDim.new(1, 0)
+		headCorner.Parent = head
+		head.Parent = row
+	end
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Text"
+	label.AnchorPoint = Vector2.new(1, 0.5)
+	label.Position = UDim2.new(1, 0, 0.5, 0)
+	label.Size = UDim2.new(1, if head then -46 else 0, 0, 26)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBlack
+	label.Text = "ELIMINATED"
+	label.TextScaled = true
+	label.TextXAlignment = Enum.TextXAlignment.Right
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(0, 0, 0)
+	stroke.Thickness = 2
+	stroke.Parent = label
+	-- Same red glyph ramp as the notif cards' "red" style.
+	local textGradient = Instance.new("UIGradient")
+	textGradient.Rotation = 90
+	textGradient.Color = NOTIF_TEXT_TINTS.red
+	textGradient.Parent = label
+	label.Parent = row
+
+	row.Parent = elimStack
+
+	-- Evict the oldest row once the feed is full (highest LayoutOrder).
+	local rows = {}
+	for _, r in ipairs(elimStack:GetChildren()) do
+		if r:IsA("Frame") then
+			table.insert(rows, r)
+		end
+	end
+	if #rows > ELIM_MAX then
+		table.sort(rows, function(a, b)
+			return a.LayoutOrder > b.LayoutOrder
+		end)
+		rows[1]:Destroy()
+	end
+
+	local scale = ensureScale(row)
+	scale.Scale = 0.6
+	tween(scale, POP_IN, { Scale = 1 })
+
+	task.delay(ELIM_LIFETIME, function()
+		if not row.Parent then
+			return -- already evicted
+		end
+		tween(label, TweenInfo.new(0.35), { TextTransparency = 1 })
+		tween(stroke, TweenInfo.new(0.35), { Transparency = 1 })
+		if head then
+			tween(head, TweenInfo.new(0.35), {
+				ImageTransparency = 1,
+				BackgroundTransparency = 1,
+			})
+		end
+		task.delay(0.4, function()
+			row:Destroy()
+		end)
+	end)
+end
+
+task.spawn(function()
+	local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+	local remotes = bullrush and bullrush:FindFirstChild("Remotes")
+	local elimRemote = remotes and remotes:FindFirstChild("Eliminated")
+	if not (elimRemote and elimRemote:IsA("RemoteEvent")) then
+		warn("[Main] Eliminated remote missing; elimination feed disabled")
+		return
+	end
+	elimRemote.OnClientEvent:Connect(function(playerName)
+		if typeof(playerName) ~= "string" or playerName == "" then
+			return
+		end
+		pushElim(playerName)
+	end)
+end)
+
 ---------------------------------------------------------------- 7) HUD counters
 -- Live readouts for the SideUI.Counters row: Cash shows leaderstats.Money
 -- (DataHandler mirrors the profile there) and Speed shows the character's
@@ -1281,6 +1411,34 @@ do
 		local productIds = { SPIN_1 = 0, SPIN_10 = 0 }
 		local spinning = false
 
+		-- the lobby wheel's FACE is a SurfaceGui replica of this window's
+		-- wheel, painted from the same reward table (surfaceDial = its dial;
+		-- built once the wheel model resolves, further down). Config and the
+		-- wheel model arrive on independent clocks, so painting is a shared
+		-- function both waiters call.
+		local spinnerRewards, surfaceDial
+
+		local function paintDial(dial)
+			if not (dial and spinnerRewards) then
+				return
+			end
+			for i, reward in ipairs(spinnerRewards) do
+				local slice = dial:FindFirstChild(tostring(i))
+				local nameLabel = slice and slice:FindFirstChild("Name")
+				local chanceLabel = slice and slice:FindFirstChild("Chance")
+				if nameLabel and nameLabel:IsA("TextLabel") then
+					nameLabel.Text = tostring(reward.label)
+				end
+				if chanceLabel and chanceLabel:IsA("TextLabel") then
+					chanceLabel.Text = tostring(reward.weight) .. "%"
+				end
+			end
+		end
+
+		-- both spinners share the dial-angle math (slice 1 up at angle 0);
+		-- parking the UI dial at 0 keeps them mirrored from the first frame
+		spinDial.Rotation = 0
+
 		-- one-shot library sounds (same clone-and-reap idiom as playUiSound,
 		-- but by name - the spinner uses more of the kit than Click)
 		local function playSfx(name, volume, pitch)
@@ -1314,28 +1472,52 @@ do
 			end
 		end
 
-		local function refreshTimer()
-			if not (timerLabel and timerLabel:IsA("TextLabel")) then
-				return
-			end
+		-- billboardLabel floats over the lobby wheel (built once the wheel
+		-- model resolves, further down); the window's Timer label and the
+		-- billboard both repaint from the same clock.
+		local billboardLabel, billboardReadyGradient
+
+		local function timerText()
 			local nextAt = tonumber(player:GetAttribute("NextFreeSpin"))
 			if not nextAt then
-				timerLabel.Text = ""
-				return
+				return nil
 			end
 			local remaining = math.floor(nextAt - workspace:GetServerTimeNow())
 			if remaining <= 0 then
-				timerLabel.Text = "Free spin ready…"
+				return "Free spin ready…"
 			elseif remaining >= 3600 then
-				timerLabel.Text = ("Free spin in %dh %dm"):format(remaining // 3600, (remaining % 3600) // 60)
+				return ("Free spin in %dh %dm"):format(remaining // 3600, (remaining % 3600) // 60)
 			elseif remaining >= 60 then
-				timerLabel.Text = ("Free spin in %dm %ds"):format(remaining // 60, remaining % 60)
+				return ("Free spin in %dm %ds"):format(remaining // 60, remaining % 60)
 			else
-				timerLabel.Text = ("Free spin in %ds"):format(remaining)
+				return ("Free spin in %ds"):format(remaining)
 			end
 		end
 
-		player:GetAttributeChangedSignal("Spins"):Connect(refreshSpinCount)
+		local function refreshTimer()
+			local text = timerText()
+			if timerLabel and timerLabel:IsA("TextLabel") then
+				timerLabel.Text = text or ""
+			end
+			-- over the wheel, banked spins trump the countdown, and the
+			-- money-green gradient flags that there's something to claim
+			if billboardLabel then
+				local spins = tonumber(player:GetAttribute("Spins")) or 0
+				if spins > 0 then
+					billboardLabel.Text = spins == 1 and "FREE SPIN READY!" or ("%d SPINS READY!"):format(spins)
+				else
+					billboardLabel.Text = text or ""
+				end
+				if billboardReadyGradient then
+					billboardReadyGradient.Enabled = spins > 0
+				end
+			end
+		end
+
+		player:GetAttributeChangedSignal("Spins"):Connect(function()
+			refreshSpinCount()
+			refreshTimer() -- the billboard's READY state rides the spin count
+		end)
 		player:GetAttributeChangedSignal("NextFreeSpin"):Connect(refreshTimer)
 		refreshSpinCount()
 		task.spawn(function()
@@ -1466,17 +1648,9 @@ do
 				end
 				-- slice labels + odds come from the shared reward table
 				if typeof(bullrushConfig.SPINNER) == "table" then
-					for i, reward in ipairs(bullrushConfig.SPINNER.REWARDS) do
-						local slice = spinDial:FindFirstChild(tostring(i))
-						local nameLabel = slice and slice:FindFirstChild("Name")
-						local chanceLabel = slice and slice:FindFirstChild("Chance")
-						if nameLabel and nameLabel:IsA("TextLabel") then
-							nameLabel.Text = tostring(reward.label)
-						end
-						if chanceLabel and chanceLabel:IsA("TextLabel") then
-							chanceLabel.Text = tostring(reward.weight) .. "%"
-						end
-					end
+					spinnerRewards = bullrushConfig.SPINNER.REWARDS
+					paintDial(spinDial)
+					paintDial(surfaceDial)
 				end
 			end
 
@@ -1516,6 +1690,93 @@ do
 						openFrame(spinnerFrame)
 					end
 				end)
+			end
+
+			-- free-spin timer floating over the wheel, dressed in the kit's
+			-- own look: the label is a CLONE of the window's Timer (font,
+			-- stroke and color travel with it), and the READY green is the
+			-- HUD Cash counter's gradient. Lives in PlayerGui with the wheel
+			-- as adornee, so each player reads their own clock.
+			if timerLabel and timerLabel:IsA("TextLabel") then
+				local billboard = Instance.new("BillboardGui")
+				billboard.Name = "SpinTimerBillboard"
+				billboard.Adornee = wheelModel
+				billboard.Size = UDim2.new(16, 0, 3.4, 0) -- studs
+				billboard.StudsOffsetWorldSpace = Vector3.new(0, 9.5, 0)
+				billboard.MaxDistance = 120
+				billboard.LightInfluence = 0
+				local label = timerLabel:Clone()
+				label.Name = "Timer"
+				label.AnchorPoint = Vector2.new(0.5, 0.5)
+				label.Position = UDim2.fromScale(0.5, 0.5)
+				label.Size = UDim2.fromScale(1, 1)
+				label.TextScaled = true
+				label.Text = ""
+				label.Visible = true
+				local ratio = label:FindFirstChildOfClass("UIAspectRatioConstraint")
+				if ratio then
+					ratio:Destroy()
+				end
+				local cashAmount = counters and counters:FindFirstChild("Cash")
+				cashAmount = cashAmount and cashAmount:FindFirstChild("Amount")
+				local sourceGradient = cashAmount and cashAmount:FindFirstChildOfClass("UIGradient")
+				if sourceGradient and not label:FindFirstChildOfClass("UIGradient") then
+					billboardReadyGradient = sourceGradient:Clone()
+					billboardReadyGradient.Enabled = false
+					billboardReadyGradient.Parent = label
+				end
+				label.Parent = billboard
+				billboard.Parent = player:WaitForChild("PlayerGui")
+				billboardLabel = label
+				refreshTimer()
+			end
+
+			-- the wheel FACE mirrors the UI wheel: a SurfaceGui replica of
+			-- the window's wheel, adorned to the disc's face part. The part
+			-- itself already rotates (FortuneWheelClient) with the same
+			-- dial-angle math, so the mirror needs no animation of its own -
+			-- slice 1 is drawn pointing up, the disc's rest pose. The
+			-- placeholder decal is hidden locally; the model's red pointer
+			-- stands in for the UI arrow, so the replica's arrow goes.
+			local facePart
+			for _, part in ipairs(wheelModel:GetDescendants()) do
+				if part:IsA("BasePart") and part:FindFirstChildOfClass("Decal") then
+					facePart = part
+					break
+				end
+			end
+			if facePart and wheel then
+				local decal = facePart:FindFirstChildOfClass("Decal")
+				local surface = Instance.new("SurfaceGui")
+				surface.Name = "WheelFaceMirror"
+				surface.Adornee = facePart
+				surface.Face = decal and decal.Face or Enum.NormalId.Back
+				surface.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+				surface.PixelsPerStud = 60
+				surface.LightInfluence = 0
+				if decal then
+					decal.Transparency = 1
+				end
+				local replica = wheel:Clone()
+				replica.Name = "Wheel"
+				replica.AnchorPoint = Vector2.new(0.5, 0.5)
+				replica.Position = UDim2.fromScale(0.5, 0.5)
+				replica.Size = UDim2.fromScale(1, 1)
+				local square = Instance.new("UIAspectRatioConstraint")
+				square.AspectRatio = 1
+				square.Parent = replica
+				local arrow = replica:FindFirstChild("Arrow")
+				if arrow then
+					arrow:Destroy()
+				end
+				local dial = replica:FindFirstChild("Spin")
+				if dial then
+					dial.Rotation = 0
+				end
+				replica.Parent = surface
+				surface.Parent = player:WaitForChild("PlayerGui")
+				surfaceDial = dial
+				paintDial(surfaceDial)
 			end
 
 			local ring = wheelModel:FindFirstChild("Ring")
@@ -1629,45 +1890,173 @@ do
 		return fillerIds[math.random(1, #fillerIds)]
 	end
 
+	-------------------------------------------------- kit style kit
+	-- Tokens harvested from the shop UI (StarterGui.Main) so the panel chrome matches
+	-- the rest of the game: GothamBlack everywhere, white text over a thin near-black
+	-- stroke, gold header gradient, tiling stud sheen. (The clickable BUTTONS aren't
+	-- rebuilt from these — cloneButton clones the real HUD buttons instead.)
+	local KIT_FONT = Enum.Font.GothamBlack
+	local INK = Color3.fromRGB(15, 15, 15)           -- the kit's outline/shadow black
+	local PAPER = Color3.fromRGB(255, 255, 255)
+	local STUD_IMG = "rbxassetid://128202495740649"  -- tiling stud sheen overlay
+	-- gradient pairs lifted straight off kit buttons (bright top -> saturated bottom)
+	local GRAD = {
+		GOLD = { Color3.fromRGB(255, 251, 0), Color3.fromRGB(255, 147, 0) }, -- header / titles
+	}
+
+	-- the kit's 4-stop vertical ramp: flat bright band up top, flat saturated band
+	-- at the bottom, blend through the middle
+	local function kitGradient(pair, rotation)
+		local g = Instance.new("UIGradient")
+		g.Rotation = rotation or 90
+		g.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, pair[1]),
+			ColorSequenceKeypoint.new(0.1, pair[1]),
+			ColorSequenceKeypoint.new(0.9, pair[2]),
+			ColorSequenceKeypoint.new(1, pair[2]),
+		})
+		return g
+	end
+
+	local function kitStroke(parent, color, thickness)
+		local s = Instance.new("UIStroke")
+		s.Color = color or INK
+		s.Thickness = thickness or 2.5
+		s.Parent = parent
+		return s
+	end
+
+	-- white GothamBlack label with the kit's dark outline
+	local function kitLabel(text, strokeColor)
+		local l = Instance.new("TextLabel")
+		l.BackgroundTransparency = 1
+		l.Text = text
+		l.Font = KIT_FONT
+		l.TextScaled = true
+		l.TextColor3 = PAPER
+		kitStroke(l, strokeColor or INK, 2)
+		return l
+	end
+
+	-- Every button in the game is the same instance (rounded plate + stud + gradient +
+	-- GothamBlack label). Rather than rebuild it, we CLONE a real one from the HUD so
+	-- the roll buttons are pixel-identical to the rest of the UI, then just retext +
+	-- resize. Sources: the green Sell / orange Buy HUD buttons and the Spinner's X.
+	local function resolve(...)
+		local node = gui
+		for _, name in ipairs({ ... }) do
+			node = node and node:FindFirstChild(name)
+		end
+		return node
+	end
+	local SRC_GREEN = resolve("SideUI", "Top", "Buttons", "Sell")
+	local SRC_ORANGE = resolve("SideUI", "Top", "Buttons", "Buy")
+	local SRC_CLOSE = resolve("Frames", "Spinner", "Close", "Close")
+	-- the Store's gold "Exclusive x10" button: premium look, ships with a Robux icon + price
+	local SRC_GOLD10 = resolve("Frames", "Store", "StoreFrame", "Container", "Exclusive", "BuyButtons", "3")
+
+	-- clone a real game button, retext its label, drop layout-only bits, wire the
+	-- shared hover/press/click feedback. Returns the button + its label (so setRolling
+	-- can retext live). Falls back to a plain green button if the kit ever moves.
+	local function cloneButton(source, text)
+		local btn, label
+		if source and source:IsA("GuiButton") then
+			btn = source:Clone()
+			btn.LayoutOrder = 0
+			btn.Visible = true
+			btn.Active = true
+			for _, d in ipairs(btn:GetDescendants()) do
+				if d:IsA("UIAspectRatioConstraint") then
+					d:Destroy()
+				end
+			end
+			label = btn:FindFirstChild("Amount") or btn:FindFirstChild("Name")
+			if not (label and label:IsA("TextLabel")) then
+				label = btn:FindFirstChildWhichIsA("TextLabel", true)
+			end
+		else
+			btn = Instance.new("ImageButton")
+			btn.BackgroundColor3 = Color3.fromRGB(60, 150, 70)
+			btn.Image = ""
+			local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 10); c.Parent = btn
+			kitStroke(btn, INK, 2.5)
+			label = kitLabel(text, INK)
+			label.AnchorPoint = Vector2.new(0.5, 0.5)
+			label.Position = UDim2.new(0.5, 0, 0.46, 0)
+			label.Size = UDim2.new(0.86, 0, 0.5, 0)
+			label.Parent = btn
+		end
+		if label then
+			label.Text = text
+		end
+		addButtonFeedback(btn)
+		return btn, label
+	end
+
 	-------------------------------------------------- panel
 	local rollFrame = Instance.new("Frame")
 	rollFrame.Name = "BullRoll"
 	rollFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	rollFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 	rollFrame.Size = UDim2.new(0.62, 0, 0.56, 0)
-	rollFrame.BackgroundColor3 = Color3.fromRGB(30, 24, 20)
+	-- neutral-dark plate with the kit's near-black outline and a faint top-lit
+	-- gradient (the kit tints its plates with a gradient rather than a flat fill)
+	rollFrame.BackgroundColor3 = Color3.fromRGB(28, 25, 34)
 	rollFrame.BorderSizePixel = 0
 	rollFrame.Visible = false
 	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 14); c.Parent = rollFrame
-		local s = Instance.new("UIStroke"); s.Color = Color3.fromRGB(120, 90, 50); s.Thickness = 3; s.Parent = rollFrame
+		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 16); c.Parent = rollFrame
+		kitStroke(rollFrame, INK, 3.5)
+		local g = Instance.new("UIGradient")
+		g.Rotation = 90
+		g.Color = ColorSequence.new(Color3.fromRGB(40, 36, 48), Color3.fromRGB(20, 18, 24))
+		g.Parent = rollFrame
 		local ar = Instance.new("UIAspectRatioConstraint"); ar.AspectRatio = 1.55; ar.Parent = rollFrame
 	end
 
-	local title = Instance.new("TextLabel")
-	title.BackgroundTransparency = 1
-	title.AnchorPoint = Vector2.new(0.5, 0)
-	title.Position = UDim2.new(0.5, 0, 0.04, 0)
-	title.Size = UDim2.new(0.8, 0, 0.12, 0)
-	title.Text = "BULL ROLL"
-	title.Font = Enum.Font.GothamBlack
-	title.TextScaled = true
-	title.TextColor3 = Color3.fromRGB(255, 210, 130)
-	title.Parent = rollFrame
+	-- title plaque: a gold kit-gradient plate with stud sheen + white GothamBlack
+	-- title, the same header language as the Spinner / shop windows
+	local header = Instance.new("Frame")
+	header.Name = "Header"
+	header.AnchorPoint = Vector2.new(0.5, 0)
+	header.Position = UDim2.new(0.5, 0, 0.05, 0)
+	header.Size = UDim2.new(0.56, 0, 0.14, 0)
+	header.BackgroundColor3 = PAPER
+	header.BorderSizePixel = 0
+	kitGradient(GRAD.GOLD).Parent = header
+	do
+		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 12); c.Parent = header
+		kitStroke(header, INK, 3)
+	end
+	do
+		local hStud = Instance.new("ImageLabel")
+		hStud.Name = "Stud"
+		hStud.BackgroundTransparency = 1
+		hStud.Image = STUD_IMG
+		hStud.ImageTransparency = 0.6
+		hStud.ScaleType = Enum.ScaleType.Tile
+		hStud.TileSize = UDim2.new(0.28, 0, 1.6, 0)
+		hStud.Size = UDim2.new(1, 0, 0.9, 0)
+		hStud.ClipsDescendants = true
+		hStud.Parent = header
+		local hc = Instance.new("UICorner"); hc.CornerRadius = UDim.new(0, 12); hc.Parent = hStud
+	end
+	local title = kitLabel("🐂  BULL ROLL", INK)
+	title.Name = "Title"
+	title.AnchorPoint = Vector2.new(0.5, 0.5)
+	title.Position = UDim2.new(0.5, 0, 0.46, 0)
+	title.Size = UDim2.new(0.9, 0, 0.6, 0)
+	title.ZIndex = 2
+	title.Parent = header
+	header.Parent = rollFrame
 
-	local closeBtn = Instance.new("TextButton")
+	-- close: a clone of the Spinner's red X button in the top-right corner
+	local closeBtn = cloneButton(SRC_CLOSE, "X")
 	closeBtn.Name = "Close"
 	closeBtn.AnchorPoint = Vector2.new(1, 0)
-	closeBtn.Position = UDim2.new(0.98, 0, 0.04, 0)
-	closeBtn.Size = UDim2.new(0.09, 0, 0.12, 0)
-	closeBtn.BackgroundColor3 = Color3.fromRGB(120, 45, 40)
-	closeBtn.Text = "✕"
-	closeBtn.Font = Enum.Font.GothamBold
-	closeBtn.TextScaled = true
-	closeBtn.TextColor3 = Color3.fromRGB(255, 235, 225)
-	closeBtn.Active = true
+	closeBtn.Position = UDim2.new(0.975, 0, 0.05, 0)
+	closeBtn.Size = UDim2.new(0.1, 0, 0.13, 0)
 	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 8); c.Parent = closeBtn
 		local ar = Instance.new("UIAspectRatioConstraint"); ar.AspectRatio = 1; ar.Parent = closeBtn
 	end
 	closeBtn.Parent = rollFrame
@@ -1680,12 +2069,16 @@ do
 	carousel.AnchorPoint = Vector2.new(0.5, 0.5)
 	carousel.Position = UDim2.new(0.5, 0, 0.48, 0)
 	carousel.Size = UDim2.new(0.92, 0, 0, CARD_H + 24)
-	carousel.BackgroundColor3 = Color3.fromRGB(18, 14, 11)
+	carousel.BackgroundColor3 = Color3.fromRGB(16, 14, 20)
 	carousel.BorderSizePixel = 0
 	carousel.ClipsDescendants = true
 	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 10); c.Parent = carousel
-		local s = Instance.new("UIStroke"); s.Color = Color3.fromRGB(80, 62, 40); s.Thickness = 2; s.Parent = carousel
+		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 12); c.Parent = carousel
+		kitStroke(carousel, INK, 3)
+		local g = Instance.new("UIGradient")
+		g.Rotation = 90
+		g.Color = ColorSequence.new(Color3.fromRGB(26, 23, 32), Color3.fromRGB(12, 10, 16))
+		g.Parent = carousel
 	end
 	carousel.Parent = rollFrame
 
@@ -1711,13 +2104,13 @@ do
 	marker.Name = "Marker"
 	marker.AnchorPoint = Vector2.new(0.5, 0.5)
 	marker.Position = UDim2.new(0.5, 0, 0.5, 0)
-	marker.Size = UDim2.new(0, 4, 1, -8)
-	marker.BackgroundColor3 = Color3.fromRGB(255, 220, 120)
+	marker.Size = UDim2.new(0, 5, 1, -8)
+	marker.BackgroundColor3 = Color3.fromRGB(255, 236, 140)
 	marker.BorderSizePixel = 0
 	marker.ZIndex = 5
 	do
 		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1, 0); c.Parent = marker
-		local s = Instance.new("UIStroke"); s.Color = Color3.fromRGB(255, 170, 60); s.Thickness = 2; s.Transparency = 0.3; s.Parent = marker
+		kitStroke(marker, INK, 2)
 	end
 	marker.Parent = carousel
 
@@ -1726,46 +2119,30 @@ do
 	pointer.BackgroundTransparency = 1
 	pointer.AnchorPoint = Vector2.new(0.5, 0)
 	pointer.Position = UDim2.new(0.5, 0, 0, -1)
-	pointer.Size = UDim2.new(0, 24, 0, 24)
+	pointer.Size = UDim2.new(0, 26, 0, 26)
 	pointer.Text = "▼"
-	pointer.Font = Enum.Font.GothamBold
+	pointer.Font = KIT_FONT
 	pointer.TextScaled = true
-	pointer.TextColor3 = Color3.fromRGB(255, 220, 120)
+	pointer.TextColor3 = Color3.fromRGB(255, 236, 140)
 	pointer.ZIndex = 6
+	kitStroke(pointer, INK, 2)
 	pointer.Parent = carousel
 
-	local rollButton = Instance.new("TextButton")
+	-- the two buttons below the carousel = clones of the HUD's green Sell / orange Buy
+	-- buttons, retexted. rollLabel is retexted live by setRolling.
+	local rollButton, rollLabel = cloneButton(SRC_GREEN, "ROLL")
 	rollButton.Name = "RollX1"
 	rollButton.AnchorPoint = Vector2.new(0.5, 1)
-	rollButton.Position = UDim2.new(0.29, 0, 0.96, 0)
+	rollButton.Position = UDim2.new(0.29, 0, 0.965, 0)
 	rollButton.Size = UDim2.new(0.4, 0, 0.16, 0)
-	rollButton.BackgroundColor3 = Color3.fromRGB(60, 150, 70)
-	rollButton.Text = "ROLL"
-	rollButton.Font = Enum.Font.GothamBold
-	rollButton.TextScaled = true
-	rollButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 10); c.Parent = rollButton
-		local s = Instance.new("UIStroke"); s.Color = Color3.fromRGB(30, 80, 35); s.Thickness = 2; s.Parent = rollButton
-		local pad = Instance.new("UIPadding"); pad.PaddingTop = UDim.new(0.16, 0); pad.PaddingBottom = UDim.new(0.16, 0); pad.Parent = rollButton
-	end
 	rollButton.Parent = rollFrame
 
-	local tenButton = Instance.new("TextButton")
+	-- gold Store x10 button (keeps its Robux icon + price display)
+	local tenButton = cloneButton(SRC_GOLD10, "ROLL x10")
 	tenButton.Name = "RollX10"
 	tenButton.AnchorPoint = Vector2.new(0.5, 1)
-	tenButton.Position = UDim2.new(0.71, 0, 0.96, 0)
+	tenButton.Position = UDim2.new(0.71, 0, 0.965, 0)
 	tenButton.Size = UDim2.new(0.4, 0, 0.16, 0)
-	tenButton.BackgroundColor3 = Color3.fromRGB(190, 150, 55)
-	tenButton.Text = "ROLL x10 (Robux)"
-	tenButton.Font = Enum.Font.GothamBold
-	tenButton.TextScaled = true
-	tenButton.TextColor3 = Color3.fromRGB(40, 30, 10)
-	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 10); c.Parent = tenButton
-		local s = Instance.new("UIStroke"); s.Color = Color3.fromRGB(120, 90, 30); s.Thickness = 2; s.Parent = tenButton
-		local pad = Instance.new("UIPadding"); pad.PaddingTop = UDim.new(0.16, 0); pad.PaddingBottom = UDim.new(0.16, 0); pad.Parent = tenButton
-	end
 	tenButton.Parent = rollFrame
 
 	-- results grid overlay (10x rolls); the backdrop button doubles as tap-to-dismiss
@@ -1776,26 +2153,22 @@ do
 	resultsPanel.AnchorPoint = Vector2.new(0.5, 0.5)
 	resultsPanel.Position = UDim2.new(0.5, 0, 0.5, 0)
 	resultsPanel.Size = UDim2.new(1, 0, 1, 0)
-	resultsPanel.BackgroundColor3 = Color3.fromRGB(12, 9, 7)
-	resultsPanel.BackgroundTransparency = 0.06
+	resultsPanel.BackgroundColor3 = Color3.fromRGB(14, 12, 18)
+	resultsPanel.BackgroundTransparency = 0.04
 	resultsPanel.BorderSizePixel = 0
 	resultsPanel.Visible = false
 	resultsPanel.ZIndex = 20
 	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 14); c.Parent = resultsPanel
+		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 16); c.Parent = resultsPanel
 	end
 	resultsPanel.Parent = rollFrame
 
-	local gridTitle = Instance.new("TextLabel")
-	gridTitle.BackgroundTransparency = 1
+	local gridTitle = kitLabel("YOUR 10 ROLLS", INK)
 	gridTitle.AnchorPoint = Vector2.new(0.5, 0)
 	gridTitle.Position = UDim2.new(0.5, 0, 0.05, 0)
 	gridTitle.Size = UDim2.new(0.8, 0, 0.1, 0)
-	gridTitle.Text = "YOUR 10 ROLLS"
-	gridTitle.Font = Enum.Font.GothamBlack
-	gridTitle.TextScaled = true
-	gridTitle.TextColor3 = Color3.fromRGB(255, 210, 130)
 	gridTitle.ZIndex = 21
+	kitGradient(GRAD.GOLD).Parent = gridTitle -- gold text ramp, the kit "premium header" look
 	gridTitle.Parent = resultsPanel
 
 	local gridHolder = Instance.new("Frame")
@@ -1814,15 +2187,11 @@ do
 	end
 	gridHolder.Parent = resultsPanel
 
-	local gridHint = Instance.new("TextLabel")
-	gridHint.BackgroundTransparency = 1
+	local gridHint = kitLabel("tap to continue", INK)
 	gridHint.AnchorPoint = Vector2.new(0.5, 1)
 	gridHint.Position = UDim2.new(0.5, 0, 0.97, 0)
-	gridHint.Size = UDim2.new(0.6, 0, 0.07, 0)
-	gridHint.Text = "tap to continue"
-	gridHint.Font = Enum.Font.GothamMedium
-	gridHint.TextScaled = true
-	gridHint.TextColor3 = Color3.fromRGB(200, 190, 175)
+	gridHint.Size = UDim2.new(0.6, 0, 0.06, 0)
+	gridHint.TextColor3 = Color3.fromRGB(210, 205, 220)
 	gridHint.ZIndex = 21
 	gridHint.Parent = resultsPanel
 
@@ -1846,59 +2215,68 @@ do
 		card.Size = size
 		card.BackgroundColor3 = col:Lerp(Color3.new(0, 0, 0), 0.72)
 		card.BorderSizePixel = 0
+		card.ClipsDescendants = true -- keep the top ribbon inside the rounded corners
 		card.ZIndex = z
-		local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 8); corner.Parent = card
-		local stroke = Instance.new("UIStroke"); stroke.Color = col; stroke.Thickness = 2; stroke.Parent = card
+		local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 10); corner.Parent = card
+		-- rarity-tinted plate with a darker inner outline, plus a bright rarity
+		-- rim on top (the outline art is baked on kit buttons; cards get a real
+		-- stroke so the rarity still reads)
+		kitStroke(card, col:Lerp(INK, 0.35), 2.5)
 		local grad = Instance.new("UIGradient")
-		grad.Color = ColorSequence.new(col:Lerp(Color3.new(0, 0, 0), 0.5), col:Lerp(Color3.new(0, 0, 0), 0.82))
+		grad.Color = ColorSequence.new(col:Lerp(Color3.new(0, 0, 0), 0.48), col:Lerp(Color3.new(0, 0, 0), 0.84))
 		grad.Rotation = 90
 		grad.Parent = card
 
+		-- top rarity ribbon: a flat rarity-colored band behind the icon so the tier
+		-- pops the instant a card scrolls past
+		local ribbon = Instance.new("Frame")
+		ribbon.Name = "Ribbon"
+		ribbon.BackgroundColor3 = col
+		ribbon.BorderSizePixel = 0
+		ribbon.Size = UDim2.new(1, 0, 0.09, 0)
+		ribbon.Position = UDim2.new(0, 0, 0, 0)
+		ribbon.ZIndex = z
+		kitGradient({ col:Lerp(PAPER, 0.35), col }).Parent = ribbon
+		ribbon.Parent = card
+
 		local icon = Instance.new("TextLabel")
 		icon.BackgroundTransparency = 1
-		icon.Size = UDim2.new(1, 0, 0.52, 0)
-		icon.Position = UDim2.new(0, 0, 0.06, 0)
+		icon.Size = UDim2.new(1, 0, 0.48, 0)
+		icon.Position = UDim2.new(0, 0, 0.11, 0)
 		icon.Text = "🐂"
 		icon.TextScaled = true
-		icon.Font = Enum.Font.GothamBold
-		icon.TextColor3 = col:Lerp(Color3.new(1, 1, 1), 0.15)
+		icon.Font = KIT_FONT
+		icon.TextColor3 = col:Lerp(PAPER, 0.35)
 		icon.ZIndex = z
 		icon.Parent = card
 
-		local nameLabel = Instance.new("TextLabel")
-		nameLabel.BackgroundTransparency = 1
-		nameLabel.Size = UDim2.new(1, -8, 0.16, 0)
-		nameLabel.Position = UDim2.new(0, 4, 0.62, 0)
-		nameLabel.Text = (bull and bull.name) or "???"
-		nameLabel.Font = Enum.Font.GothamBold
-		nameLabel.TextScaled = true
-		nameLabel.TextColor3 = Color3.fromRGB(245, 240, 230)
+		local nameLabel = kitLabel((bull and bull.name) or "???", INK)
+		nameLabel.Size = UDim2.new(1, -10, 0.16, 0)
+		nameLabel.Position = UDim2.new(0, 5, 0.62, 0)
 		nameLabel.ZIndex = z
 		nameLabel.Parent = card
 
-		local rarLabel = Instance.new("TextLabel")
-		rarLabel.BackgroundTransparency = 1
-		rarLabel.Size = UDim2.new(1, -8, 0.1, 0)
-		rarLabel.Position = UDim2.new(0, 4, 0.8, 0)
-		rarLabel.Text = rarity
-		rarLabel.Font = Enum.Font.GothamBold
-		rarLabel.TextScaled = true
-		rarLabel.TextColor3 = col
+		local rarLabel = kitLabel(rarity, INK)
+		rarLabel.Size = UDim2.new(1, -10, 0.1, 0)
+		rarLabel.Position = UDim2.new(0, 5, 0.8, 0)
+		rarLabel.TextColor3 = col:Lerp(PAPER, 0.45)
 		rarLabel.ZIndex = z
 		rarLabel.Parent = card
 
 		if opts.badge then
 			local badge = Instance.new("TextLabel")
 			badge.AnchorPoint = Vector2.new(0.5, 0.5)
-			badge.Position = UDim2.new(0.5, 0, 0.94, 0)
-			badge.Size = UDim2.new(0.7, 0, 0.13, 0)
+			badge.Position = UDim2.new(0.5, 0, 0.95, 0)
+			badge.Size = UDim2.new(0.72, 0, 0.14, 0)
 			badge.BackgroundColor3 = opts.badgeColor or Color3.fromRGB(70, 180, 80)
 			badge.Text = opts.badge
-			badge.Font = Enum.Font.GothamBold
+			badge.Font = KIT_FONT
 			badge.TextScaled = true
-			badge.TextColor3 = Color3.fromRGB(255, 255, 255)
+			badge.TextColor3 = PAPER
 			badge.ZIndex = z + 1
 			local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(1, 0); bc.Parent = badge
+			-- one stroke outlines both the pill and its glyphs (kit look)
+			kitStroke(badge, INK, 2)
 			badge.Parent = card
 		end
 		return card
@@ -1958,8 +2336,9 @@ do
 
 	local function setRolling(state)
 		rolling = state
-		rollButton.AutoButtonColor = not state
-		rollButton.Text = state and "ROLLING…" or (("ROLL ($%s)"):format(comma(ROLL_COST)))
+		rollLabel.Text = state and "ROLLING…" or (("ROLL  $%s"):format(comma(ROLL_COST)))
+		-- dim the plate while a roll is in flight so it reads as busy
+		rollButton.ImageTransparency = state and 0.35 or 0
 	end
 
 	local function animateReveal(results)
@@ -2115,17 +2494,10 @@ do
 		l.Parent = testHolder
 	end
 	local function makeTestBtn(text, order, count)
-		local b = Instance.new("TextButton")
+		local b = cloneButton(SRC_ORANGE, text)
 		b.Size = UDim2.new(1, 0, 0.45, 0)
-		b.BackgroundColor3 = Color3.fromRGB(150, 60, 160)
-		b.Text = text
-		b.Font = Enum.Font.GothamBold
-		b.TextScaled = true
-		b.TextColor3 = Color3.fromRGB(255, 255, 255)
 		b.LayoutOrder = order
 		b.ZIndex = 50
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 8); c.Parent = b
-		local s = Instance.new("UIStroke"); s.Color = Color3.fromRGB(90, 30, 100); s.Thickness = 2; s.Parent = b
 		b.Parent = testHolder
 		b.Activated:Connect(function()
 			debugFakeReveal(count)

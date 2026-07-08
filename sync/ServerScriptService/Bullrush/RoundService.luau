@@ -15,7 +15,6 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
-local NotifyService = require(script.Parent.NotifyService)
 local FriendBoostService = require(script.Parent.FriendBoostService)
 local EconomyService = require(script.Parent.EconomyService)
 
@@ -100,16 +99,10 @@ function RoundService.eliminate(player: Player, cause: string?)
 	local remaining = RoundService.aliveCount()
 	-- Ledger: elimination order fixes placement; the final-3 bonus fires here.
 	EconomyService.noteElimination(player, remaining, RoundService.getAlive())
+	-- Clients render the elimination feed themselves off this remote (head
+	-- shot + ELIMINATED on the screen edge); it no longer goes through the
+	-- NotifyService card stack.
 	Remotes.Eliminated:FireAllClients(player.Name, remaining, cause)
-
-	-- Elimination feed (white cards, top-center stack under the shop HUD).
-	NotifyService.broadcast(
-		player.Name
-			.. (if cause == "REVENGE"
-				then " was trampled by a bull — "
-				else " was eliminated — ")
-			.. (if remaining == 1 then "1 remains" else ("%d remain"):format(remaining)),
-		"white")
 end
 
 -- Participant of the current round who has since been eliminated. Gates who
