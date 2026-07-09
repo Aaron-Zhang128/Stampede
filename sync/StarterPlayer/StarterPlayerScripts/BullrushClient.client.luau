@@ -110,7 +110,12 @@ local WARN_COLOR = Color3.fromRGB(220, 60, 40)
 local SCORCH_COLOR = Color3.fromRGB(55, 48, 42)
 local SILHOUETTE_COLOR = Color3.fromRGB(56, 56, 62)
 
-local PULSE_TWEEN_INFO = TweenInfo.new(0.35, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+-- Danger pulse: every threatened tile pulsates in UNISON (a red floor breathing
+-- up to full red and back), so the whole lane reads as one warning. A live claim
+-- owns the tile color every frame, so a new red indicator always wins over the
+-- selection tint and any scorch/restore in progress.
+local PULSE_WAVE_PERIOD = 0.7 -- seconds for one full pulse cycle
+local PULSE_FLOOR = 0.4 -- min red intensity so the lane never reads as safe
 local SCORCH_RESTORE_TIME = 2.5
 
 local SHAKE_RANGE = 14 -- studs from the lane center line
@@ -122,6 +127,12 @@ local GRAZE_RANGE = 14 -- planar studs: a bull's closest approach inside this co
 local GRAZE_DEADLY = 5 -- at/inside this it practically brushed you: full-strength punch
 local GRAZE_HYSTERESIS = 2 -- bull must recede this far past its closest approach before the punch fires
 local TREMOR_LEVEL = 0.3 -- sustained shake floor while the arena-shrink telegraph runs
+
+local GHOST_PAW_HZ = 8.5 -- pawing rhythm of the winding-up ghost bull
+local STREAK_COLOR = Color3.fromRGB(255, 244, 224) -- warm-white near-miss speed lines
+
+local NEARMISS_FOV = 2.6 -- degrees the view widens on a close shave
+local HITSTOP_TIME = 0.08 -- seconds of frozen camera on a heavy impact (fake hitstop)
 
 -- Client-side effects folder (created locally; never replicates)
 local fxFolder = workspace:FindFirstChild("BullrushClientFX") or Instance.new("Folder")
@@ -242,18 +253,21 @@ local function stopTileTween(part: BasePart)
 	end
 end
 
--- A lane starts threatening this tile: bump refcount, start pulsing on 0 -> 1.
+-- Set of tiles a lane is threatening RIGHT NOW; the paint loop below owns their
+-- color every frame and pulses them all in unison.
+local tilePulse: { [BasePart]: boolean } = {}
+
+-- A lane starts threatening this tile. New claims take priority instantly: the
+-- tile snaps to full red this frame, then the paint loop takes over the pulse.
 local function claimTile(part: BasePart)
 	local count = (tileRefCount[part] or 0) + 1
 	tileRefCount[part] = count
 	if count > 1 then
-		return -- already pulsing for another lane
+		return -- already claimed by another lane
 	end
 	stopTileTween(part) -- cancel any in-flight scorch restore
-	part.Color = originalColors[part] -- pulse from a clean base
-	local tween = TweenService:Create(part, PULSE_TWEEN_INFO, { Color = WARN_COLOR })
-	tileTweens[part] = tween
-	tween:Play()
+	tilePulse[part] = true
+	part.Color = WARN_COLOR -- instant priority: a fresh danger tile reads red at once
 end
 
 -- A lane stops threatening this tile. Only when the LAST lane releases it does
@@ -266,6 +280,7 @@ local function releaseTile(part: BasePart, withScorch: boolean)
 		return -- another active lane still owns this tile; keep pulsing
 	end
 	tileRefCount[part] = nil
+	tilePulse[part] = nil -- the paint loop stops owning it; scorch/restore takes over
 	stopTileTween(part)
 	if withScorch then
 		part.Color = SCORCH_COLOR
@@ -304,8 +319,26 @@ local function abandonTile(part: BasePart)
 		return
 	end
 	tileRefCount[part] = nil
+	tilePulse[part] = nil
 	stopTileTween(part)
 end
+
+-- The danger paint loop: every frame, every claimed tile pulses in UNISON over
+-- a red floor. This is the SOLE owner of a claimed tile's color, so a live
+-- danger claim always wins over the selection tint, scorch, and restore.
+RunService.RenderStepped:Connect(function()
+	if next(tilePulse) == nil then
+		return
+	end
+	local wave = 0.5 + 0.5 * math.sin(os.clock() / PULSE_WAVE_PERIOD * 2 * math.pi)
+	local a = PULSE_FLOOR + (1 - PULSE_FLOOR) * wave
+	for part in pairs(tilePulse) do
+		local base = originalColors[part]
+		if base then
+			part.Color = base:Lerp(WARN_COLOR, a)
+		end
+	end
+end)
 
 -- Doom glow: a neon-red slab pinned just above a doomed tile's top, fading in
 -- from invisible to a hot glow across the telegraph (quad ease-in: barely-there
@@ -404,6 +437,11 @@ end
 
 -- Removes silhouette + sounds for a lane entry (tiles are handled separately).
 local function teardownLaneFX(entry, fadeSounds: boolean)
+	-- Stop the per-frame ghost wind-up animation.
+	if entry.animConn then
+		entry.animConn:Disconnect()
+		entry.animConn = nil
+	end
 	if entry.rumble then
 		if fadeSounds then
 			entry.rumble.Parent = SoundService -- detach before the silhouette dies
@@ -423,10 +461,16 @@ local function teardownLaneFX(entry, fadeSounds: boolean)
 	end
 end
 
--- Smoky ghost-bull at the lane start, plus a rumble that swells over warnTime.
--- Uses entry.bounds so the ghost stands at the ACTIVE window edge of a
--- shrunken arena, not out at the full-grid edge.
+-- Smoky ghost-bull at the lane start that PAWS and COILS as it winds up, plus a
+-- rumble that swells over warnTime. The red lane pulse marks the danger; this
+-- ghost carries the anticipation (and faces the charge direction). Uses
+-- entry.bounds so it sits at the ACTIVE window edge of a shrunken arena.
 local function spawnSilhouette(entry, warnTime: number)
+	-- A repeat Telegraph for this lane must not leak the old ghost/anim.
+	if entry.animConn then
+		entry.animConn:Disconnect()
+		entry.animConn = nil
+	end
 	if entry.silhouette then
 		entry.silhouette:Destroy()
 		entry.silhouette = nil
@@ -454,11 +498,38 @@ local function spawnSilhouette(entry, warnTime: number)
 		end
 	end
 	local startPos, endPos = GridUtil.lanePath(entry.lane, entry.bounds)
-	ghost:PivotTo(CFrame.lookAt(startPos, endPos))
+	local dir = (endPos - startPos)
+	dir = if dir.Magnitude > 0 then dir.Unit else Vector3.new(0, 0, 1)
+	local ghostBaseCF = CFrame.lookAt(startPos, endPos)
+	ghost:PivotTo(ghostBaseCF)
 	ghost.Parent = fxFolder
 	entry.silhouette = ghost
 
-	local root = ghost.PrimaryPart or ghost:FindFirstChild("Root")
+	-- Per-frame ghost wind-up: pawing scuff + a coil that leans it back and
+	-- drops its nose, storing energy the real bull "releases" as its launch
+	-- stretch. Torn down (animConn disconnected) the instant the bull charges.
+	local ghostRoot = ghost.PrimaryPart or ghost:FindFirstChild("Root")
+	local ghostPos = ghostBaseCF.Position
+	local ghostRot = ghostBaseCF.Rotation
+	local telegraphStart = os.clock()
+	entry.animConn = RunService.RenderStepped:Connect(function()
+		local liveGhost = entry.silhouette
+		if not (liveGhost and ghostRoot and ghostRoot.Parent) then
+			return
+		end
+		local now = os.clock()
+		local progress = math.clamp((now - telegraphStart) / math.max(warnTime, 0.1), 0, 1)
+		local paw = math.sin(now * GHOST_PAW_HZ * math.pi)
+		local scuff = math.max(paw, 0) * 0.28 -- forward scuffs, never backward
+		local coil = progress * progress -- eases into the wind-up
+		local back = -(0.7 * coil + scuff) -- pull back along the charge line
+		local dip = -0.18 * coil + math.abs(paw) * 0.07
+		local pitch = 0.14 * coil -- nose dips as it readies
+		local offset = dir * back + Vector3.new(0, dip, 0)
+		liveGhost:PivotTo(CFrame.new(ghostPos + offset) * ghostRot * CFrame.Angles(pitch, 0, 0.05 * paw))
+	end)
+
+	local root = ghostRoot
 	local rumble = makeSound("rumble", {
 		Volume = 0,
 		Looped = true,
@@ -499,6 +570,13 @@ local tremor = 0
 local shakeDirty = false
 local shakeRandom = Random.new()
 
+-- Fake hitstop: on a heavy impact the camera FREEZES at a displaced offset for
+-- HITSTOP_TIME (no jitter, no decay), then releases into the normal rattle.
+-- That momentary hold is what reads as "the hit landed hard". Roblox can't pause
+-- physics/animation network-wide from a client, so this is camera-only by design.
+local hitstopUntil = 0
+local hitstopOffset = Vector3.zero
+
 local function getHumanoid(): Humanoid?
 	local character = player.Character
 	return character and character:FindFirstChildOfClass("Humanoid") or nil
@@ -506,6 +584,17 @@ end
 
 local function addTrauma(amount: number)
 	trauma = math.min(trauma + amount, MAX_TRAUMA)
+end
+
+-- strength 0..1: how hard the freeze displaces the camera and how much rattle
+-- spills out the far side of the hold.
+local function triggerHitstop(strength: number)
+	strength = math.clamp(strength, 0, 1)
+	hitstopUntil = os.clock() + HITSTOP_TIME
+	local dir = Vector3.new(shakeRandom:NextNumber(-1, 1), shakeRandom:NextNumber(-1, 1), 0)
+	dir = if dir.Magnitude > 0 then dir.Unit else Vector3.new(1, 0, 0)
+	hitstopOffset = dir * (0.9 + 1.7 * strength)
+	addTrauma(0.2 * strength) -- rattle released when the freeze ends
 end
 
 -- Perpendicular distance from the local character to a lane's center line,
@@ -620,35 +709,9 @@ local function addStroke(inst: Instance, thickness: number, transparency: number
 	stroke.Parent = inst
 end
 
--- Top-center status panel
-local statusPanel = Instance.new("Frame")
-statusPanel.Name = "StatusPanel"
-statusPanel.AnchorPoint = Vector2.new(0.5, 0)
-statusPanel.Position = UDim2.new(0.5, 0, 0, 62)
-statusPanel.Size = UDim2.new(0, 430, 0, 44)
-statusPanel.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
-statusPanel.BackgroundTransparency = 0.35
-statusPanel.BorderSizePixel = 0
-statusPanel.Parent = hud
-addCorner(statusPanel, 10)
-addStroke(statusPanel, 1.5, 0.5)
-
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Name = "StatusLabel"
-statusLabel.BackgroundTransparency = 1
-statusLabel.Position = UDim2.new(0, 10, 0, 0)
-statusLabel.Size = UDim2.new(1, -20, 1, 0)
-statusLabel.Font = Enum.Font.GothamBlack
-statusLabel.TextSize = 20
-statusLabel.TextScaled = true -- mode + team strings can run long; shrink, never clip
-statusLabel.TextColor3 = Color3.fromRGB(240, 238, 230)
-statusLabel.TextStrokeTransparency = 0.85
-statusLabel.Text = "Waiting for players…"
-statusLabel.Parent = statusPanel
-
-local statusSizeCap = Instance.new("UITextSizeConstraint")
-statusSizeCap.MaxTextSize = 20
-statusSizeCap.Parent = statusLabel
+-- The persistent top-center status bar was removed: round identity is now two
+-- notif cards (NEXT: <mode> at intermission, <mode> — GO! at kickoff), and the
+-- live alive count rides the elimination-feed cards. See Main.server.luau.
 
 -- Revenge hit payoff: a big center-screen burst when YOUR bull tramples
 -- someone — the small green money card alone is easy to miss.
@@ -698,51 +761,11 @@ end
 
 local currentState = "WAITING"
 local locallyEliminated = false -- true from our elimination until the round leaves ACTIVE
-local lastWave = 0
-local lastAlive = 0
-local lastGridSize = Config.GRID_SIZE -- active window side length
-local lastModeName: string? = nil -- current/next round's mode display name
-local lastTeamCounts: { [string]: number }? = nil -- Team Rush alive counts, ACTIVE only
-local intermissionEndsAt: number? = nil
-local lastIntermissionSecond: number? = nil
 
 -- Revenge cooldown mirror (server-authoritative, from RevengeAck THROW_OK /
 -- DENIED): drives the SEND BULL button countdown (bridge attributes) below.
 local revengeReadyAt = 0 -- os.clock() when the next throw unlocks
 local revengeWasCooling = false -- edge-detects the cooldown lapping for the ready ding
-
--- Validates the Team Rush counts table the server sends in ACTIVE updates.
-local function isTeamCounts(counts): boolean
-	return typeof(counts) == "table"
-		and tonumber(counts.RED) ~= nil
-		and tonumber(counts.BLUE) ~= nil
-end
-
-local function refreshStatus(timeLeft: number?)
-	if currentState == "WAITING" then
-		statusLabel.Text = "Waiting for players…"
-	elseif currentState == "INTERMISSION" then
-		if timeLeft then
-			statusLabel.Text = ("%s starts in %ds"):format(
-				lastModeName or "Round", math.max(0, math.ceil(timeLeft)))
-		else
-			statusLabel.Text = "Round starting…"
-		end
-	elseif currentState == "ACTIVE" then
-		local prefix = if lastModeName then lastModeName .. " • " else ""
-		if lastTeamCounts then
-			statusLabel.Text = ("%sRED %d v %d BLUE • %dx%d"):format(
-				prefix, lastTeamCounts.RED or 0, lastTeamCounts.BLUE or 0, lastGridSize, lastGridSize)
-		else
-			statusLabel.Text = ("%sWave %d • %d alive • %dx%d"):format(
-				prefix, lastWave, lastAlive, lastGridSize, lastGridSize)
-		end
-	elseif currentState == "WINNER" or currentState == "ROUNDOVER" then
-		statusLabel.Text = "Round over"
-	else
-		statusLabel.Text = tostring(currentState)
-	end
-end
 
 --==============================================================================
 -- Revenge lane selection — tile tint layer. While the overhead bull-cam is up
@@ -1334,7 +1357,52 @@ end
 -- by the bigger elimination slam anyway (trauma is capped).
 --==============================================================================
 
-local grazeTracked: { [Instance]: { minDist: number, fired: boolean } } = {}
+local grazeTracked: { [Instance]: { minDist: number, fired: boolean, dir: Vector3? } } = {}
+
+-- Near-miss pop: a quick FOV widen-and-settle plus a couple of amber speed-line
+-- streaks shooting past in the bull's travel direction. Grounded and subtle —
+-- it rewards a close shave without touching the character rig or physics.
+local function nearMissPop(originPos: Vector3, dir: Vector3, closeness: number)
+	local camera = workspace.CurrentCamera
+	if camera then
+		local base = camera.FieldOfView
+		-- Reversing tween: widens then returns to exactly where it started, so it
+		-- can't drift even if the dash FOV kick overlaps it.
+		TweenService:Create(
+			camera,
+			TweenInfo.new(0.11, Enum.EasingStyle.Sine, Enum.EasingDirection.Out, 0, true),
+			{ FieldOfView = base + NEARMISS_FOV * closeness }
+		):Play()
+	end
+
+	local count = 2 + math.floor(closeness * 2 + 0.5) -- 2..4 streaks by how close
+	for i = 1, count do
+		local streak = Instance.new("Part")
+		streak.Anchored = true
+		streak.CanCollide = false
+		streak.CanQuery = false
+		streak.CanTouch = false
+		streak.CastShadow = false
+		streak.Material = Enum.Material.Neon
+		streak.Color = STREAK_COLOR
+		streak.Size = Vector3.new(0.18, 0.18, 2.6 + 1.4 * closeness)
+		streak.Transparency = 0.35
+		local spread = Vector3.new(
+			shakeRandom:NextNumber(-2.2, 2.2),
+			shakeRandom:NextNumber(0.2, 2.6),
+			shakeRandom:NextNumber(-2.2, 2.2)
+		)
+		local from = originPos + spread - dir * 3
+		streak.CFrame = CFrame.lookAt(from, from + dir)
+		streak.Parent = fxFolder
+		TweenService:Create(
+			streak,
+			TweenInfo.new(0.16 + 0.06 * i, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ CFrame = CFrame.lookAt(from + dir * (13 + 6 * closeness), from + dir), Transparency = 1 }
+		):Play()
+		Debris:AddItem(streak, 0.5)
+	end
+end
 
 local function updateNearMisses()
 	local bullsFolder = arena and arena:FindFirstChild("ActiveBulls")
@@ -1358,7 +1426,9 @@ local function updateNearMisses()
 			local dist = Vector2.new(delta.X, delta.Z).Magnitude -- planar; ignore gallop bob
 			local track = grazeTracked[bull]
 			if not track then
-				track = { minDist = dist, fired = false }
+				-- Bull faces -Z, so LookVector is its charge direction — stored so
+				-- the near-miss streaks fly the way it was actually going.
+				track = { minDist = dist, fired = false, dir = root.CFrame.LookVector }
 				grazeTracked[bull] = track
 			elseif dist < track.minDist then
 				track.minDist = dist
@@ -1370,6 +1440,8 @@ local function updateNearMisses()
 						- math.clamp((track.minDist - GRAZE_DEADLY) / (GRAZE_RANGE - GRAZE_DEADLY), 0, 1)
 					addTrauma(0.35 + 0.45 * closeness)
 					playOneShot("chargeWhoosh", { Volume = 0.14 + 0.245 * closeness, PlaybackSpeed = 1.25 })
+					local popDir = track.dir or (root.Position - here)
+					nearMissPop(here, Vector3.new(popDir.X, 0, popDir.Z).Unit, closeness)
 					if closeness >= 0.5 then
 						-- Phone-class devices buzz only on REALLY close shaves;
 						-- gamepads already rumble via the trauma-driven motors.
@@ -1385,6 +1457,48 @@ local function updateNearMisses()
 		if not seen[bull] then
 			grazeTracked[bull] = nil
 		end
+	end
+end
+
+--==============================================================================
+-- Revenge bull priority: the bull the LOCAL player launched must always be the
+-- easiest one to pick out FOR THEM. The thrower is eliminated when they send it,
+-- so this can't ride the alive-only near-miss loop — it hooks ActiveBulls
+-- directly. Property writes here are client-side, so ONLY the thrower sees the
+-- boosted glow (renders through walls and over every other bull); everyone else
+-- keeps the standard occluded red the server set.
+--==============================================================================
+
+local function boostOwnRevengeBull(bull: Instance)
+	if not (bull and bull:IsA("Model")) then
+		return
+	end
+	if bull:GetAttribute("ThrowerName") ~= player.Name then
+		return
+	end
+	local glow = bull:FindFirstChild("RevengeGlow") or bull:WaitForChild("RevengeGlow", 2)
+	if glow and glow:IsA("Highlight") then
+		glow.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- see it through walls & other bulls
+		glow.FillColor = Color3.fromRGB(255, 120, 70)
+		glow.FillTransparency = 0.4
+		glow.OutlineColor = Color3.fromRGB(255, 230, 120)
+		glow.OutlineTransparency = 0
+	end
+end
+
+-- Re-hooks if the ActiveBulls folder is ever recreated (round cleanup / stream).
+local hookedBullsFolder: Instance? = nil
+local function watchActiveBulls()
+	local folder = arena and arena:FindFirstChild("ActiveBulls")
+	if not folder or folder == hookedBullsFolder then
+		return
+	end
+	hookedBullsFolder = folder
+	folder.ChildAdded:Connect(function(bull)
+		task.defer(boostOwnRevengeBull, bull)
+	end)
+	for _, bull in ipairs(folder:GetChildren()) do
+		task.defer(boostOwnRevengeBull, bull)
 	end
 end
 
@@ -1456,6 +1570,9 @@ laneClearedRemote.OnClientEvent:Connect(function(lane)
 	if dist and dist <= SHAKE_RANGE then
 		local closeness = 1 - dist / SHAKE_RANGE -- 0 at the edge, 1 on the line
 		addTrauma(0.55 + 0.45 * closeness)
+		if closeness > 0.35 then
+			triggerHitstop(closeness) -- a hard clear right by you freeze-punches
+		end
 		playOneShot("slam", { Volume = 0.245 + 0.175 * closeness })
 		playOneShot("thud", { Volume = 0.21 + 0.14 * closeness, PlaybackSpeed = 0.55 })
 	end
@@ -1639,18 +1756,15 @@ if arenaShrinkRemote then
 end
 
 eliminatedRemote.OnClientEvent:Connect(function(playerName, aliveCount, cause)
-	if tonumber(aliveCount) then
-		lastAlive = tonumber(aliveCount) :: number
-		if currentState == "ACTIVE" then
-			refreshStatus(nil)
-		end
-	end
+	-- aliveCount now shows only in the server's elimination-feed cards, not a
+	-- persistent HUD readout, so it's no longer tracked here.
 	if typeof(playerName) == "string" then
 		eliminatedNames[playerName] = true -- ghost them for the living
 	end
 	if playerName == player.Name then
 		locallyEliminated = true
 		refreshArenaBase() -- the ring appears the instant you fall
+		triggerHitstop(1) -- freeze-frame the trample before the ragdoll launch
 		addTrauma(MAX_TRAUMA) -- trampled: the hardest hit the shake system allows
 		playHapticPulse("GameplayExplosion") -- phones etc; gamepads peak via the trauma-driven motors
 		playOneShot("thud", { Volume = 0.42, PlaybackSpeed = 0.5 })
@@ -1703,44 +1817,15 @@ roundStateRemote.OnClientEvent:Connect(function(state, info)
 		info = {}
 	end
 	currentState = state
-	if tonumber(info.wave) then
-		lastWave = tonumber(info.wave) :: number
-	end
-	if tonumber(info.aliveCount) then
-		lastAlive = tonumber(info.aliveCount) :: number
-	end
-	if tonumber(info.gridSize) then
-		lastGridSize = tonumber(info.gridSize) :: number
-	elseif state == "INTERMISSION" or state == "WAITING" then
-		-- The server reconfigures the arena at the next round start, so fall
-		-- back to the full grid until ACTIVE info says otherwise.
-		lastGridSize = Config.GRID_SIZE
-	end
-
-	if typeof(info.modeName) == "string" then
-		lastModeName = info.modeName
-	elseif state == "WAITING" then
-		lastModeName = nil -- no mode picked until players show up
-	end
-	lastTeamCounts = if state == "ACTIVE" and isTeamCounts(info.teamCounts)
-		then info.teamCounts
-		else nil
 
 	-- The ACTIVE window drives the bull-cam framing; forget it between rounds.
+	-- (Round identity + alive count moved to notif cards, so nothing else in
+	-- the info payload needs mirroring here anymore.)
 	if state == "ACTIVE" and isBounds(info.bounds) then
 		lastBounds = info.bounds
 	elseif state ~= "ACTIVE" then
 		lastBounds = nil
 	end
-
-	local timeLeft = tonumber(info.timeLeft)
-	if state == "INTERMISSION" and timeLeft then
-		intermissionEndsAt = os.clock() + timeLeft
-	else
-		intermissionEndsAt = nil
-	end
-	lastIntermissionSecond = nil
-	refreshStatus(timeLeft)
 
 	if state ~= "ACTIVE" then
 		locallyEliminated = false -- fresh eyes (and shakes) for the next round
@@ -1759,23 +1844,13 @@ roundStateRemote.OnClientEvent:Connect(function(state, info)
 end)
 
 --==============================================================================
--- The single per-frame binding: near-miss tracking, shake decay + gamepad
--- rumble, and the intermission countdown display
+-- The single per-frame binding: near-miss tracking, shake decay + gamepad rumble.
 --==============================================================================
 
 local revengeRefreshAccum = 0
 local baseRefreshAccum = 0
 
 RunService.RenderStepped:Connect(function(dt)
-	-- Local intermission countdown (display only; server events stay authoritative)
-	if currentState == "INTERMISSION" and intermissionEndsAt then
-		local remaining = math.max(0, intermissionEndsAt - os.clock())
-		local second = math.ceil(remaining)
-		if second ~= lastIntermissionSecond then
-			lastIntermissionSecond = second
-			refreshStatus(remaining)
-		end
-	end
 
 	-- Revenge lane-select repaint, throttled to 0.1s: selection tint, ring
 	-- rebuilds after shrinks, and the HUD cooldown mirror. Runs in EVERY
@@ -1799,9 +1874,23 @@ RunService.RenderStepped:Connect(function(dt)
 		refreshGhosts()
 		refreshBullCamPad() -- change-guarded; hides again when the round ends
 		updateOverhead() -- bull-cam exit conditions, reframing, and pad entry
+		watchActiveBulls() -- (re)hook the thrower's-own-bull highlight boost
 	end
 
 	updateNearMisses()
+
+	-- Hitstop wins the camera outright: while frozen, hold a constant displaced
+	-- offset (no jitter, no trauma decay) so the impact reads as a hard stop
+	-- before the rattle spills out. Everything above still ran this frame.
+	if os.clock() < hitstopUntil then
+		local humanoid = getHumanoid()
+		if humanoid then
+			humanoid.CameraOffset = hitstopOffset
+		end
+		shakeDirty = true
+		setGamepadRumble(1)
+		return
+	end
 
 	-- Trauma-based camera shake: punchy trauma decays fast; tremor holds a
 	-- sustained floor until whoever set it clears it. One combined level so

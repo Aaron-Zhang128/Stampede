@@ -14,11 +14,16 @@
 	knockback burst to our own character. Movement is client-authoritative, so the
 	owning client drives the physics (same idiom as BullrushDash) and it replicates
 	to everyone else.
+
+	Bot rigs (Workspace.BullrushArena.Bots) get the same prompt so the shove is
+	testable solo; triggering sends the rig Model and the SERVER applies the
+	knockback (bots are server-owned). Bots never push back.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local ExpressivePrompts = require(ReplicatedStorage.ExpressivePrompts)
@@ -36,10 +41,16 @@ ExpressivePrompts.Init()
 
 local roundActive = false
 local prompts: { [Player]: ProximityPrompt } = {}
+local botPrompts: { [Model]: ProximityPrompt } = {}
 
 local function refreshEnabled()
 	for _, prompt in prompts do
 		if prompt.Parent then -- skip prompts destroyed with an old character
+			prompt.Enabled = roundActive
+		end
+	end
+	for _, prompt in botPrompts do
+		if prompt.Parent then
 			prompt.Enabled = roundActive
 		end
 	end
@@ -101,6 +112,63 @@ end
 Players.PlayerAdded:Connect(trackPlayer)
 Players.PlayerRemoving:Connect(function(other)
 	prompts[other] = nil
+end)
+
+--==============================================================================
+-- Same prompt over every bot rig, so the shove is testable solo. AIService
+-- rebuilds the rigs each round; prompts die with them.
+--==============================================================================
+
+local function attachBotPrompt(rig: Instance)
+	if not rig:IsA("Model") or botPrompts[rig] then
+		return
+	end
+	local adornee = rig:WaitForChild("Head", 10) or rig:FindFirstChild("HumanoidRootPart")
+	if not adornee or not adornee.Parent then
+		return
+	end
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "PushPrompt"
+	prompt.Style = Enum.ProximityPromptStyle.Custom
+	prompt.ActionText = "Push"
+	prompt.ObjectText = rig.Name
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = PUSH.RANGE
+	prompt.RequiresLineOfSight = false
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.GamepadKeyCode = Enum.KeyCode.ButtonY
+	prompt.Enabled = roundActive
+	prompt.Parent = adornee
+
+	prompt.Triggered:Connect(function()
+		Remotes.Push:FireServer(rig) -- bot proxies never replicate, so send the rig
+	end)
+
+	botPrompts[rig] = prompt
+	rig.Destroying:Connect(function()
+		botPrompts[rig] = nil
+	end)
+end
+
+local function watchBotsFolder(folder: Instance)
+	folder.ChildAdded:Connect(attachBotPrompt)
+	for _, rig in folder:GetChildren() do
+		task.spawn(attachBotPrompt, rig)
+	end
+end
+
+task.spawn(function()
+	local arena = Workspace:WaitForChild("BullrushArena", 30) or Workspace
+	local folder = arena:FindFirstChild("Bots")
+	if folder then
+		watchBotsFolder(folder)
+	end
+	arena.ChildAdded:Connect(function(child)
+		if child.Name == "Bots" and child:IsA("Folder") then
+			watchBotsFolder(child)
+		end
+	end)
 end)
 
 --==============================================================================

@@ -16,8 +16,9 @@
 	  rollable   false keeps it out of the roll pool (starter + exclusives)
 
 	Rolling (BullCatalog.roll): pick a rarity by weight, then a uniform bull
-	within that rarity. Duplicate pulls refund
-	Config.BULLS.ROLL_COST * rarity.dupeRefund Money (BullRollService).
+	within that rarity. The default weights below are overridable per roll -
+	each lucky box in Config.BULLS.BOXES carries its own rarity weight table.
+	Duplicate pulls refund box.cost * rarity.dupeRefund Money (BullRollService).
 ]]
 
 local BullCatalog = {}
@@ -92,21 +93,39 @@ end
 
 -- One weighted roll: rarity by weight (only rarities that actually have a
 -- rollable bull count), then uniform within the rarity. The caller passes the
--- Random instance so tests can seed it.
-function BullCatalog.roll(rng: Random): string
+-- Random instance so tests can seed it. `weights` (optional, { rarity -> w })
+-- overrides the default per-rarity weights - lucky boxes each bring their own
+-- table; rarities weighted <= 0 (or absent from the table) can't drop.
+function BullCatalog.roll(rng: Random, weights: { [string]: number }?): string
 	local rarityPools = getPools()
+	local function weightOf(rarity)
+		local w = if weights then weights[rarity] or 0 else BullCatalog.Rarities[rarity].weight
+		return math.max(w, 0)
+	end
 	local totalWeight = 0
 	for rarity in rarityPools do
-		totalWeight += BullCatalog.Rarities[rarity].weight
+		totalWeight += weightOf(rarity)
+	end
+	if totalWeight <= 0 then
+		-- a box with all-zero weights is a config bug; fall back to the defaults
+		return BullCatalog.roll(rng)
 	end
 	local pick = rng:NextNumber() * totalWeight
 	for rarity, pool in rarityPools do
-		pick -= BullCatalog.Rarities[rarity].weight
-		if pick <= 0 then
-			return pool[rng:NextInteger(1, #pool)]
+		local w = weightOf(rarity)
+		if w > 0 then
+			pick -= w
+			if pick <= 0 then
+				return pool[rng:NextInteger(1, #pool)]
+			end
 		end
 	end
-	-- float dust at the very top of the range: any pool works
+	-- float dust at the very top of the range: any weighted pool works
+	for rarity, pool in rarityPools do
+		if weightOf(rarity) > 0 then
+			return pool[1]
+		end
+	end
 	local _, pool = next(rarityPools)
 	return pool[1]
 end

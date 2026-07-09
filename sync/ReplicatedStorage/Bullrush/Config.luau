@@ -16,7 +16,7 @@ Config.BULL_HIT_HALF_LENGTH = 3.5 -- kill box half-length along the travel axis
 Config.BULL_HIT_HALF_WIDTH = 3.9  -- kill box half-width across the lane
 
 Config.MIN_PLAYERS = 1            -- solo rounds run for practice; wins only awarded with 2+ starters
-Config.INTERMISSION_TIME = 10
+Config.INTERMISSION_TIME = 15
 Config.MONEY_PER_WIN = 100
 
 -- Friend boost: every money grant is multiplied by 1 + PER_FRIEND for each of
@@ -72,12 +72,34 @@ Config.SPINNER = {
 	},
 }
 
--- Bull rolls: players spend Money to roll the shared BullCatalog
--- (ReplicatedStorage.Bullrush.BullCatalog - rarities, weights, speeds); the
--- EQUIPPED bull's speed replaces REVENGE.SPEED on the bull-cam throw.
--- Duplicate pulls refund ROLL_COST * rarity.dupeRefund Money.
+-- Bull rolls: players buy LUCKY BOXES (Frames.Shop1 "Lucky Boxes" window);
+-- each box is one roll of the shared BullCatalog with the box's own rarity
+-- weights - pricier boxes skew harder toward the top tiers. Buying a box
+-- immediately plays the roll reveal. Duplicate pulls refund
+-- box.cost * rarity.dupeRefund Money. weights need not sum to 100 (they're
+-- normalized), but keeping them at 100 makes the UI odds label obvious.
 Config.BULLS = {
-	ROLL_COST = 200,              -- Money per roll (~2 decent rounds of earnings)
+	BOXES = {
+		BASIC = {
+			name = "Lucky Box", tag = "Basic", order = 1,
+			cost = 150,           -- ~1-2 rounds of earnings
+			color = Color3.fromRGB(205, 127, 50), -- bronze
+			weights = { COMMON = 64, UNCOMMON = 25, RARE = 9, EPIC = 1.8, LEGENDARY = 0.2 },
+		},
+		SUPER = {
+			name = "Super Lucky Box", tag = "Super", order = 2,
+			cost = 450,
+			color = Color3.fromRGB(150, 190, 230), -- silver-blue
+			weights = { COMMON = 40, UNCOMMON = 31, RARE = 20, EPIC = 7, LEGENDARY = 2 },
+		},
+		MEGA = {
+			name = "Mega Lucky Box", tag = "Mega", order = 3,
+			cost = 1200,
+			color = Color3.fromRGB(255, 190, 40), -- gold
+			weights = { COMMON = 16, UNCOMMON = 28, RARE = 31, EPIC = 18, LEGENDARY = 7 },
+		},
+	},
+	ROBUX_BOX = "MEGA",           -- Robux rolls (BULL_ROLL/BULL_ROLL_10) open this box
 }
 
 -- Revenge bulls: eliminated participants may send a bull down a lane of the

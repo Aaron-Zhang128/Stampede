@@ -25,7 +25,23 @@ local SLICE_ANGLE = 60
 local sfxGroup = SoundService:FindFirstChild("GameSFX")
 local tickerTemplate = sfxGroup and sfxGroup:FindFirstChild("Ticker")
 
-local wheelModel = workspace:WaitForChild("FortuneWheel", 60)
+-- the wheel was reparented under Workspace.Lobby in the map rework, so a plain
+-- workspace:WaitForChild("FortuneWheel") no longer resolves. Scan descendants
+-- (retrying while the model streams in) so any future move can't break this.
+local function resolveWheel()
+	local deadline = os.clock() + 60
+	repeat
+		for _, m in ipairs(workspace:GetDescendants()) do
+			if m:IsA("Model") and m.Name == "FortuneWheel" then
+				return m
+			end
+		end
+		task.wait(0.2)
+	until os.clock() >= deadline
+	return nil
+end
+
+local wheelModel = resolveWheel()
 local disc = wheelModel and wheelModel:WaitForChild("Disc", 10)
 if not (disc and disc:IsA("Model")) then
 	warn("[FortuneWheelClient] Workspace.FortuneWheel.Disc missing; lobby wheel stays still")

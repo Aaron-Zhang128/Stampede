@@ -1,20 +1,22 @@
 --[[
 	BullRollService - the roll + equip backend for revenge bulls.
 
-	Players roll the shared BullCatalog for bulls; the EQUIPPED bull's speed
-	replaces Config.REVENGE.SPEED on the bull sent from the overhead bull-cam
-	(RevengeService calls getEquippedBull at throw time). Duplicate pulls
-	auto-refund ROLL_COST * rarity.dupeRefund Money - a refund, not an earner,
-	so it's granted RAW (no friend boost / mode multiplier).
+	Players buy LUCKY BOXES (Config.BULLS.BOXES) - each box is one roll of the
+	shared BullCatalog with the box's own rarity weights. The EQUIPPED bull's
+	speed replaces Config.REVENGE.SPEED on the bull sent from the overhead
+	bull-cam (RevengeService calls getEquippedBull at throw time). Duplicate
+	pulls auto-refund box.cost * rarity.dupeRefund Money - a refund, not an
+	earner, so it's granted RAW (no friend boost / mode multiplier).
 
 	Client contract (StarterGui.Main owns ALL the UI, per the house rule):
-	- BullRoll:FireServer()           spend Config.BULLS.ROLL_COST Money on one roll
+	- BullRoll:FireServer(boxId)      buy + open one Config.BULLS.BOXES box
 	- BullEquip:FireServer(bullId)    equip an owned BullCatalog id
 	- BullAck:FireClient(player, kind, data) answers the caller only:
-	    "ROLLED"   { results = {{bullId, rarity, isNew, refund}},
+	    "ROLLED"   { results = {{bullId, rarity, isNew, refund}}, boxId,
 	                 money = new balance, source = "MONEY" | "ROBUX" }
 	    "EQUIPPED" { bullId }
-	    "DENIED"   { reason = "NO_MONEY" | "DATA_NOT_LOADED" | "NOT_OWNED" | "BAD_ID" }
+	    "DENIED"   { reason = "NO_MONEY" (+ cost) | "DATA_NOT_LOADED"
+	                        | "NOT_OWNED" | "BAD_ID" | "BAD_BOX" }
 	Inventory replicates as player attributes (set on join by Data.server.luau,
 	refreshed here after every roll): Bulls = JSON { bullId = true },
 	EquippedBull = id - so the UI needs no fetch remote.
@@ -95,13 +97,25 @@ end
 -- Rolling
 --==============================================================================
 
--- Grants `count` already-paid-for rolls and acks the batch. Dupe refunds are
--- summed and granted raw at the end (one profile write, not one per dupe).
-local function grantRolls(player, count: number, source: string)
+-- boxId -> (boxId, box) from Config.BULLS.BOXES; nil for junk input.
+local function getBox(boxId: any): (string?, any)
+	if typeof(boxId) == "string" then
+		local box = Config.BULLS.BOXES[boxId]
+		if box then
+			return boxId, box
+		end
+	end
+	return nil, nil
+end
+
+-- Grants `count` already-paid-for openings of `box` and acks the batch. Dupe
+-- refunds (box.cost basis) are summed and granted raw at the end (one profile
+-- write, not one per dupe).
+local function grantRolls(player, count: number, source: string, boxId: string, box)
 	local results = {}
 	local refundTotal = 0
 	for _ = 1, count do
-		local bullId = BullCatalog.roll(rng)
+		local bullId = BullCatalog.roll(rng, box.weights)
 		local bull = BullCatalog.get(bullId) :: BullCatalog.Bull
 		local isNew = not DataHandler.HasBull(player, bullId)
 		local refund = 0
@@ -113,7 +127,7 @@ local function grantRolls(player, count: number, source: string)
 					("%s pulled %s!"):format(displayName, bull.name:upper()), "green", 5)
 			end
 		else
-			refund = math.floor(Config.BULLS.ROLL_COST * BullCatalog.Rarities[bull.rarity].dupeRefund)
+			refund = math.floor(box.cost * BullCatalog.Rarities[bull.rarity].dupeRefund)
 			refundTotal += refund
 		end
 		table.insert(results, { bullId = bullId, rarity = bull.rarity, isNew = isNew, refund = refund })
@@ -124,6 +138,7 @@ local function grantRolls(player, count: number, source: string)
 	refreshInventoryAttribute(player)
 	ack(player, "ROLLED", {
 		results = results,
+		boxId = boxId,
 		money = DataHandler.GetStat(player, "Money"),
 		source = source,
 	})
@@ -131,25 +146,30 @@ local function grantRolls(player, count: number, source: string)
 end
 
 -- Public (not just the remote's target) so smoke tests can call it directly.
-function BullRollService.requestRoll(player)
+function BullRollService.requestRoll(player, requestedBoxId: any)
 	local now = os.clock()
 	if now - (lastRequestAt[player] or 0) < REQUEST_GAP then
 		return
 	end
 	lastRequestAt[player] = now
 
+	local boxId, box = getBox(requestedBoxId)
+	if not (boxId and box) then
+		ack(player, "DENIED", { reason = "BAD_BOX" })
+		return
+	end
 	if not profileReady(player) then
 		ack(player, "DENIED", { reason = "DATA_NOT_LOADED" })
 		return
 	end
-	local cost = Config.BULLS.ROLL_COST
+	local cost = box.cost
 	local money = DataHandler.GetStat(player, "Money") or 0
 	if money < cost then
-		ack(player, "DENIED", { reason = "NO_MONEY" })
+		ack(player, "DENIED", { reason = "NO_MONEY", cost = cost })
 		return
 	end
 	DataHandler.SetStat(player, "Money", money - cost)
-	grantRolls(player, 1, "MONEY")
+	grantRolls(player, 1, "MONEY", boxId, box)
 end
 
 function BullRollService.requestEquip(player, bullId: any)
@@ -220,7 +240,12 @@ function BullRollService.init()
 				-- (and eventually refund) rather than eat the Robux.
 				return Enum.ProductPurchaseDecision.NotProcessedYet
 			end
-			grantRolls(player, count, "ROBUX")
+			-- Robux rolls open the premium box (best odds; refunds on its cost)
+			local boxId, box = getBox(Config.BULLS.ROBUX_BOX)
+			if not (boxId and box) then
+				boxId, box = next(Config.BULLS.BOXES)
+			end
+			grantRolls(player, count, "ROBUX", boxId, box)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 	end
@@ -228,8 +253,8 @@ function BullRollService.init()
 	EconomyService.registerProduct(Config.PRODUCTS.BULL_ROLL_10, makeHandler(10))
 end
 
-rollRemote.OnServerEvent:Connect(function(player)
-	BullRollService.requestRoll(player)
+rollRemote.OnServerEvent:Connect(function(player, boxId)
+	BullRollService.requestRoll(player, boxId)
 end)
 
 equipRemote.OnServerEvent:Connect(function(player, bullId)

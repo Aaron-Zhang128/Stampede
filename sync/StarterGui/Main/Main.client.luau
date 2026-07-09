@@ -118,6 +118,39 @@ for _, frame in ipairs(Frames:GetChildren()) do
 	end
 end
 
+---------------------------------------------------------------- 1b) lobby shop door
+-- the lobby Shop stall carries a Custom-styled ProximityPrompt (dressed by
+-- ExpressivePrompts, which PushClient installs). Triggering it opens the Shop1
+-- window. Scan descendants (retrying while the map streams in) so a future
+-- reparent of the stall can't silently break the door, exactly like the wheel.
+do
+	local Shop1 = Frames:FindFirstChild("Shop1")
+	if Shop1 then
+		task.spawn(function()
+			local prompt
+			local deadline = os.clock() + 60
+			repeat
+				for _, d in ipairs(workspace:GetDescendants()) do
+					if d:IsA("ProximityPrompt") and d.Name == "ShopPrompt" then
+						prompt = d
+						break
+					end
+				end
+				if not prompt then
+					task.wait(0.3)
+				end
+			until prompt or os.clock() >= deadline
+			if prompt then
+				prompt.Triggered:Connect(function(who)
+					if who == player then
+						openFrame(Shop1)
+					end
+				end)
+			end
+		end)
+	end
+end
+
 ---------------------------------------------------------------- 2) HUD -> frames
 local function scrollStoreTo(sectionName)
 	local targetY = 0
@@ -317,6 +350,70 @@ local function playClick()
 end
 local function playHover()
 	playUiSound(0.9, 1.5)
+end
+
+-- Settings audio sliders: drag the handle across a row (or click the track) to
+-- set the matching SoundGroup volume live. "Music" -> SoundService.BackgroundMusic,
+-- "Sound Effects" -> SoundService.GameSFX. Missing group/slider -> silent no-op.
+do
+	local UserInputService = game:GetService("UserInputService")
+	local settingsFrame = Frames:FindFirstChild("Config/Settings")
+	local container = settingsFrame and settingsFrame:FindFirstChild("Container")
+
+	local function wireVolumeSlider(row, group)
+		local sliderFrame = row and row:FindFirstChild("Slider")
+		local handle = sliderFrame and sliderFrame:FindFirstChild("Button")
+		if not (handle and group) then
+			return
+		end
+
+		-- handle center travels 0..1 across the Slider frame; alpha IS the volume
+		local function applyAlpha(alpha)
+			alpha = math.clamp(alpha, 0, 1)
+			handle.Position = UDim2.new(alpha, 0, 0.5, 0)
+			group.Volume = alpha
+		end
+
+		-- start the handle where the group's current volume already sits
+		applyAlpha(group.Volume)
+
+		local dragging = false
+		local function updateFromX(x)
+			local width = sliderFrame.AbsoluteSize.X
+			if width > 0 then
+				applyAlpha((x - sliderFrame.AbsolutePosition.X) / width)
+			end
+		end
+		local function beginDrag(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				dragging = true
+				updateFromX(input.Position.X)
+			end
+		end
+
+		handle.InputBegan:Connect(beginDrag)
+		sliderFrame.Active = true -- let clicks on the track jump the handle
+		sliderFrame.InputBegan:Connect(beginDrag)
+
+		UserInputService.InputChanged:Connect(function(input)
+			if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch) then
+				updateFromX(input.Position.X)
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				dragging = false
+			end
+		end)
+	end
+
+	if container then
+		wireVolumeSlider(container:FindFirstChild("Slider1"), SoundService:FindFirstChild("BackgroundMusic"))
+		wireVolumeSlider(container:FindFirstChild("Slider2"), SoundService:FindFirstChild("GameSFX"))
+	end
 end
 
 local function addButtonFeedback(btn)
@@ -566,6 +663,8 @@ end)
 -- the style colours the TEXT itself: "red"/"green" run a vertical light-to-
 -- dark gradient down the glyphs (danger / good news), "white" stays plain.
 -- Cards clone SideUI.Top.Notif and stack under the top HUD, newest first.
+-- The stack also hosts ONE sticky card: the intermission countdown
+-- ("NEXT: <mode> — 12s"), repainted from the per-second RoundState resends.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local notifTemplate = SideUI:WaitForChild("Top"):WaitForChild("Notif")
@@ -620,11 +719,12 @@ notifLayout.Parent = notifStack
 
 local notifCounter = 0
 
-function pushNotif(text, style, duration) -- assigns the forward-declared local
-	notifCounter += 1
+-- Shared card factory: clone the template, drop its stacking layout, style the
+-- text. Used by pushNotif's transient cards AND the sticky intermission
+-- countdown card below. Returns nil if the template lost its label (e.g. a
+-- test harness cloned a destroyed copy) rather than error in a remote handler.
+local function buildNotifCard(text, style)
 	local card = notifTemplate:Clone()
-	card.Name = "Notif" .. notifCounter
-	card.LayoutOrder = -notifCounter -- newest on top
 	card.Size = UDim2.new(1, 0, 0, 36)
 	card.Position = UDim2.new()
 	card.Visible = true
@@ -637,10 +737,8 @@ function pushNotif(text, style, duration) -- assigns the forward-declared local
 	end
 	local label = card:FindFirstChild("Text")
 	if not (label and label:IsA("TextLabel")) then
-		-- Template lost its label (e.g. a test harness cloned a destroyed
-		-- copy): drop the card rather than error inside a remote handler.
 		card:Destroy()
-		return
+		return nil, nil
 	end
 	label.AnchorPoint = Vector2.new(0.5, 0.5)
 	label.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -658,13 +756,41 @@ function pushNotif(text, style, duration) -- assigns the forward-declared local
 		textGradient.Color = tint
 		textGradient.Parent = label
 	end
+	return card, label
+end
 
+-- fade-and-destroy, shared by expiring notifs and the retiring countdown card
+local function fadeOutCard(card, label)
+	local stroke = label and label:FindFirstChildOfClass("UIStroke")
+	tween(card, TweenInfo.new(0.35), { BackgroundTransparency = 1 })
+	if label then
+		tween(label, TweenInfo.new(0.35), { TextTransparency = 1 })
+	end
+	if stroke then
+		tween(stroke, TweenInfo.new(0.35), { Transparency = 1 })
+	end
+	task.delay(0.4, function()
+		card:Destroy()
+	end)
+end
+
+local intermissionCard = nil -- the sticky countdown card; exempt from eviction
+
+function pushNotif(text, style, duration) -- assigns the forward-declared local
+	local card, label = buildNotifCard(text, style)
+	if not card then
+		return
+	end
+	notifCounter += 1
+	card.Name = "Notif" .. notifCounter
+	card.LayoutOrder = -notifCounter -- newest on top
 	card.Parent = notifStack
 
 	-- Evict the oldest card once the stack is full (highest LayoutOrder).
+	-- The intermission countdown card neither counts nor gets evicted.
 	local cards = {}
 	for _, c in ipairs(notifStack:GetChildren()) do
-		if c:IsA("Frame") then
+		if c:IsA("Frame") and c ~= intermissionCard then
 			table.insert(cards, c)
 		end
 	end
@@ -683,15 +809,7 @@ function pushNotif(text, style, duration) -- assigns the forward-declared local
 		if not card.Parent then
 			return -- already evicted
 		end
-		local stroke = label:FindFirstChildOfClass("UIStroke")
-		tween(card, TweenInfo.new(0.35), { BackgroundTransparency = 1 })
-		tween(label, TweenInfo.new(0.35), { TextTransparency = 1 })
-		if stroke then
-			tween(stroke, TweenInfo.new(0.35), { Transparency = 1 })
-		end
-		task.delay(0.4, function()
-			card:Destroy()
-		end)
+		fadeOutCard(card, label)
 	end)
 end
 
@@ -715,6 +833,97 @@ task.spawn(function()
 			tonumber(duration)
 		)
 	end)
+
+	-- Two things ride the per-second RoundState resends (Main.server round loop):
+	-- the CurrentArea HUD banner shows the current/upcoming GAME TYPE (mode), and a
+	-- single sticky notif card shows JUST the countdown during intermission.
+	local currentArea = SideUI:FindFirstChild("Top") and SideUI.Top:FindFirstChild("CurrentArea")
+	local areaWordA = currentArea and currentArea:FindFirstChild("Rarity")    -- accent (gradient) word
+	local areaWordB = currentArea and currentArea:FindFirstChild("TextLabel") -- plain white word
+	-- mode.name -> { accent word, white word, accent colour }
+	local GAME_TYPE = {
+		["Classic"] = { "Classic", "Mode", Color3.fromRGB(95, 175, 255) },
+		["Mega Grid"] = { "Large", "Grid", Color3.fromRGB(255, 150, 40) },
+		["Small Grid"] = { "Small", "Grid", Color3.fromRGB(90, 220, 110) },
+		["Stampede"] = { "Stampede", "Mode", Color3.fromRGB(255, 80, 70) },
+		["Team Rush"] = { "Teams", "Mode", Color3.fromRGB(200, 120, 255) },
+	}
+	local function paintGameType(modeName)
+		if not (currentArea and areaWordA and areaWordA:IsA("TextLabel")) then
+			return
+		end
+		local g = GAME_TYPE[modeName]
+		local col = (g and g[3]) or Color3.fromRGB(255, 255, 255)
+		areaWordA.Text = (g and g[1]) or modeName
+		if areaWordB and areaWordB:IsA("TextLabel") then
+			areaWordB.Text = (g and g[2]) or "Round"
+		end
+		-- retint the accent word's kit gradient (ships named "Epic") to the mode colour
+		local grad = areaWordA:FindFirstChildOfClass("UIGradient")
+		if grad then
+			grad.Rotation = -90
+			grad.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, col:Lerp(Color3.new(1, 1, 1), 0.45)),
+				ColorSequenceKeypoint.new(0.1, col:Lerp(Color3.new(1, 1, 1), 0.45)),
+				ColorSequenceKeypoint.new(0.9, col),
+				ColorSequenceKeypoint.new(1, col),
+			})
+		end
+		if not currentArea.Visible then
+			currentArea.Visible = true
+			local scale = ensureScale(currentArea)
+			scale.Scale = 0.6
+			tween(scale, POP_IN, { Scale = 1 })
+		end
+	end
+
+	local stateRemote = remotes:FindFirstChild("RoundState")
+	if stateRemote and stateRemote:IsA("RemoteEvent") then
+		local intermissionLabel = nil
+		if currentArea then
+			currentArea.Visible = false -- hidden until the first state that carries a mode
+		end
+		stateRemote.OnClientEvent:Connect(function(state, info)
+			info = if typeof(info) == "table" then info else {}
+
+			-- GAME TYPE banner: show the mode whenever one is known, hide otherwise (WAITING)
+			local modeName = if typeof(info.modeName) == "string" then info.modeName else nil
+			if modeName then
+				paintGameType(modeName)
+			elseif currentArea then
+				currentArea.Visible = false
+			end
+
+			-- COUNTDOWN card: just the timer, one sticky card, only during intermission
+			local timeLeft = tonumber(info.timeLeft)
+			if state == "INTERMISSION" and timeLeft then
+				local seconds = math.max(0, math.floor(timeLeft + 0.5))
+				local text = ("NEXT ROUND IN %ds"):format(seconds)
+				if intermissionCard and intermissionCard.Parent then
+					if intermissionLabel then
+						intermissionLabel.Text = text
+					end
+				else
+					local card, label = buildNotifCard(text, "white")
+					if card then
+						card.Name = "IntermissionTimer"
+						card.LayoutOrder = -1e9 -- pinned above every transient card
+						card.Parent = notifStack
+						intermissionCard, intermissionLabel = card, label
+						local scale = ensureScale(card)
+						scale.Scale = 0.6
+						tween(scale, POP_IN, { Scale = 1 })
+					end
+				end
+			elseif intermissionCard then
+				local card, label = intermissionCard, intermissionLabel
+				intermissionCard, intermissionLabel = nil, nil
+				if card.Parent then
+					fadeOutCard(card, label)
+				end
+			end
+		end)
+	end
 end)
 
 -- Elimination side feed: eliminations skip the notif card stack and show on
@@ -923,8 +1132,10 @@ end
 -- RoundSummary payload at round end (EconomyService.settle - see the contract
 -- in GridUtil's header). The payload is HELD until the player is back in the
 -- lobby (the WAITING/INTERMISSION state right after the teleport), then the
--- tab auto-opens with the winner's portrait + name, your own portrait +
--- placement in the corner TinyBox, the Money you earned, and an itemized
+-- tab auto-opens with the winner's portrait + name, your EQUIPPED BULL (real
+-- model in a ViewportFrame, name underneath) in the corner TinyBox — falling
+-- back to the old portrait + placement if the catalog never loads — plus the
+-- Money you earned, and an itemized
 -- breakdown line; it auto-closes when the next round goes ACTIVE. The kit's XP row stays hidden until an XP system exists. The
 -- "2x Rewards?" button prompts the Config.PRODUCTS.DOUBLE_ROUND dev product;
 -- the server answers a granted receipt with an { update = true } resend.
@@ -1115,6 +1326,71 @@ if summaryMain then
 		return ("rbxthumb://type=AvatarBust&id=%d&w=420&h=420"):format(userId)
 	end
 
+	-- The corner TinyBox shows the bull you have EQUIPPED — its real model in
+	-- a ViewportFrame that sits exactly where the kit's portrait ImageLabel
+	-- was (same slot/aspect); the ImageLabel stays behind as the fallback.
+	-- Catalog + model folders resolve in the startup task.spawn below, before
+	-- any payload can arrive.
+	local bullCatalog, bullModelsFolder, bullFallbackModel
+	local tinyViewport
+	if tinyIcon then
+		tinyViewport = Instance.new("ViewportFrame")
+		tinyViewport.Name = "BullPreview"
+		tinyViewport.BackgroundTransparency = 1
+		tinyViewport.AnchorPoint = tinyIcon.AnchorPoint
+		tinyViewport.Position = tinyIcon.Position
+		tinyViewport.Size = tinyIcon.Size
+		tinyViewport.ZIndex = tinyIcon.ZIndex
+		tinyViewport.Ambient = Color3.fromRGB(165, 160, 155)
+		tinyViewport.LightColor = Color3.fromRGB(255, 250, 240)
+		tinyViewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
+		local iconRatio = tinyIcon:FindFirstChildOfClass("UIAspectRatioConstraint")
+		if iconRatio then
+			iconRatio:Clone().Parent = tinyViewport
+		end
+		tinyViewport.Visible = false
+		tinyViewport.Parent = tinyBox
+	end
+
+	-- (re)render the equipped bull into the TinyBox viewport; returns the
+	-- catalog entry on success, nil when the catalog/model isn't available so
+	-- populate() can fall back to the old portrait + placement look
+	local function renderEquippedBull()
+		if not (tinyViewport and bullCatalog and typeof(bullCatalog.Bulls) == "table") then
+			return nil
+		end
+		local id = player:GetAttribute("EquippedBull") or "STARTER"
+		local bull = bullCatalog.Bulls[id]
+		if not bull then
+			return nil
+		end
+		local source = (bull.modelName and bullModelsFolder and bullModelsFolder:FindFirstChild(bull.modelName))
+			or bullFallbackModel
+		if not source then
+			return nil
+		end
+		-- keep the aspect constraint; only the previous render gets swept
+		for _, old in ipairs(tinyViewport:GetChildren()) do
+			if old:IsA("Model") or old:IsA("Camera") then
+				old:Destroy()
+			end
+		end
+		local model = source:Clone()
+		model:PivotTo(CFrame.new())
+		local center, size = Vector3.zero, Vector3.new(10, 10, 10)
+		pcall(function()
+			local cf, bbox = model:GetBoundingBox()
+			center, size = cf.Position, bbox
+		end)
+		local camera = Instance.new("Camera")
+		-- same 3/4-front framing as the Index cards (bulls face -Z)
+		camera.CFrame = CFrame.lookAt(center + Vector3.new(-0.55, 0.42, -1).Unit * size.Magnitude * 0.72, center)
+		camera.Parent = tinyViewport
+		tinyViewport.CurrentCamera = camera
+		model.Parent = tinyViewport
+		return bull
+	end
+
 	local function ordinal(n)
 		local tens = n % 100
 		local suffix = "TH"
@@ -1141,11 +1417,26 @@ if summaryMain then
 				winnerLabel.TextColor3 = defaultNameColor
 			end
 		end
-		if tinyIcon then
-			tinyIcon.Image = portrait(player.UserId)
-		end
-		if tinyText then
-			tinyText.Text = ordinal(tonumber(data.placement) or 1)
+		local equippedBull = renderEquippedBull()
+		if equippedBull then
+			if tinyIcon then
+				tinyIcon.Visible = false
+			end
+			tinyViewport.Visible = true
+			if tinyText then
+				tinyText.Text = equippedBull.name
+			end
+		else
+			if tinyViewport then
+				tinyViewport.Visible = false
+			end
+			if tinyIcon then
+				tinyIcon.Visible = true
+				tinyIcon.Image = portrait(player.UserId)
+			end
+			if tinyText then
+				tinyText.Text = ordinal(tonumber(data.placement) or 1)
+			end
 		end
 		if coinsAmount then
 			coinsAmount.Text = "+" .. comma(tonumber(data.total) or 0)
@@ -1190,12 +1481,21 @@ if summaryMain then
 		if okConfig and typeof(bullrushConfig) == "table" and typeof(bullrushConfig.PRODUCTS) == "table" then
 			productId = tonumber(bullrushConfig.PRODUCTS.DOUBLE_ROUND) or 0
 		end
+		local okCatalog, catalog = pcall(require, bullrush:WaitForChild("BullCatalog"))
+		if okCatalog and typeof(catalog) == "table" then
+			bullCatalog = catalog
+		end
+		local bullAssets = ReplicatedStorage:FindFirstChild("BullrushAssets")
+		bullModelsFolder = bullAssets and bullAssets:FindFirstChild("Bulls")
+		bullFallbackModel = bullAssets and bullAssets:FindFirstChild("BullTemplate")
 
 		-- The payload lands while the winner banner is still up and the player
 		-- is standing in the arena; hold it until the post-round state change
 		-- (WAITING/INTERMISSION fires right after the lobby teleport) so the
 		-- recap only ever opens back in the lobby.
 		local pendingSummary: { [string]: any }? = nil
+		local SUMMARY_AUTOCLOSE = 5 -- seconds the recap stays up before folding on its own
+		local autoCloseToken = 0
 
 		summaryRemote.OnClientEvent:Connect(function(data)
 			if typeof(data) ~= "table" then
@@ -1224,6 +1524,16 @@ if summaryMain then
 					if currentFrame ~= summaryFrame then
 						openFrame(summaryFrame)
 					end
+					-- fold on its own after a short read; the token keeps a
+					-- stale timer from closing a NEWER recap (or whatever
+					-- window the player opened after dismissing this one)
+					autoCloseToken += 1
+					local token = autoCloseToken
+					task.delay(SUMMARY_AUTOCLOSE, function()
+						if token == autoCloseToken and currentFrame == summaryFrame then
+							closeFrame(summaryFrame)
+						end
+					end)
 				elseif state == "ACTIVE" then
 					-- The recap is over once the next round actually starts.
 					pendingSummary = nil
@@ -1679,7 +1989,25 @@ do
 		-- out and back in - the prompt covers reopening in place. The
 		-- auto-open also never steals the screen from another open window.
 		task.spawn(function()
-			local wheelModel = workspace:WaitForChild("FortuneWheel", 60)
+			-- the wheel was reparented under Workspace.Lobby in the map rework,
+			-- so a plain workspace:WaitForChild("FortuneWheel") no longer resolves.
+			-- Scan descendants (retrying while it streams in) so a future move
+			-- can't silently break both doors again.
+			local wheelModel
+			do
+				local deadline = os.clock() + 60
+				repeat
+					for _, m in ipairs(workspace:GetDescendants()) do
+						if m:IsA("Model") and m.Name == "FortuneWheel" then
+							wheelModel = m
+							break
+						end
+					end
+					if not wheelModel then
+						task.wait(0.2)
+					end
+				until wheelModel or os.clock() >= deadline
+			end
 			if not wheelModel then
 				return
 			end
@@ -1810,14 +2138,17 @@ end
 
 
 ---------------------------------------------------------------- 11) bull roll
--- Gacha reveal for the bull roll system (ReplicatedStorage.Bullrush.BullCatalog
--- + ServerScriptService.Bullrush.BullRollService). The WHOLE panel is built here
--- in code (no kit instance) so it drops cleanly into a shop frame later — to wire
--- it up, just call openFrame(rollFrame) from a button (or reparent rollFrame).
+-- LUCKY BOXES + the gacha reveal (ReplicatedStorage.Bullrush.BullCatalog +
+-- ServerScriptService.Bullrush.BullRollService). Frames.Shop1 is reworked into
+-- the "Lucky Boxes" shop: one kit card per Config.BULLS.BOXES box (name, tier
+-- tag, a RichText odds line, a $cost buy button). Buying a box fires
+-- BullRoll:FireServer(boxId); the "ROLLED" ack AUTO-OPENS the reveal wheel
+-- (rollFrame) — the shop window closes itself via openFrame's one-at-a-time
+-- rule. The wheel's green button re-buys the same box ("ROLL AGAIN").
 --
--- The server rolls the result and answers the caller: BullRoll:FireServer() ->
--- BullAck "ROLLED" { results = {{bullId,rarity,isNew,refund}}, money, source }.
--- This section is pure presentation: a horizontal strip of rarity-tinted
+-- The server rolls the result and answers the caller: BullRoll:FireServer(boxId)
+-- -> BullAck "ROLLED" { results = {{bullId,rarity,isNew,refund}}, boxId, money,
+-- source }. The reveal is pure presentation: a horizontal strip of rarity-tinted
 -- placeholder cards (swap the "🐂" TextLabel for a ViewportFrame/thumbnail once
 -- the models land) scrolls fast, cubic-eases to a stop with the won bull under
 -- the center marker, ticks per card, drumroll on the final crawl. A 10x roll runs
@@ -1825,13 +2156,12 @@ end
 -- All motion is manual RenderStepped math, never a TweenService loop (Run-mode
 -- tween freeze — see the marquee/ambient sections).
 do
-	local UserInputService = game:GetService("UserInputService")
-
 	-- resolved async (remotes + Config + Catalog) at the bottom of this block
 	local BullCatalog = nil
 	local ackRemote = nil
-	local rollRemote = nil        -- nil until acks wired = button stays inert
-	local ROLL_COST = 200
+	local rollRemote = nil        -- nil until acks wired = buttons stay inert
+	local BOXES = nil             -- Config.BULLS.BOXES once Config resolves
+	local lastBoxId = nil         -- box behind the current reveal (ROLL AGAIN re-buys it)
 	local productIds = { BULL_ROLL = 0, BULL_ROLL_10 = 0 }
 
 	-- geometry (pixels): the strip lives in a clipped viewport and only its X
@@ -1891,17 +2221,15 @@ do
 	end
 
 	-------------------------------------------------- kit style kit
-	-- Tokens harvested from the shop UI (StarterGui.Main) so the panel chrome matches
-	-- the rest of the game: GothamBlack everywhere, white text over a thin near-black
-	-- stroke, gold header gradient, tiling stud sheen. (The clickable BUTTONS aren't
-	-- rebuilt from these — cloneButton clones the real HUD buttons instead.)
+	-- Tokens harvested from the shop UI so the cards + 10x grid match the rest of the
+	-- game: GothamBlack, white text over a thin near-black stroke. (The clickable
+	-- BUTTONS aren't built from these — cloneButton clones the real HUD buttons.)
 	local KIT_FONT = Enum.Font.GothamBlack
 	local INK = Color3.fromRGB(15, 15, 15)           -- the kit's outline/shadow black
 	local PAPER = Color3.fromRGB(255, 255, 255)
-	local STUD_IMG = "rbxassetid://128202495740649"  -- tiling stud sheen overlay
-	-- gradient pairs lifted straight off kit buttons (bright top -> saturated bottom)
+	-- gradient pair lifted off the kit's gold buttons (bright top -> saturated bottom)
 	local GRAD = {
-		GOLD = { Color3.fromRGB(255, 251, 0), Color3.fromRGB(255, 147, 0) }, -- header / titles
+		GOLD = { Color3.fromRGB(255, 251, 0), Color3.fromRGB(255, 147, 0) }, -- 10x grid title
 	}
 
 	-- the kit's 4-stop vertical ramp: flat bright band up top, flat saturated band
@@ -1994,92 +2322,32 @@ do
 	end
 
 	-------------------------------------------------- panel
+	-- MINIMAL roll screen (user: "literally just the horizontal wheel + the two spin
+	-- buttons, nothing else — no background, no other parts"). rollFrame is a
+	-- TRANSPARENT container that only groups + positions the wheel, the two buttons,
+	-- and a small X, so the pop tween scales them together and openFrame/closeFrame
+	-- still work. Its height is fixed to the (fixed-px) wheel + gap + button row.
+	local BTN_H = 58
+	local GAP = 14
+	local resultsPanel -- forward-declared; the X handler hides it if a 10x grid is up
 	local rollFrame = Instance.new("Frame")
 	rollFrame.Name = "BullRoll"
 	rollFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	rollFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-	rollFrame.Size = UDim2.new(0.62, 0, 0.56, 0)
-	-- neutral-dark plate with the kit's near-black outline and a faint top-lit
-	-- gradient (the kit tints its plates with a gradient rather than a flat fill)
-	rollFrame.BackgroundColor3 = Color3.fromRGB(28, 25, 34)
+	rollFrame.Size = UDim2.new(0.6, 0, 0, (CARD_H + 24) + GAP + BTN_H)
+	rollFrame.BackgroundTransparency = 1
 	rollFrame.BorderSizePixel = 0
 	rollFrame.Visible = false
-	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 16); c.Parent = rollFrame
-		kitStroke(rollFrame, INK, 3.5)
-		local g = Instance.new("UIGradient")
-		g.Rotation = 90
-		g.Color = ColorSequence.new(Color3.fromRGB(40, 36, 48), Color3.fromRGB(20, 18, 24))
-		g.Parent = rollFrame
-		local ar = Instance.new("UIAspectRatioConstraint"); ar.AspectRatio = 1.55; ar.Parent = rollFrame
-	end
 
-	-- title plaque: a gold kit-gradient plate with stud sheen + white GothamBlack
-	-- title, the same header language as the Spinner / shop windows
-	local header = Instance.new("Frame")
-	header.Name = "Header"
-	header.AnchorPoint = Vector2.new(0.5, 0)
-	header.Position = UDim2.new(0.5, 0, 0.05, 0)
-	header.Size = UDim2.new(0.56, 0, 0.14, 0)
-	header.BackgroundColor3 = PAPER
-	header.BorderSizePixel = 0
-	kitGradient(GRAD.GOLD).Parent = header
-	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 12); c.Parent = header
-		kitStroke(header, INK, 3)
-	end
-	do
-		local hStud = Instance.new("ImageLabel")
-		hStud.Name = "Stud"
-		hStud.BackgroundTransparency = 1
-		hStud.Image = STUD_IMG
-		hStud.ImageTransparency = 0.6
-		hStud.ScaleType = Enum.ScaleType.Tile
-		hStud.TileSize = UDim2.new(0.28, 0, 1.6, 0)
-		hStud.Size = UDim2.new(1, 0, 0.9, 0)
-		hStud.ClipsDescendants = true
-		hStud.Parent = header
-		local hc = Instance.new("UICorner"); hc.CornerRadius = UDim.new(0, 12); hc.Parent = hStud
-	end
-	local title = kitLabel("🐂  BULL ROLL", INK)
-	title.Name = "Title"
-	title.AnchorPoint = Vector2.new(0.5, 0.5)
-	title.Position = UDim2.new(0.5, 0, 0.46, 0)
-	title.Size = UDim2.new(0.9, 0, 0.6, 0)
-	title.ZIndex = 2
-	title.Parent = header
-	header.Parent = rollFrame
-
-	-- close: a clone of the Spinner's red X button in the top-right corner
-	local closeBtn = cloneButton(SRC_CLOSE, "X")
-	closeBtn.Name = "Close"
-	closeBtn.AnchorPoint = Vector2.new(1, 0)
-	closeBtn.Position = UDim2.new(0.975, 0, 0.05, 0)
-	closeBtn.Size = UDim2.new(0.1, 0, 0.13, 0)
-	do
-		local ar = Instance.new("UIAspectRatioConstraint"); ar.AspectRatio = 1; ar.Parent = closeBtn
-	end
-	closeBtn.Parent = rollFrame
-	closeBtn.Activated:Connect(function()
-		closeFrame(rollFrame)
-	end)
-
+	-- the horizontal wheel: a transparent clip region (cards float, no backdrop)
 	local carousel = Instance.new("Frame")
 	carousel.Name = "Carousel"
-	carousel.AnchorPoint = Vector2.new(0.5, 0.5)
-	carousel.Position = UDim2.new(0.5, 0, 0.48, 0)
-	carousel.Size = UDim2.new(0.92, 0, 0, CARD_H + 24)
-	carousel.BackgroundColor3 = Color3.fromRGB(16, 14, 20)
+	carousel.AnchorPoint = Vector2.new(0.5, 0)
+	carousel.Position = UDim2.new(0.5, 0, 0, 0)
+	carousel.Size = UDim2.new(1, 0, 0, CARD_H + 24)
+	carousel.BackgroundTransparency = 1
 	carousel.BorderSizePixel = 0
 	carousel.ClipsDescendants = true
-	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 12); c.Parent = carousel
-		kitStroke(carousel, INK, 3)
-		local g = Instance.new("UIGradient")
-		g.Rotation = 90
-		g.Color = ColorSequence.new(Color3.fromRGB(26, 23, 32), Color3.fromRGB(12, 10, 16))
-		g.Parent = carousel
-	end
 	carousel.Parent = rollFrame
 
 	local strip = Instance.new("Frame")
@@ -2114,54 +2382,102 @@ do
 	end
 	marker.Parent = carousel
 
-	local pointer = Instance.new("TextLabel")
-	pointer.Name = "Pointer"
-	pointer.BackgroundTransparency = 1
-	pointer.AnchorPoint = Vector2.new(0.5, 0)
-	pointer.Position = UDim2.new(0.5, 0, 0, -1)
-	pointer.Size = UDim2.new(0, 26, 0, 26)
-	pointer.Text = "▼"
-	pointer.Font = KIT_FONT
-	pointer.TextScaled = true
-	pointer.TextColor3 = Color3.fromRGB(255, 236, 140)
-	pointer.ZIndex = 6
-	kitStroke(pointer, INK, 2)
-	pointer.Parent = carousel
+	-- matching arrows above and below the landing slot (both painted the won rarity)
+	local function makeArrow(name, glyph, anchorY, posY)
+		local a = Instance.new("TextLabel")
+		a.Name = name
+		a.BackgroundTransparency = 1
+		a.AnchorPoint = Vector2.new(0.5, anchorY)
+		a.Position = UDim2.new(0.5, 0, posY, 0)
+		a.Size = UDim2.new(0, 28, 0, 28)
+		a.Text = glyph
+		a.Font = KIT_FONT
+		a.TextScaled = true
+		a.TextColor3 = Color3.fromRGB(255, 236, 140)
+		a.ZIndex = 6
+		kitStroke(a, INK, 2)
+		a.Parent = carousel
+		return a
+	end
+	local pointer = makeArrow("Pointer", "▼", 1, 0)      -- above, pointing down
+	local pointerBottom = makeArrow("PointerB", "▲", 0, 1) -- below, pointing up
 
-	-- the two buttons below the carousel = clones of the HUD's green Sell / orange Buy
-	-- buttons, retexted. rollLabel is retexted live by setRolling.
+	-- small close X (clone of the Spinner's), floating just above the wheel's top-right
+	local closeBtn = cloneButton(SRC_CLOSE, "X")
+	closeBtn.Name = "Close"
+	closeBtn.AnchorPoint = Vector2.new(1, 1)
+	closeBtn.Position = UDim2.new(1, 0, 0, -8)
+	closeBtn.Size = UDim2.new(0, 40, 0, 40)
+	closeBtn.Parent = rollFrame
+	closeBtn.Activated:Connect(function()
+		if resultsPanel then
+			resultsPanel.Visible = false
+		end
+		closeFrame(rollFrame)
+	end)
+
+	-- the two spin buttons, directly under the wheel = clones of the HUD green Sell /
+	-- gold Store x10 buttons, retexted. rollLabel is retexted live by setRolling.
 	local rollButton, rollLabel = cloneButton(SRC_GREEN, "ROLL")
 	rollButton.Name = "RollX1"
 	rollButton.AnchorPoint = Vector2.new(0.5, 1)
-	rollButton.Position = UDim2.new(0.29, 0, 0.965, 0)
-	rollButton.Size = UDim2.new(0.4, 0, 0.16, 0)
+	rollButton.Position = UDim2.new(0.31, 0, 1, 0)
+	rollButton.Size = UDim2.new(0, 240, 0, BTN_H)
 	rollButton.Parent = rollFrame
 
-	-- gold Store x10 button (keeps its Robux icon + price display)
-	local tenButton = cloneButton(SRC_GOLD10, "ROLL x10")
+	-- gold Store x10 button. Its native layout floats the label above the plate and
+	-- shows a Store price row — recenter the label and hide that row so it's a clean
+	-- single-label gold button mirroring the green one.
+	local tenButton, tenLabel = cloneButton(SRC_GOLD10, "ROLL x10")
 	tenButton.Name = "RollX10"
 	tenButton.AnchorPoint = Vector2.new(0.5, 1)
-	tenButton.Position = UDim2.new(0.71, 0, 0.965, 0)
-	tenButton.Size = UDim2.new(0.4, 0, 0.16, 0)
+	tenButton.Position = UDim2.new(0.69, 0, 1, 0)
+	tenButton.Size = UDim2.new(0, 240, 0, BTN_H)
+	if tenLabel then
+		-- match the green button's Name label geometry exactly so both read centered.
+		-- the gold button's label ships TextXAlignment=Left, so force center too or the
+		-- text hugs the left edge.
+		tenLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+		tenLabel.Position = UDim2.new(0.5, 0, 0.45, 0)
+		tenLabel.Size = UDim2.new(0.9, 0, 0.575, 0)
+		tenLabel.TextXAlignment = Enum.TextXAlignment.Center
+		tenLabel.TextYAlignment = Enum.TextYAlignment.Center
+	end
+	local tenInfo = tenButton:FindFirstChild("Info")
+	if tenInfo then
+		tenInfo.Visible = false
+	end
+	-- the gold button ships with chunkier stud tiling than the green one; copy the
+	-- green button's finer TileSize so both stud textures read identically
+	local tenStud = tenButton:FindFirstChild("Stud", true)
+	local greenStud = SRC_GREEN and SRC_GREEN:FindFirstChild("Stud", true)
+	if tenStud and greenStud then
+		tenStud.TileSize = greenStud.TileSize
+	end
 	tenButton.Parent = rollFrame
 
-	-- results grid overlay (10x rolls); the backdrop button doubles as tap-to-dismiss
-	local resultsPanel = Instance.new("TextButton")
-	resultsPanel.Name = "Results"
+	-- results grid overlay (10x rolls): a full-screen modal parented to the ScreenGui
+	-- (the roll screen itself has no background, so the grid brings its own dim
+	-- backdrop). ZIndex 10 clears every sibling (max is 3). Tap anywhere to dismiss.
+	resultsPanel = Instance.new("TextButton")
+	resultsPanel.Name = "BullRollResults"
 	resultsPanel.AutoButtonColor = false
 	resultsPanel.Text = ""
 	resultsPanel.AnchorPoint = Vector2.new(0.5, 0.5)
 	resultsPanel.Position = UDim2.new(0.5, 0, 0.5, 0)
 	resultsPanel.Size = UDim2.new(1, 0, 1, 0)
 	resultsPanel.BackgroundColor3 = Color3.fromRGB(14, 12, 18)
-	resultsPanel.BackgroundTransparency = 0.04
+	resultsPanel.BackgroundTransparency = 0.15
 	resultsPanel.BorderSizePixel = 0
 	resultsPanel.Visible = false
-	resultsPanel.ZIndex = 20
-	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 16); c.Parent = resultsPanel
-	end
-	resultsPanel.Parent = rollFrame
+	resultsPanel.ZIndex = 10
+	resultsPanel.Parent = gui
+	-- close the grid whenever the roll screen goes away (X, frame-switch, etc.)
+	rollFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+		if not rollFrame.Visible then
+			resultsPanel.Visible = false
+		end
+	end)
 
 	local gridTitle = kitLabel("YOUR 10 ROLLS", INK)
 	gridTitle.AnchorPoint = Vector2.new(0.5, 0)
@@ -2202,65 +2518,96 @@ do
 	rollFrame.Parent = Frames
 
 	-------------------------------------------------- card builder
-	-- placeholder card: swap the "🐂" icon TextLabel for a ViewportFrame/thumbnail
-	-- once real models exist. opts = { badge, badgeColor, zIndex }
+	-- Copies the Shop UI card (Frames.Shop1.Container.<n>): a dark translucent plate
+	-- with a thin INK outline + a cyan Highlight rim; a nested "IconFrame" whose border
+	-- is a rarity-colored GRADIENT stroke, holding the icon; and white GothamBlack Name
+	-- + a rarity label whose text carries the tier gradient. opts = { badge, badgeColor,
+	-- zIndex }. (🐂 icon is a placeholder — swap for a ViewportFrame/thumbnail later.)
+	local CYAN = Color3.fromRGB(118, 214, 255) -- the shop cards' fixed Highlight-rim accent
 	local function makeCard(bullId, size, opts)
 		opts = opts or {}
 		local z = opts.zIndex or 1
 		local bull = BullCatalog and BullCatalog.get(bullId) or nil
 		local rarity = (bull and bull.rarity) or "COMMON"
 		local col = rarityColor(rarity)
+		-- per-tier ramp built from the tier color, same juicy shape as the notif
+		-- text (NOTIF_TEXT_TINTS): bright highlight at the top of the glyphs, the
+		-- saturated tier colour through the middle, a deep shade at the baseline.
+		-- Rotation 90 runs top -> bottom so the highlight lands up top.
+		local tierHi   = col:Lerp(PAPER, 0.55) -- lit top edge
+		local tierDeep = col:Lerp(INK, 0.5)    -- shaded baseline
+		local function tierGradient(rotation)
+			local g = Instance.new("UIGradient")
+			g.Rotation = rotation or 90
+			g.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, tierHi),
+				ColorSequenceKeypoint.new(0.45, col),
+				ColorSequenceKeypoint.new(1, tierDeep),
+			})
+			return g
+		end
 
 		local card = Instance.new("Frame")
 		card.Size = size
-		card.BackgroundColor3 = col:Lerp(Color3.new(0, 0, 0), 0.72)
+		card.BackgroundColor3 = INK
+		card.BackgroundTransparency = 0.15 -- reads solid over the world (shop cards sit on a panel)
 		card.BorderSizePixel = 0
-		card.ClipsDescendants = true -- keep the top ribbon inside the rounded corners
+		card.ClipsDescendants = true
 		card.ZIndex = z
 		local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 10); corner.Parent = card
-		-- rarity-tinted plate with a darker inner outline, plus a bright rarity
-		-- rim on top (the outline art is baked on kit buttons; cards get a real
-		-- stroke so the rarity still reads)
-		kitStroke(card, col:Lerp(INK, 0.35), 2.5)
-		local grad = Instance.new("UIGradient")
-		grad.Color = ColorSequence.new(col:Lerp(Color3.new(0, 0, 0), 0.48), col:Lerp(Color3.new(0, 0, 0), 0.84))
-		grad.Rotation = 90
-		grad.Parent = card
+		kitStroke(card, INK, 2)
 
-		-- top rarity ribbon: a flat rarity-colored band behind the icon so the tier
-		-- pops the instant a card scrolls past
-		local ribbon = Instance.new("Frame")
-		ribbon.Name = "Ribbon"
-		ribbon.BackgroundColor3 = col
-		ribbon.BorderSizePixel = 0
-		ribbon.Size = UDim2.new(1, 0, 0.09, 0)
-		ribbon.Position = UDim2.new(0, 0, 0, 0)
-		ribbon.ZIndex = z
-		kitGradient({ col:Lerp(PAPER, 0.35), col }).Parent = ribbon
-		ribbon.Parent = card
+		-- shop's signature cyan Highlight rim (an inset transparent frame with a cyan stroke)
+		local rim = Instance.new("Frame")
+		rim.Name = "Highlight"
+		rim.BackgroundTransparency = 1
+		rim.AnchorPoint = Vector2.new(0.5, 0.5)
+		rim.Position = UDim2.fromScale(0.5, 0.5)
+		rim.Size = UDim2.new(1, -6, 1, -6)
+		rim.ZIndex = z
+		do
+			local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 8); rc.Parent = rim
+			local rs = Instance.new("UIStroke"); rs.Color = CYAN; rs.Thickness = 1.5; rs.Transparency = 0.3; rs.Parent = rim
+		end
+		rim.Parent = card
 
+		-- IconFrame: a nested dark box whose border is the rarity gradient (shop's icon box)
+		local iconFrame = Instance.new("Frame")
+		iconFrame.Name = "IconFrame"
+		iconFrame.BackgroundColor3 = INK
+		iconFrame.BackgroundTransparency = 0.35
+		iconFrame.AnchorPoint = Vector2.new(0.5, 0)
+		iconFrame.Position = UDim2.new(0.5, 0, 0.05, 0)
+		iconFrame.Size = UDim2.new(0.84, 0, 0.55, 0)
+		iconFrame.ZIndex = z
+		do
+			local ic = Instance.new("UICorner"); ic.CornerRadius = UDim.new(0, 8); ic.Parent = iconFrame
+			local rarStroke = Instance.new("UIStroke"); rarStroke.Thickness = 2.5; rarStroke.Parent = iconFrame
+			tierGradient(90).Parent = rarStroke -- lit-top -> shaded-bottom tier border
+		end
 		local icon = Instance.new("TextLabel")
 		icon.BackgroundTransparency = 1
-		icon.Size = UDim2.new(1, 0, 0.48, 0)
-		icon.Position = UDim2.new(0, 0, 0.11, 0)
+		icon.Size = UDim2.fromScale(1, 1)
 		icon.Text = "🐂"
 		icon.TextScaled = true
 		icon.Font = KIT_FONT
-		icon.TextColor3 = col:Lerp(PAPER, 0.35)
+		icon.TextColor3 = PAPER
 		icon.ZIndex = z
-		icon.Parent = card
+		icon.Parent = iconFrame
+		iconFrame.Parent = card
 
 		local nameLabel = kitLabel((bull and bull.name) or "???", INK)
-		nameLabel.Size = UDim2.new(1, -10, 0.16, 0)
-		nameLabel.Position = UDim2.new(0, 5, 0.62, 0)
+		nameLabel.Size = UDim2.new(1, -10, 0.15, 0)
+		nameLabel.Position = UDim2.new(0, 5, 0.64, 0)
 		nameLabel.ZIndex = z
 		nameLabel.Parent = card
 
+		-- rarity text: white with an INK outline + the juicy tier gradient
 		local rarLabel = kitLabel(rarity, INK)
-		rarLabel.Size = UDim2.new(1, -10, 0.1, 0)
-		rarLabel.Position = UDim2.new(0, 5, 0.8, 0)
-		rarLabel.TextColor3 = col:Lerp(PAPER, 0.45)
+		rarLabel.Size = UDim2.new(1, -10, 0.11, 0)
+		rarLabel.Position = UDim2.new(0, 5, 0.82, 0)
 		rarLabel.ZIndex = z
+		tierGradient(90).Parent = rarLabel
 		rarLabel.Parent = card
 
 		if opts.badge then
@@ -2283,7 +2630,9 @@ do
 	end
 
 	-------------------------------------------------- strip + animation
+	local winnerCard = nil -- the WINNER_INDEX card, popped when the wheel lands
 	local function buildStrip(headlineBullId)
+		winnerCard = nil
 		for _, c in ipairs(strip:GetChildren()) do
 			if c:IsA("Frame") then
 				c:Destroy()
@@ -2294,8 +2643,14 @@ do
 			local card = makeCard(id, UDim2.fromOffset(CARD_W, CARD_H))
 			card.LayoutOrder = i
 			card.Parent = strip
+			if i == WINNER_INDEX then
+				winnerCard = card
+			end
 		end
 	end
+
+	-- (The CurrentArea HUD banner now shows the round GAME TYPE, driven by RoundState
+	-- in section 6 — it is no longer a roll-rarity banner.)
 
 	local function announce(results, headline)
 		local h = BullCatalog and BullCatalog.get(headline.bullId) or nil
@@ -2336,7 +2691,9 @@ do
 
 	local function setRolling(state)
 		rolling = state
-		rollLabel.Text = state and "ROLLING…" or (("ROLL  $%s"):format(comma(ROLL_COST)))
+		local box = (BOXES and lastBoxId) and BOXES[lastBoxId] or nil
+		rollLabel.Text = state and "ROLLING…"
+			or (box and ("ROLL AGAIN  $%s"):format(comma(box.cost)) or "ROLL AGAIN")
 		-- dim the plate while a roll is in flight so it reads as busy
 		rollButton.ImageTransparency = state and 0.35 or 0
 	end
@@ -2362,6 +2719,7 @@ do
 		resultsPanel.Visible = false
 		marker.BackgroundColor3 = Color3.fromRGB(255, 220, 120)
 		pointer.TextColor3 = Color3.fromRGB(255, 220, 120)
+		pointerBottom.TextColor3 = Color3.fromRGB(255, 220, 120)
 		buildStrip(headline.bullId)
 		RunService.Heartbeat:Wait() -- let the list layout resolve before measuring
 
@@ -2402,10 +2760,17 @@ do
 						drum:Destroy()
 					end)
 				end
-				-- small flourish: paint the marker the won rarity
+				-- landing flourish: paint the marker/arrows the won rarity and pop the
+				-- winning card so it punches out of the row
 				local col = rarityColor(headline.rarity)
 				marker.BackgroundColor3 = col
 				pointer.TextColor3 = col
+				pointerBottom.TextColor3 = col
+				if winnerCard then
+					local ws = ensureScale(winnerCard)
+					ws.Scale = 1
+					tween(ws, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.1 })
+				end
 				playSfx("winner!", 0.6)
 				announce(results, headline)
 				if #results > 1 then
@@ -2417,12 +2782,14 @@ do
 	end
 
 	-------------------------------------------------- buttons
+	-- "ROLL AGAIN": buy the same box the current reveal came from (lastBoxId
+	-- defaults to the cheapest box until the first purchase lands)
 	rollButton.Activated:Connect(function()
-		if rolling or not rollRemote then
+		if rolling or not rollRemote or not lastBoxId then
 			return
 		end
 		setRolling(true)
-		rollRemote:FireServer()
+		rollRemote:FireServer(lastBoxId)
 	end)
 
 	tenButton.Activated:Connect(function()
@@ -2439,16 +2806,8 @@ do
 		end
 	end)
 
-	-- TEMP test opener: press B to toggle the panel. Delete this once a shop
-	-- button calls openFrame(rollFrame) instead.
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then
-			return
-		end
-		if input.KeyCode == Enum.KeyCode.B then
-			openFrame(rollFrame)
-		end
-	end)
+	-- (The old "press B" test opener is gone: buying a lucky box in Shop1 —
+	-- opened from the lobby shop stall — auto-opens this reveal.)
 
 	-- TEMP on-screen test buttons (left edge): fire a FAKE local reveal so the
 	-- carousel can be watched without working data (a real roll denies
@@ -2467,7 +2826,9 @@ do
 			local isNew = rng:NextNumber() < 0.55
 			local refund = 0
 			if not isNew and BullCatalog then
-				refund = math.floor(ROLL_COST * (BullCatalog.Rarities[rarity].dupeRefund or 0.25))
+				local box = (BOXES and lastBoxId) and BOXES[lastBoxId] or nil
+				local costBasis = (box and box.cost) or 200
+				refund = math.floor(costBasis * (BullCatalog.Rarities[rarity].dupeRefund or 0.25))
 			end
 			table.insert(results, { bullId = id, rarity = rarity, isNew = isNew, refund = refund })
 		end
@@ -2508,6 +2869,186 @@ do
 	makeTestBtn("TEST x10", 2, 10)
 	testHolder.Parent = gui
 
+	-------------------------------------------------- lucky box shop (Frames.Shop1)
+	-- Reworks the kit's "Pickaxes" shop into the LUCKY BOXES window: one kit card
+	-- per Config.BULLS.BOXES box, cheapest first. Each card keeps the kit chrome
+	-- and gets: Name = box name, the Rarity tag = box tier (gradient retinted to
+	-- the box color), the Power row = per-rarity drop odds (RichText, rarity-
+	-- colored), and the kit Buy button = "$cost" -> BullRoll:FireServer(boxId).
+	-- The "ROLLED" ack below auto-opens the reveal wheel, and openFrame's
+	-- one-window rule closes this shop as it does.
+	local RARITY_ORDER = { "COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY" }
+	local BOX_EMOJI = { BASIC = "📦", SUPER = "🎁", MEGA = "💎" } -- placeholder icons
+
+	local function colorHex(c)
+		return string.format("#%02X%02X%02X",
+			math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+	end
+
+	-- the roll cards' juicy 3-stop tier ramp as a ColorSequence, for retinting
+	-- the kit cards' "Legendary" gradients to each box's color
+	local function boxRamp(col)
+		return ColorSequence.new({
+			ColorSequenceKeypoint.new(0, col:Lerp(PAPER, 0.55)),
+			ColorSequenceKeypoint.new(0.45, col),
+			ColorSequenceKeypoint.new(1, col:Lerp(INK, 0.5)),
+		})
+	end
+
+	-- "64%  25%  9%  1.8%  0.2%" with each figure tinted its rarity color
+	local function oddsLine(weights)
+		local total = 0
+		for _, r in ipairs(RARITY_ORDER) do
+			total += math.max(tonumber(weights[r]) or 0, 0)
+		end
+		if total <= 0 then
+			return ""
+		end
+		local parts = {}
+		for _, r in ipairs(RARITY_ORDER) do
+			local w = math.max(tonumber(weights[r]) or 0, 0)
+			if w > 0 then
+				local pct = w / total * 100
+				local figure = (pct % 1 == 0) and ("%d%%"):format(pct) or ("%.1f%%"):format(pct)
+				table.insert(parts, ('<font color="%s">%s</font>'):format(colorHex(rarityColor(r)), figure))
+			end
+		end
+		return table.concat(parts, "  ")
+	end
+
+	local function buildBoxShop()
+		local shopFrame = Frames:FindFirstChild("Shop1")
+		local shopContainer = shopFrame and shopFrame:FindFirstChild("Container")
+		if not (shopFrame and shopContainer and BOXES) then
+			return
+		end
+		local header = shopFrame:FindFirstChild("Header")
+		local headerName = header and header:FindFirstChild("Name")
+		if headerName and headerName:IsA("TextLabel") then
+			headerName.Text = "Lucky Boxes"
+		end
+
+		-- keep one kit card as the template, clear the demo pickaxes (cards =
+		-- Frames with an Info child; the SPACE spacers/layout/adjuster survive)
+		local template = nil
+		for _, child in ipairs(shopContainer:GetChildren()) do
+			if child:IsA("Frame") and child:FindFirstChild("Info") then
+				if not template then
+					template = child:Clone()
+				end
+				child:Destroy()
+			end
+		end
+		if not template then
+			return
+		end
+
+		local ids = {}
+		for id in BOXES do
+			table.insert(ids, id)
+		end
+		table.sort(ids, function(a, b)
+			return (BOXES[a].order or 99) < (BOXES[b].order or 99)
+		end)
+
+		for i, boxId in ipairs(ids) do
+			local box = BOXES[boxId]
+			local card = template:Clone()
+			card.Name = boxId
+			card.LayoutOrder = box.order or i
+
+			local locked = card:FindFirstChild("Locked")
+			if locked then
+				locked.Visible = false
+			end
+
+			local info = card:FindFirstChild("Info")
+			local nameLabel = info and info:FindFirstChild("Name")
+			if nameLabel and nameLabel:IsA("TextLabel") then
+				nameLabel.Text = box.name or boxId
+			end
+			local tagLabel = info and info:FindFirstChild("Rarity")
+			if tagLabel and tagLabel:IsA("TextLabel") then
+				tagLabel.Text = box.tag or ""
+				local g = tagLabel:FindFirstChildWhichIsA("UIGradient")
+				if g and box.color then
+					g.Color = boxRamp(box.color)
+				end
+			end
+
+			-- icon box: hide the pickaxe image, drop in a box emoji; the kit's
+			-- rarity-gradient border stroke retints to the box color
+			local iconFrame = card:FindFirstChild("IconFrame")
+			if iconFrame then
+				local img = iconFrame:FindFirstChild("Icon")
+				if img and img:IsA("GuiObject") then
+					img.Visible = false
+				end
+				local stroke = iconFrame:FindFirstChildWhichIsA("UIStroke")
+				local strokeGrad = stroke and stroke:FindFirstChildWhichIsA("UIGradient")
+				if strokeGrad and box.color then
+					strokeGrad.Color = boxRamp(box.color)
+				end
+				local emoji = Instance.new("TextLabel")
+				emoji.Name = "BoxIcon"
+				emoji.BackgroundTransparency = 1
+				emoji.AnchorPoint = Vector2.new(0.5, 0.5)
+				emoji.Position = UDim2.fromScale(0.5, 0.5)
+				emoji.Size = UDim2.fromScale(0.8, 0.8)
+				emoji.Text = BOX_EMOJI[boxId] or "📦"
+				emoji.TextScaled = true
+				emoji.Font = KIT_FONT
+				emoji.TextColor3 = PAPER
+				emoji.Parent = iconFrame
+			end
+
+			-- the kit "Power" row becomes the odds line
+			local power = card:FindFirstChild("Power")
+			local powerLabel = power and power:FindFirstChild("Power")
+			if powerLabel and powerLabel:IsA("TextLabel") then
+				local pIcon = power:FindFirstChild("Icon")
+				if pIcon and pIcon:IsA("GuiObject") then
+					pIcon.Visible = false
+				end
+				powerLabel.RichText = true
+				powerLabel.Text = oddsLine(box.weights or {})
+			end
+
+			-- buy button: the kit's money button retexted to the box cost; the
+			-- Robux button hides (no per-box Robux products yet)
+			local buyButtons = card:FindFirstChild("BuyButtons")
+			local robuxBtn = buyButtons and buyButtons:FindFirstChild("BuyRobux")
+			if robuxBtn and robuxBtn:IsA("GuiObject") then
+				robuxBtn.Visible = false
+			end
+			local buyBtn = buyButtons and buyButtons:FindFirstChild("Buy/Equip/Equipped/Locked")
+			if buyBtn and buyBtn:IsA("GuiButton") then
+				buyBtn.Active = true
+				local costLabel = buyBtn:FindFirstChild("Cost/Equip/Equipped/Locked")
+				if costLabel and costLabel:IsA("TextLabel") then
+					costLabel.Text = "$" .. comma(box.cost or 0)
+				end
+				-- force the green "Buy" look (the template may ship Equipped/Locked)
+				for _, d in ipairs(buyBtn:GetChildren()) do
+					if d:IsA("UIGradient") then
+						d.Enabled = (d.Name == "Buy/Equip")
+					end
+				end
+				addButtonFeedback(buyBtn) -- clones carry no connections; rewire feel+sfx
+				buyBtn.Activated:Connect(function()
+					if rolling or not rollRemote then
+						return
+					end
+					lastBoxId = boxId
+					setRolling(true)
+					rollRemote:FireServer(boxId)
+				end)
+			end
+
+			card.Parent = shopContainer
+		end
+	end
+
 	-------------------------------------------------- wire remotes + config
 	task.spawn(function()
 		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
@@ -2535,35 +3076,56 @@ do
 
 		local okConfig, config = pcall(require, bullrush:WaitForChild("Config"))
 		if okConfig and typeof(config) == "table" then
-			if typeof(config.BULLS) == "table" then
-				ROLL_COST = tonumber(config.BULLS.ROLL_COST) or ROLL_COST
+			if typeof(config.BULLS) == "table" and typeof(config.BULLS.BOXES) == "table" then
+				BOXES = config.BULLS.BOXES
+				-- ROLL AGAIN targets the cheapest box until a purchase overrides it
+				local bestCost
+				for id, box in BOXES do
+					local cost = tonumber(box.cost) or math.huge
+					if not bestCost or cost < bestCost then
+						bestCost, lastBoxId = cost, id
+					end
+				end
 			end
 			if typeof(config.PRODUCTS) == "table" then
 				productIds.BULL_ROLL = tonumber(config.PRODUCTS.BULL_ROLL) or 0
 				productIds.BULL_ROLL_10 = tonumber(config.PRODUCTS.BULL_ROLL_10) or 0
 			end
 		end
-		setRolling(false) -- paints the button label now that ROLL_COST is known
+		setRolling(false) -- paints the button label now that the box cost is known
+		buildBoxShop()    -- Shop1 -> the Lucky Boxes window (needs BOXES + catalog)
 
 		ackRemote.OnClientEvent:Connect(function(kind, data)
 			data = typeof(data) == "table" and data or {}
 			if kind == "ROLLED" then
+				if typeof(data.boxId) == "string" and (not BOXES or BOXES[data.boxId]) then
+					lastBoxId = data.boxId -- ROLL AGAIN re-buys what was just opened
+				end
+				-- buying a box (Shop1 / ROLL AGAIN / Robux) jumps straight into the
+				-- reveal; openFrame's one-window rule closes the shop on the way
+				if currentFrame ~= rollFrame then
+					openFrame(rollFrame)
+				end
 				setRolling(true)
 				animateReveal(data.results)
 			elseif kind == "DENIED" then
 				setRolling(false)
 				if data.reason == "NO_MONEY" then
-					pushNotif(("Not enough Money — a roll costs $%s"):format(comma(ROLL_COST)), "red", 3)
+					local cost = tonumber(data.cost)
+					pushNotif(cost and ("Not enough Money — that box costs $%s"):format(comma(cost))
+						or "Not enough Money for that box", "red", 3)
 				elseif data.reason == "DATA_NOT_LOADED" then
 					pushNotif("Your data hasn't loaded — try again soon", "red", 3)
+				elseif data.reason == "BAD_BOX" then
+					pushNotif("That box isn't available", "red", 3)
 				elseif data.reason == "NOT_OWNED" or data.reason == "BAD_ID" then
 					pushNotif("That bull can't be equipped", "red", 3)
 				end
 			end
-			-- "EQUIPPED" acks are ignored: this shell has no inventory/equip UI yet
+			-- "EQUIPPED" acks live in section 12 (bull index) — never handle them here
 		end)
 
-		rollRemote = requestRemote -- arm the button only once acks are wired
+		rollRemote = requestRemote -- arm the buttons only once acks are wired
 	end)
 end
 
@@ -2729,9 +3291,26 @@ do
 						if rarityLabel and rarityLabel:IsA("TextLabel") then
 							rarityLabel.Text = DISPLAY[currentRarity] or currentRarity
 							local tier = BullCatalog.Rarities[currentRarity]
-							if tier and tier.color then
-								rarityLabel.TextColor3 = tier.color
+							local tcol = (tier and tier.color) or Color3.fromRGB(200, 200, 200)
+							-- the kit ships a rainbow "BrainrotGod" UIGradient on this label,
+							-- and a gradient overrides TextColor3 — so swap it for the roll
+							-- wheel cards' juicy tier ramp (bright highlight at the top of
+							-- the glyphs, saturated tier colour through the middle, deep
+							-- shade at the baseline)
+							for _, g in ipairs(rarityLabel:GetChildren()) do
+								if g:IsA("UIGradient") then
+									g:Destroy()
+								end
 							end
+							rarityLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+							local rg = Instance.new("UIGradient")
+							rg.Rotation = 90
+							rg.Color = ColorSequence.new({
+								ColorSequenceKeypoint.new(0, tcol:Lerp(Color3.new(1, 1, 1), 0.55)),
+								ColorSequenceKeypoint.new(0.45, tcol),
+								ColorSequenceKeypoint.new(1, tcol:Lerp(Color3.fromRGB(15, 15, 15), 0.5)),
+							})
+							rg.Parent = rarityLabel
 						end
 						buildPreview(inner, bull, has)
 						if id == equippedId then

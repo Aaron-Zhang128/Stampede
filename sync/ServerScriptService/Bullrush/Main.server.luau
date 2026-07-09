@@ -408,6 +408,9 @@ while true do
 	end
 
 	local mode = pickMode(#playersWithCharacters() + AIService.botCount())
+	-- Round identity rides the client's sticky intermission countdown card
+	-- (Main §6), painted from the per-second INTERMISSION resends below — a
+	-- one-shot "NEXT:" card here would just double it up.
 	for timeLeft = Config.INTERMISSION_TIME, 1, -1 do
 		setRoundState("INTERMISSION", {
 			timeLeft = timeLeft,
@@ -478,7 +481,7 @@ while true do
 				end
 			end
 		else
-			NotifyService.broadcast(mode.name:upper(), "white", 3)
+			NotifyService.broadcast((mode.name:upper() .. " — GO!"), "white", 3)
 		end
 
 		local stopWatcher = startBoundsWatcher()
@@ -500,8 +503,8 @@ while true do
 							local won, paid = RoundService.awardWinner(player)
 							if won then
 								EconomyService.noteWin(player, paid)
-								NotifyService.send(player,
-									("VICTORY! +1 Win  •  +%d Money"):format(paid), "green", 6)
+								-- Money lives in the Summary tab now, not this card.
+								NotifyService.send(player, "VICTORY! +1 Win", "green", 6)
 							end
 						else
 							RoundService.resetStreak(player)
@@ -531,8 +534,8 @@ while true do
 			local won, paid = RoundService.awardWinner(winner)
 			if won then
 				EconomyService.noteWin(winner, paid)
-				NotifyService.send(winner,
-					("VICTORY! +1 Win  •  +%d Money"):format(paid), "green", 6)
+				-- Money lives in the Summary tab now, not this card.
+				NotifyService.send(winner, "VICTORY! +1 Win", "green", 6)
 			end
 			summaryWinner = {
 				winnerName = winner.Name,

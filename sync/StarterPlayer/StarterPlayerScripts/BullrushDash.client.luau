@@ -94,6 +94,35 @@ local function fovKick()
 	out:Play()
 end
 
+-- A quick puff of dust kicked up where the dash plants — the "stick the landing"
+-- beat that makes the burst feel like it ended with weight, not just stopped.
+local function landingPuff(root: BasePart)
+	local emitAt = Instance.new("Attachment")
+	emitAt.Position = Vector3.new(0, -2.6, 0) -- near the feet
+	emitAt.Parent = root
+	local puff = Instance.new("ParticleEmitter")
+	puff.Texture = "rbxassetid://241629053" -- soft round smoke (Roblox default dust)
+	puff.Color = ColorSequence.new(Color3.fromRGB(196, 176, 142)) -- dusty tan
+	puff.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.35),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	puff.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.6),
+		NumberSequenceKeypoint.new(1, 3.4),
+	})
+	puff.Lifetime = NumberRange.new(0.35, 0.55)
+	puff.Speed = NumberRange.new(4, 7)
+	puff.SpreadAngle = Vector2.new(180, 180)
+	puff.Drag = 6
+	puff.Rotation = NumberRange.new(0, 360)
+	puff.LightEmission = 0.05
+	puff.Enabled = false
+	puff.Parent = emitAt
+	puff:Emit(10)
+	Debris:AddItem(emitAt, 1)
+end
+
 local function dash()
 	if dashing or os.clock() - lastDashAt < COOLDOWN then
 		return
@@ -128,6 +157,9 @@ local function dash()
 		if nowRoot ~= root or os.clock() - lastDashAt >= DASH_TIME then
 			connection:Disconnect()
 			dashing = false
+			if nowRoot == root then
+				landingPuff(root) -- only if we survived the dash (not a mid-dash death)
+			end
 			task.delay(math.max(COOLDOWN - (os.clock() - lastDashAt), 0), function()
 				if aliveParts() then
 					playWhoosh(2.1, 0.084) -- soft "ready again" ping

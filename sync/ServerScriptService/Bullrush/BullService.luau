@@ -32,6 +32,16 @@ local ROLL_AMPLITUDE = 0.06 -- rad: alternating shoulder lean
 local LAUNCH_SPEED_SCALE = 1.15 -- victim fling speed relative to bull speed
 local LAUNCH_SPEED_BASE = 12 -- studs/s added on top, so slow bulls still send you
 
+-- Squash & stretch (the "bouncy but grounded" juice). The bull coils out of the
+-- gate STRETCHED along its travel axis (a lunge), eases back to normal, then
+-- SQUASHES as it slams through the far edge. Body faces -Z, so its local Z is
+-- the travel axis (scaled by `along`); X/Y are the cross-section (`cross`).
+local LUNGE_TIME = 0.16    -- seconds the launch stretch takes to settle
+local LUNGE_STRETCH = 0.30 -- +30% along travel at the very start of the charge
+local LUNGE_SQUASH = 0.14  -- -14% cross-section while stretched (fake volume)
+local IMPACT_TIME = 0.12   -- squash window as it barrels through the far edge
+local IMPACT_SQUASH = 0.20 -- -20% along / +cross as it slams flat
+
 local BullService = {}
 
 local function getActiveBullsFolder(): Folder
@@ -72,10 +82,22 @@ function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill
 	local bull = templateFor(style and style.bullId):Clone()
 	bull:PivotTo(CFrame.lookAt(startPos, endPos))
 
+	-- Body is the visible mesh; squash/stretch drives its Size around its center
+	-- each frame (Root, the invisible primary, is untouched so the model still
+	-- rides where PivotTo puts it).
+	local body = bull:FindFirstChild("Body")
+	local baseBodySize = if body and body:IsA("BasePart") then body.Size else nil
+
 	-- Revenge bulls read as PLAYER-SENT: a red glow everyone can see, plus the
 	-- thrower's name over its head so victims know who to blame (and the
 	-- thrower can spot THEIR bull in a stampede).
 	if style then
+		-- Stamp the thrower so their own client can give this bull top-priority
+		-- highlighting (see BullrushClient.boostOwnRevengeBull) — they should
+		-- always be able to pick out the bull they sent.
+		if style.throwerName then
+			bull:SetAttribute("ThrowerName", style.throwerName)
+		end
 		local glow = Instance.new("Highlight")
 		glow.Name = "RevengeGlow"
 		glow.FillColor = Color3.fromRGB(255, 60, 40)
@@ -165,6 +187,25 @@ function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill
 		local nod = PITCH_AMPLITUDE * math.sin(2 * phase)
 		local sway = ROLL_AMPLITUDE * math.sin(phase)
 		bull:PivotTo(CFrame.new(position + Vector3.new(0, bob, 0)) * rotation * CFrame.Angles(nod, 0, sway))
+
+		-- Coil-release lunge on the way out, slam-squash on arrival.
+		if baseBodySize and body.Parent then
+			local along, cross = 1, 1
+			if elapsed < LUNGE_TIME then
+				local k = 1 - elapsed / LUNGE_TIME -- 1 -> 0
+				k = k * k                          -- quad ease-out of the stretch
+				along += LUNGE_STRETCH * k
+				cross -= LUNGE_SQUASH * k
+			end
+			local remain = duration - elapsed
+			if remain < IMPACT_TIME then
+				local k = 1 - remain / IMPACT_TIME -- 0 -> 1 as it hits the far edge
+				k = k * k
+				along -= IMPACT_SQUASH * k
+				cross += IMPACT_SQUASH * 0.6 * k
+			end
+			body.Size = Vector3.new(baseBodySize.X * cross, baseBodySize.Y * cross, baseBodySize.Z * along)
+		end
 
 		-- Kill check: axis-aligned box around the bull's root position.
 		local bullAlong = if lane.axis == "row" then position.X else position.Z

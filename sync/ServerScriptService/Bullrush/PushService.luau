@@ -15,15 +15,20 @@
 	  * per-pusher cooldown (Config.PUSH.COOLDOWN)
 	  * a distance sanity check, so a tampered client can't shove from across the map
 
-	Bots (AIService) are plain tables, never fire remotes, and never receive a
-	client-made prompt, so they simply don't take part as pushers or targets.
+	Bots (AIService) never fire remotes, so they can't push — but they CAN be
+	pushed (so the shove is testable solo): PushClient sends the bot's rig
+	Model, we map it back to its proxy via AIService.findByCharacter, and since
+	bot rigs are server-owned (network owner nil) the SERVER applies the same
+	knockback burst the victim's client would.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
+local AIService = require(script.Parent.AIService)
 local RoundService = require(script.Parent.RoundService)
 local NotifyService = require(script.Parent.NotifyService)
 
@@ -31,20 +36,66 @@ local PushService = {}
 
 local lastPushAt: { [Player]: number } = {}
 
-local function rootOf(player: Player): BasePart?
-	local character = player.Character
+-- Works on real Players and bot proxies alike (both expose .Character).
+local function rootOf(participant): BasePart?
+	local character = participant.Character
 	return character and character:FindFirstChild("HumanoidRootPart")
+end
+
+-- Server-side mirror of PushClient's knockback burst, for server-owned bot
+-- rigs: one burst with an upward pop, then hold the horizontal velocity for
+-- PUSH.TIME while gravity takes the vertical back over.
+local function shoveBot(proxy, direction: Vector3)
+	local character = proxy.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root then
+		return
+	end
+
+	-- Pause the wander brain and cancel the current MoveTo so the humanoid
+	-- doesn't fight the burst.
+	proxy.busyUntil = math.max(proxy.busyUntil or 0, os.clock() + Config.PUSH.TIME + 0.3)
+	humanoid:MoveTo(root.Position)
+
+	root.AssemblyLinearVelocity = Vector3.new(
+		direction.X * Config.PUSH.SPEED,
+		Config.PUSH.UP,
+		direction.Z * Config.PUSH.SPEED
+	)
+	local startedAt = os.clock()
+	local connection
+	connection = RunService.Heartbeat:Connect(function()
+		if not root.Parent or humanoid.Health <= 0 or os.clock() - startedAt >= Config.PUSH.TIME then
+			connection:Disconnect()
+			return
+		end
+		root.AssemblyLinearVelocity = Vector3.new(
+			direction.X * Config.PUSH.SPEED,
+			root.AssemblyLinearVelocity.Y,
+			direction.Z * Config.PUSH.SPEED
+		)
+	end)
 end
 
 function PushService.init()
 	Remotes.Push.OnServerEvent:Connect(function(pusher: Player, target)
-		-- Only ever act on a real Player target that isn't the pusher.
-		if typeof(target) ~= "Instance" or not target:IsA("Player") or target == pusher then
+		-- Resolve the target: a real Player, or a bot rig Model (PushClient
+		-- sends the Model since bot proxies never replicate).
+		local victim: any = nil
+		if typeof(target) == "Instance" then
+			if target:IsA("Player") and target ~= pusher then
+				victim = target
+			elseif target:IsA("Model") then
+				victim = AIService.findByCharacter(target)
+			end
+		end
+		if not victim then
 			return
 		end
 
 		-- Both in play => a round is ACTIVE and neither has been eliminated.
-		if not RoundService.isAlive(pusher) or not RoundService.isAlive(target) then
+		if not RoundService.isAlive(pusher) or not RoundService.isAlive(victim) then
 			return
 		end
 
@@ -56,7 +107,7 @@ function PushService.init()
 		end
 
 		local pusherRoot = rootOf(pusher)
-		local targetRoot = rootOf(target)
+		local targetRoot = rootOf(victim)
 		if not pusherRoot or not targetRoot then
 			return
 		end
@@ -79,11 +130,17 @@ function PushService.init()
 
 		lastPushAt[pusher] = now
 
-		-- The victim owns their character, so their client applies the burst.
-		Remotes.Pushed:FireClient(target, flat.Unit)
-
-		NotifyService.send(pusher, "You shoved " .. target.DisplayName .. "!", "green", 2)
-		NotifyService.send(target, pusher.DisplayName .. " shoved you!", "red", 2)
+		if typeof(victim) == "Instance" then
+			-- Real player: they own their character, so their client applies
+			-- the burst.
+			Remotes.Pushed:FireClient(victim, flat.Unit)
+			NotifyService.send(pusher, "You shoved " .. victim.DisplayName .. "!", "green", 2)
+			NotifyService.send(victim, pusher.DisplayName .. " shoved you!", "red", 2)
+		else
+			-- Bot: server-owned rig, server drives the knockback.
+			shoveBot(victim, flat.Unit)
+			NotifyService.send(pusher, "You shoved " .. victim.Name .. "!", "green", 2)
+		end
 	end)
 
 	-- Don't leak cooldown entries for players who leave.

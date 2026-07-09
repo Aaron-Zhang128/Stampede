@@ -17,12 +17,14 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local Debris = game:GetService("Debris")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local GridUtil = require(ReplicatedStorage.Bullrush.GridUtil)
 local ShrinkService = require(script.Parent.ShrinkService)
 
 local WANDER_PAUSE = { 0.7, 1.6 } -- seconds between wander targets
+local DEAD_RIG_DESPAWN = 0.6 -- seconds a dead bot corpse lingers before it's cleared
 
 local AIService = {}
 
@@ -102,6 +104,11 @@ local function buildRig(name: string): Model?
 	local humanoid = rig:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		humanoid.DisplayName = name
+		-- Corpses never respawn like players do, so clear the dead rig quickly
+		-- instead of leaving it slumped on the arena until the lobby port.
+		humanoid.Died:Once(function()
+			Debris:AddItem(rig, DEAD_RIG_DESPAWN)
+		end)
 	end
 	local animate = rig:FindFirstChild("Animate") -- LocalScript, dead weight on a server rig
 	if animate then
@@ -153,6 +160,17 @@ function AIService.prepareForRound(): { any }
 		end
 	end
 	return table.clone(bots)
+end
+
+-- PushService: clients can only reference a bot by its rig Model, so map the
+-- rig back to the proxy the round pipeline knows about.
+function AIService.findByCharacter(character: Model)
+	for _, proxy in bots do
+		if proxy.Character == character then
+			return proxy
+		end
+	end
+	return nil
 end
 
 -- Team Rush: bots have no Player.Team backing, so paint the rig instead.

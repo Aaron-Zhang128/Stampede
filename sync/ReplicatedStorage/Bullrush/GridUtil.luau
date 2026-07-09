@@ -53,15 +53,17 @@
 
 	Bull roll system (BullRollService; catalog data shared in
 	ReplicatedStorage.Bullrush.BullCatalog):
-	- BullRoll:FireServer() -- spend Config.BULLS.ROLL_COST Money on one
-	  catalog roll. Robux rolls are NOT sent here: the client prompts
+	- BullRoll:FireServer(boxId) -- buy one Config.BULLS.BOXES lucky box
+	  (box.cost Money) and open it: one catalog roll with the box's own
+	  rarity weights. Robux rolls are NOT sent here: the client prompts
 	  Config.PRODUCTS.BULL_ROLL / BULL_ROLL_10 via MarketplaceService and
-	  the receipt grants the rolls server-side.
+	  the receipt opens Config.BULLS.ROBUX_BOX boxes server-side.
 	- BullEquip:FireServer(bullId) -- equip an owned bull.
 	- BullAck:FireClient(player, kind: string, data: table) -- to the
 	  caller only: "ROLLED" { results: {{bullId, rarity, isNew, refund}},
-	  money: new balance, source: "MONEY" | "ROBUX" }, "EQUIPPED" { bullId },
-	  "DENIED" { reason: "NO_MONEY" | "DATA_NOT_LOADED" | "NOT_OWNED" | "BAD_ID" }
+	  boxId, money: new balance, source: "MONEY" | "ROBUX" },
+	  "EQUIPPED" { bullId }, "DENIED" { reason: "NO_MONEY" (+ cost) |
+	  "DATA_NOT_LOADED" | "NOT_OWNED" | "BAD_ID" | "BAD_BOX" }
 	  Owned bulls replicate as player attributes: Bulls (JSON {bullId=true})
 	  + EquippedBull -- the UI reads those, no fetch remote needed.
 ]]
