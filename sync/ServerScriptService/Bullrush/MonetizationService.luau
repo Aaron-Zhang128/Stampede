@@ -4,11 +4,12 @@
 	Every monetizable thing in Bullrush flows through here:
 
 	  DEVELOPER PRODUCTS (consumable, buy again)   Config.PRODUCTS
-	    DOUBLE_ROUND   Summary "2x Rewards?"   -> EconomyService handler
-	    BULL_ROLL      1 Robux bull roll       -> BullRollService handler
-	    BULL_ROLL_10   10 Robux bull rolls     -> BullRollService handler
-	    SPIN_1         1 Robux fortune spin    -> SpinService handler
-	    SPIN_10        10 Robux fortune spins  -> SpinService handler
+	    DOUBLE_ROUND     Summary "2x Rewards?"    -> EconomyService handler
+	    BULL_ROLL        1 Robux bull roll        -> BullRollService handler
+	    BULL_ROLL_10     10 Robux bull rolls      -> BullRollService handler
+	    SPIN_1           1 Robux fortune spin     -> SpinService handler
+	    SPIN_10          10 Robux fortune spins   -> SpinService handler
+	    DAILY_CLAIM_ALL  whole 7-day daily loop   -> DailyRewardService handler
 
 	  GAME PASSES (permanent perks)                Config.PASSES
 	    VIP            perk bundle + money boost -> PASS_BENEFITS below
@@ -31,6 +32,7 @@
 	  EconomyService.init(...)   -- registers DOUBLE_ROUND
 	  BullRollService.init()     -- registers BULL_ROLL / BULL_ROLL_10
 	  SpinService.init()         -- registers SPIN_1 / SPIN_10
+	  DailyRewardService.init()  -- registers DAILY_CLAIM_ALL
 ]]
 
 local Players = game:GetService("Players")
@@ -42,7 +44,6 @@ local NotifyService = require(script.Parent.NotifyService)
 
 local MonetizationService = {}
 
-local Granted = Enum.ProductPurchaseDecision.PurchaseGranted
 local NotYet = Enum.ProductPurchaseDecision.NotProcessedYet
 
 --==============================================================================

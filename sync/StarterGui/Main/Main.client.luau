@@ -4169,10 +4169,344 @@ do
 		["Team Rush"] = Color3.fromRGB(200, 120, 255),
 		["Low Gravity"] = Color3.fromRGB(120, 220, 255),
 	}
+	-- Per-mode "snapshot" recipe for the mini-map that sits in each vote card's
+	-- icon slot. Every mode plays on the SAME physical 9x9 arena, so a photo of
+	-- the map would read identically for all of them — instead we draw a stylised
+	-- top-down diagram: a dark 9x9 board footprint with the mode's starting play
+	-- window (Config.MODES[*].startSize) lit up in the mode colour, plus a small
+	-- indicator glyph for the trait that actually distinguishes same-size modes.
+	-- `window` mirrors Config startSize; `kind` picks the overlay. Hardcoded to
+	-- mirror Config the same way MODE_COLOR mirrors the banner's GAME_TYPE map.
+	local MODE_SNAPSHOT = {
+		["Classic"] = { window = 7, kind = "plain" },
+		["Mega Grid"] = { window = 9, kind = "mega" }, -- fills the board + shrink rings
+		["Small Grid"] = { window = 5, kind = "plain" }, -- tight window reads as "small"
+		["Stampede"] = { window = 7, kind = "bulls" }, -- extra bull dots = more danger
+		["Team Rush"] = { window = 7, kind = "teams" }, -- red/blue split window
+		["Low Gravity"] = { window = 7, kind = "gravity" }, -- up-arrows = floaty
+	}
+	local TEAM_RED = Color3.fromRGB(255, 80, 70)
+	local TEAM_BLUE = Color3.fromRGB(95, 175, 255)
+	local BOARD_GRID = 9 -- Config.GRID_SIZE: the full arena is a 9x9 tile grid
 
-	-- Same "clone a real HUD button" approach as the Bull Roll section: grab the
-	-- green Sell button (rounded plate + stud + gradient + GothamBlack label) so
-	-- the vote buttons are pixel-identical to the rest of the UI.
+	-- Paint a top-down mode snapshot into the card's icon slot: hide the shipped
+	-- emblem, host a square board, tile the starting window, then overlay the
+	-- mode's indicator. Rebuilt per ballot inside a fresh clone, so no stale art.
+	local function drawMiniMap(icon, name, col)
+		icon.Image = ""
+		icon.BackgroundTransparency = 1
+		icon.ImageTransparency = 1
+		local old = icon:FindFirstChild("MiniMap")
+		if old then
+			old:Destroy()
+		end
+		local desc = MODE_SNAPSHOT[name] or { window = 7, kind = "plain" }
+		local w = math.max(1, desc.window)
+
+		-- keep the diagram square + centred no matter the icon slot's shape
+		local map = Instance.new("Frame")
+		map.Name = "MiniMap"
+		map.AnchorPoint = Vector2.new(0.5, 0.5)
+		map.Position = UDim2.new(0.5, 0, 0.5, 0)
+		map.Size = UDim2.new(1, 0, 1, 0)
+		map.BackgroundTransparency = 1
+		local ar = Instance.new("UIAspectRatioConstraint")
+		ar.AspectRatio = 1
+		ar.Parent = map
+		map.Parent = icon
+
+		-- board = the full 9x9 arena footprint (the "map")
+		local board = Instance.new("Frame")
+		board.Name = "Board"
+		board.AnchorPoint = Vector2.new(0.5, 0.5)
+		board.Position = UDim2.new(0.5, 0, 0.5, 0)
+		board.Size = UDim2.new(0.92, 0, 0.92, 0)
+		board.BackgroundColor3 = Color3.fromRGB(24, 22, 28)
+		board.BorderSizePixel = 0
+		local bc = Instance.new("UICorner")
+		bc.CornerRadius = UDim.new(0, 4)
+		bc.Parent = board
+		local bs = Instance.new("UIStroke")
+		bs.Color = INK
+		bs.Thickness = 1.5
+		bs.Transparency = 0.15
+		bs.Parent = board
+		board.Parent = map
+
+		-- window = the lit starting play zone (startSize/9 of the board)
+		local frac = w / BOARD_GRID
+		local win = Instance.new("Frame")
+		win.Name = "Window"
+		win.AnchorPoint = Vector2.new(0.5, 0.5)
+		win.Position = UDim2.new(0.5, 0, 0.5, 0)
+		win.Size = UDim2.new(frac, 0, frac, 0)
+		win.BackgroundTransparency = 1
+		win.Parent = board
+
+		local mid = (w + 1) / 2
+		local bright = col:Lerp(PAPER, 0.12)
+		for r = 1, w do
+			for c = 1, w do
+				local cell = Instance.new("Frame")
+				cell.BorderSizePixel = 0
+				-- -1px gap bleeds the dark board through as tile grid lines
+				cell.Size = UDim2.new(1 / w, -1, 1 / w, -1)
+				cell.Position = UDim2.new((c - 1) / w, 0, (r - 1) / w, 0)
+				local cellCol = bright
+				if desc.kind == "teams" then
+					if c < mid then
+						cellCol = TEAM_RED:Lerp(PAPER, 0.06)
+					elseif c > mid then
+						cellCol = TEAM_BLUE:Lerp(PAPER, 0.06)
+					else
+						cellCol = Color3.fromRGB(40, 40, 46) -- no-man's-land seam
+					end
+				end
+				cell.BackgroundColor3 = cellCol
+				cell.Parent = win
+			end
+		end
+
+		-- trait indicator overlaid on the window
+		if desc.kind == "bulls" then
+			-- scattered dark dots ringed red = "more bulls charging"
+			for _, s in ipairs({ { 0.26, 0.3 }, { 0.72, 0.36 }, { 0.46, 0.72 } }) do
+				local dot = Instance.new("Frame")
+				dot.AnchorPoint = Vector2.new(0.5, 0.5)
+				dot.Position = UDim2.new(s[1], 0, s[2], 0)
+				dot.Size = UDim2.new(0.24, 0, 0.24, 0)
+				dot.BackgroundColor3 = Color3.fromRGB(22, 18, 20)
+				dot.BorderSizePixel = 0
+				local dcn = Instance.new("UICorner")
+				dcn.CornerRadius = UDim.new(1, 0)
+				dcn.Parent = dot
+				local dst = Instance.new("UIStroke")
+				dst.Color = TEAM_RED
+				dst.Thickness = 1.2
+				dst.Parent = dot
+				dot.Parent = win
+			end
+		elseif desc.kind == "gravity" then
+			-- floaty up-arrows
+			for _, x in ipairs({ 0.3, 0.7 }) do
+				local arr = Instance.new("TextLabel")
+				arr.BackgroundTransparency = 1
+				arr.AnchorPoint = Vector2.new(0.5, 0.5)
+				arr.Position = UDim2.new(x, 0, 0.5, 0)
+				arr.Size = UDim2.new(0.42, 0, 0.72, 0)
+				arr.Font = Enum.Font.GothamBlack
+				arr.Text = "▲"
+				arr.TextScaled = true
+				arr.TextColor3 = Color3.fromRGB(20, 20, 26)
+				arr.TextStrokeColor3 = PAPER
+				arr.TextStrokeTransparency = 0.25
+				arr.Parent = win
+			end
+		elseif desc.kind == "mega" then
+			-- concentric rings hinting the huge grid collapses inward
+			for i = 1, 2 do
+				local f = 1 - i * 0.28
+				local ring = Instance.new("Frame")
+				ring.AnchorPoint = Vector2.new(0.5, 0.5)
+				ring.Position = UDim2.new(0.5, 0, 0.5, 0)
+				ring.Size = UDim2.new(f, 0, f, 0)
+				ring.BackgroundTransparency = 1
+				local rst = Instance.new("UIStroke")
+				rst.Color = INK
+				rst.Thickness = 1.5
+				rst.Transparency = 0.35
+				rst.Parent = ring
+				ring.Parent = win
+			end
+		end
+	end
+
+	-- Real in-game arena render for the snapshot: resolved off-thread so the UI
+	-- never stalls if Bullrush / the arena is absent from a place copy. GridUtil
+	-- gives canonical tile positions so we rebuild a PRISTINE full grid regardless
+	-- of the arena's live shrink state at intermission (tiles sit sunk/charred
+	-- from last round until the next reset()). Until these resolve, drawMiniMap's
+	-- diagram is the graceful fallback.
+	local arenaSource = nil -- Workspace.BullrushArena (Tiles + Walls + LavaFloor)
+	local GridUtil = nil
+	task.spawn(function()
+		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+		if bullrush then
+			local gu = bullrush:FindFirstChild("GridUtil")
+			if gu then
+				local ok, mod = pcall(require, gu)
+				if ok then
+					GridUtil = mod
+				end
+			end
+		end
+		local arena = workspace:WaitForChild("BullrushArena", 30)
+		if arena and arena:WaitForChild("Tiles", 10) then
+			arenaSource = arena
+		end
+	end)
+
+	-- Paint an ACTUAL top-down snapshot of the arena into the card's icon slot: a
+	-- ViewportFrame rendering clones of the real arena parts — the tile grid, the
+	-- LavaFloor moat it sits in, and the boundary walls — normalised to their
+	-- canonical positions. The mode's starting window (startSize) is lit + mode-
+	-- tinted and raised, the tiles outside it are charred and sunk (the shrunk/
+	-- dead ground), and the walls hug the window; the camera always frames the
+	-- full 9x9 so the arena SIZE reads (Small = small bright core in the lava,
+	-- Mega = fills the board). Team Rush splits the window red/blue.
+	local function drawArenaSnapshot(icon, name, col)
+		if not (arenaSource and GridUtil) then
+			drawMiniMap(icon, name, col) -- diagram fallback until the arena resolves
+			return
+		end
+		local tilesFolder = arenaSource:FindFirstChild("Tiles")
+		if not tilesFolder then
+			drawMiniMap(icon, name, col)
+			return
+		end
+		icon.Image = ""
+		icon.BackgroundTransparency = 1
+		icon.ImageTransparency = 1
+		local old = icon:FindFirstChild("ArenaShot")
+		if old then
+			old:Destroy()
+		end
+		local mini = icon:FindFirstChild("MiniMap")
+		if mini then
+			mini:Destroy()
+		end
+
+		local desc = MODE_SNAPSHOT[name] or { window = 7, kind = "plain" }
+		local w = math.clamp(desc.window, 1, BOARD_GRID)
+		local margin = (BOARD_GRID - w) / 2 -- rings outside the window each side
+		local lo, hi = 1 + margin, BOARD_GRID - margin -- window index span
+		local mid = (BOARD_GRID + 1) / 2
+
+		local vp = Instance.new("ViewportFrame")
+		vp.Name = "ArenaShot"
+		vp.AnchorPoint = Vector2.new(0.5, 0.5)
+		vp.Position = UDim2.fromScale(0.5, 0.5)
+		vp.Size = UDim2.fromScale(1, 1)
+		vp.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
+		vp.BackgroundTransparency = 0
+		vp.Ambient = Color3.fromRGB(150, 146, 150)
+		vp.LightColor = Color3.fromRGB(255, 250, 240)
+		vp.LightDirection = Vector3.new(-0.4, -1, -0.55)
+		local vc = Instance.new("UICorner")
+		vc.CornerRadius = UDim.new(0, 6)
+		vc.Parent = vp
+		local vs = Instance.new("UIStroke")
+		vs.Color = INK
+		vs.Thickness = 1.5
+		vs.Transparency = 0.2
+		vs.Parent = vp
+
+		local world = Instance.new("Model")
+		world.Name = "Arena"
+
+		-- tile spacing (centres touch, so part width == spacing == 2*halfTile)
+		local sp = GridUtil.tileCenter(1, 2).X - GridUtil.tileCenter(1, 1).X
+		local halfTile = sp / 2
+
+		-- the environment: the LavaFloor moat the grid island sits in (clone as-is,
+		-- it keeps its orange colour / position under the tiles)
+		local lavaPart = arenaSource:FindFirstChild("LavaFloor")
+		if lavaPart and lavaPart:IsA("BasePart") then
+			local lava = lavaPart:Clone()
+			lava:ClearAllChildren()
+			lava.Anchored = true
+			lava.CanCollide = false
+			lava.CastShadow = false
+			lava.Parent = world
+		end
+
+		local CHAR = Color3.fromRGB(46, 42, 40) -- charred dead ground outside the window
+		for _, src in ipairs(tilesFolder:GetChildren()) do
+			if src:IsA("BasePart") then
+				local r, c = string.match(src.Name, "^Tile_(%d+)_(%d+)$")
+				r, c = tonumber(r), tonumber(c)
+				if r and c then
+					local tile = src:Clone()
+					tile.Anchored = true
+					local inWindow = r >= lo and r <= hi and c >= lo and c <= hi
+					local top = GridUtil.tileCenter(r, c) -- canonical TOP-surface centre
+					-- sit out-of-window tiles a few studs lower so they read as sunk
+					local yTop = if inWindow then top.Y else top.Y - 4
+					tile.CFrame = CFrame.new(top.X, yTop - tile.Size.Y / 2, top.Z)
+					if inWindow then
+						local light = (r + c) % 2 == 0 -- checkerboard parity
+						local base = col
+						if desc.kind == "teams" then
+							base = if c < mid then TEAM_RED elseif c > mid then TEAM_BLUE else Color3.fromRGB(70, 70, 78)
+						end
+						tile.Color = if light then base:Lerp(PAPER, 0.18) else base:Lerp(INK, 0.28)
+						tile.Material = Enum.Material.SmoothPlastic
+						tile.Transparency = 0
+					else
+						tile.Color = CHAR
+						tile.Material = Enum.Material.Slate
+						tile.Transparency = 0.05
+					end
+					tile.Parent = world
+				end
+			end
+		end
+
+		-- the boundaries: clone the guard walls and snap them to the start-window
+		-- perimeter (same math as ShrinkService.updateWalls). In-game they're
+		-- invisible physics fences (Transparency 1) — render them faintly here so
+		-- the enclosure reads, tinted to the mode. Their built height/Y is kept.
+		local wallsFolder = arenaSource:FindFirstChild("Walls")
+		if wallsFolder then
+			local WALL_T = 1
+			local minC, maxC = GridUtil.tileCenter(lo, lo), GridUtil.tileCenter(hi, hi)
+			local minX, maxX = minC.X - halfTile, maxC.X + halfTile
+			local minZ, maxZ = minC.Z - halfTile, maxC.Z + halfTile
+			local midX, midZ = (minX + maxX) / 2, (minZ + maxZ) / 2
+			local spanX = maxX - minX + 2 * WALL_T
+			local spanZ = maxZ - minZ + 2 * WALL_T
+			local function placeWall(nm, x, z, sx, sz)
+				local wsrc = wallsFolder:FindFirstChild(nm)
+				if not (wsrc and wsrc:IsA("BasePart")) then
+					return
+				end
+				local wl = wsrc:Clone()
+				wl:ClearAllChildren()
+				wl.Anchored = true
+				wl.CanCollide = false
+				wl.CastShadow = false
+				wl.Size = Vector3.new(sx, wl.Size.Y, sz)
+				wl.CFrame = CFrame.new(x, wl.Position.Y, z) -- keep the built wall height/Y
+				wl.Material = Enum.Material.SmoothPlastic
+				wl.Color = col:Lerp(PAPER, 0.4)
+				wl.Transparency = 0.55
+				wl.Parent = world
+			end
+			placeWall("WallNorth", midX, minZ - WALL_T / 2, spanX, WALL_T)
+			placeWall("WallSouth", midX, maxZ + WALL_T / 2, spanX, WALL_T)
+			placeWall("WallWest", minX - WALL_T / 2, midZ, WALL_T, spanZ)
+			placeWall("WallEast", maxX + WALL_T / 2, midZ, WALL_T, spanZ)
+		end
+
+		-- camera frames the FULL 9x9 tile grid (constant scale) angled top-down so
+		-- the lit window's SIZE is what changes between modes. Frame by the grid
+		-- span — NOT the world bbox, which the wide lava moat would blow out — and
+		-- aim at the top checkerboard surface, not mid-pillar.
+		local target = GridUtil.tileCenter(mid, mid) -- board centre, top surface
+		local gridSpan = BOARD_GRID * sp -- edge-to-edge width of the 9x9 grid
+		local camera = Instance.new("Camera")
+		camera.FieldOfView = 55
+		camera.CFrame = CFrame.lookAt(target + Vector3.new(-0.28, 1, -0.62).Unit * gridSpan * 1.35, target)
+		camera.Parent = vp
+		vp.CurrentCamera = camera
+		world.Parent = vp
+		vp.Parent = icon
+	end
+
+	-- Reuse the Daily reward day-card as the vote option: a polished dark-glass
+	-- plate with an icon, a title, a value line, and a styled claim button. We
+	-- clone it and repaint each slot (icon tint, mode name, live count, VOTE
+	-- button) — same "clone real kit UI" trick the Bull Roll section uses.
 	local function resolve(...)
 		local node = gui
 		for _, name in ipairs({ ... }) do
@@ -4180,7 +4514,7 @@ do
 		end
 		return node
 	end
-	local SRC_BTN = resolve("SideUI", "Top", "Buttons", "Sell")
+	local SRC_CARD = resolve("Frames", "Daily", "Container", "1")
 
 	local voteRemote = nil -- Remotes.VoteMode, resolved off-thread below
 
@@ -4196,7 +4530,7 @@ do
 	panel.Name = "Panel"
 	panel.AnchorPoint = Vector2.new(0.5, 1)
 	panel.Position = UDim2.new(0.5, 0, 1, -18)
-	panel.Size = UDim2.new(0, 490, 0, 168)
+	panel.Size = UDim2.new(0, 510, 0, 220)
 	panel.BackgroundTransparency = 1
 	panel.Parent = voteGui
 	ensureScale(panel)
@@ -4220,7 +4554,7 @@ do
 	row.Name = "Row"
 	row.AnchorPoint = Vector2.new(0.5, 1)
 	row.Position = UDim2.new(0.5, 0, 1, 0)
-	row.Size = UDim2.new(1, 0, 0, 128)
+	row.Size = UDim2.new(1, 0, 0, 182)
 	row.BackgroundTransparency = 1
 	row.Parent = panel
 
@@ -4237,116 +4571,141 @@ do
 	local currentKey = nil -- concat of the ballot's ids; rebuild when it changes
 	local myVote = nil
 
+	-- 4-stop kit colour ramp (flat bright band up top -> flat saturated bottom)
+	local function modeRamp(col)
+		return ColorSequence.new({
+			ColorSequenceKeypoint.new(0, col:Lerp(PAPER, 0.35)),
+			ColorSequenceKeypoint.new(0.1, col:Lerp(PAPER, 0.35)),
+			ColorSequenceKeypoint.new(0.9, col),
+			ColorSequenceKeypoint.new(1, col),
+		})
+	end
+
 	local function styleSelection()
 		for id, c in cards do
 			local selected = (id == myVote)
 			if c.stroke then
-				c.stroke.Color = if selected then SELECT_GOLD else INK
-				c.stroke.Thickness = if selected then 4 else 2.5
+				c.stroke.Color = if selected then SELECT_GOLD else c.strokeColor
+				c.stroke.Thickness = if selected then 3 else c.strokeThick
+				c.stroke.Transparency = if selected then 0 else c.strokeTransp
 			end
 			c.count.TextColor3 = if selected then SELECT_GOLD else PAPER
+			if c.btnLabel then
+				c.btnLabel.Text = if selected then "VOTED" else "VOTE"
+			end
 		end
 	end
 
 	local function buildCards(options)
 		for _, c in cards do
-			c.cell:Destroy()
+			c.card:Destroy()
 		end
 		table.clear(cards)
 		for i, opt in options do
 			local name = tostring(opt.name or opt.id or "?")
 			local col = MODE_COLOR[name] or Color3.fromRGB(150, 150, 150)
 
-			-- transparent cell stacks the live count over the cloned button
-			local cell = Instance.new("Frame")
-			cell.Name = "Cell_" .. tostring(opt.id)
-			cell.LayoutOrder = i
-			cell.Size = UDim2.new(0, 150, 0, 116)
-			cell.BackgroundTransparency = 1
-			cell.Parent = row
-
-			-- big live count above the button
-			local countLabel = Instance.new("TextLabel")
-			countLabel.Name = "Count"
-			countLabel.AnchorPoint = Vector2.new(0.5, 0)
-			countLabel.Position = UDim2.new(0.5, 0, 0, 0)
-			countLabel.Size = UDim2.new(1, 0, 0, 44)
-			countLabel.BackgroundTransparency = 1
-			countLabel.Font = Enum.Font.GothamBlack
-			countLabel.TextColor3 = PAPER
-			countLabel.TextStrokeColor3 = INK
-			countLabel.TextStrokeTransparency = 0.2
-			countLabel.TextScaled = true
-			countLabel.Text = "0"
-			countLabel.Parent = cell
-
-			-- clone the real HUD button (falls back to a plain plate if it moved)
-			local button
-			if SRC_BTN and SRC_BTN:IsA("GuiButton") then
-				button = SRC_BTN:Clone()
-				for _, d in ipairs(button:GetDescendants()) do
+			-- clone the Daily reward day-card (dark-glass plate + icon + labels +
+			-- claim button). Falls back to a plain plate if the kit ever moves.
+			local card
+			if SRC_CARD and SRC_CARD:IsA("GuiObject") then
+				card = SRC_CARD:Clone()
+				for _, d in ipairs(card:GetDescendants()) do
 					if d:IsA("UIAspectRatioConstraint") then
 						d:Destroy()
 					end
 				end
 			else
-				button = Instance.new("ImageButton")
-				button.BackgroundColor3 = col
-				local c = Instance.new("UICorner")
-				c.CornerRadius = UDim.new(0, 10)
-				c.Parent = button
-				local s = Instance.new("UIStroke")
-				s.Color = INK
-				s.Thickness = 2.5
-				s.Parent = button
+				card = Instance.new("Frame")
+				card.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+				local uc = Instance.new("UICorner")
+				uc.CornerRadius = UDim.new(0, 10)
+				uc.Parent = card
+				local us = Instance.new("UIStroke")
+				us.Color = INK
+				us.Thickness = 2.5
+				us.Parent = card
 			end
-			button.Name = "Vote_" .. tostring(opt.id)
-			button.Visible = true
-			button.Active = true
-			button.AnchorPoint = Vector2.new(0.5, 1)
-			button.Position = UDim2.new(0.5, 0, 1, 0)
-			button.Size = UDim2.new(1, 0, 0, 60)
-			button.Parent = cell
+			card.Name = "Vote_" .. tostring(opt.id)
+			card.Visible = true
+			card.LayoutOrder = i
+			card.AnchorPoint = Vector2.new(0.5, 0.5)
+			card.Position = UDim2.new(0.5, 0, 0.5, 0)
+			card.Size = UDim2.new(0, 152, 0, 174)
+			card.Parent = row
 
-			-- retint the button's colour ramp to the mode colour (same 4-stop kit
-			-- shape the HUD buttons ship with; mirrors the CurrentArea banner)
-			local grad = button:FindFirstChildOfClass("UIGradient")
-			if grad then
-				grad.Rotation = 90
-				grad.Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, col:Lerp(PAPER, 0.35)),
-					ColorSequenceKeypoint.new(0.1, col:Lerp(PAPER, 0.35)),
-					ColorSequenceKeypoint.new(0.9, col),
-					ColorSequenceKeypoint.new(1, col),
-				})
+			-- icon -> an actual in-game snapshot of the arena for this mode: a
+			-- ViewportFrame render of the real tiles, lit window sized to the mode
+			-- (falls back to drawMiniMap's diagram until the arena resolves)
+			local icon = card:FindFirstChild("Icon")
+			if icon and icon:IsA("ImageLabel") then
+				drawArenaSnapshot(icon, name, col)
 			end
 
-			-- retext the kit label to the mode name
-			local nameLabel = button:FindFirstChild("Name")
-			if not (nameLabel and nameLabel:IsA("TextLabel")) then
-				nameLabel = button:FindFirstChildWhichIsA("TextLabel", true)
-			end
-			if nameLabel then
+			-- Name label -> mode name
+			local nameLabel = card:FindFirstChild("Name")
+			if nameLabel and nameLabel:IsA("TextLabel") then
 				nameLabel.Text = name
 			end
 
-			addButtonFeedback(button)
-			local id = opt.id
-			button.Activated:Connect(function()
-				if myVote == id then
-					return
-				end
-				myVote = id
-				styleSelection()
-				if voteRemote then
-					voteRemote:FireServer(id)
-				end
-			end)
+			-- Amount label -> live vote count line
+			local countLabel = card:FindFirstChild("Amount")
+			if not (countLabel and countLabel:IsA("TextLabel")) then
+				countLabel = card:FindFirstChildWhichIsA("TextLabel", true)
+			end
+			if countLabel then
+				countLabel.Text = "0 votes"
+			end
 
+			-- the claim button becomes the VOTE button: retint to the mode colour,
+			-- collapse its claim/locked state gradients to one, relabel "VOTE"
+			local button = card:FindFirstChildWhichIsA("ImageButton")
+			local btnLabel
+			if button then
+				button.Name = "VoteBtn"
+				button.Active = true
+				button.Visible = true
+				local first = true
+				for _, g in ipairs(button:GetChildren()) do
+					if g:IsA("UIGradient") then
+						if first then
+							g.Enabled = true
+							g.Rotation = 90
+							g.Color = modeRamp(col)
+							first = false
+						else
+							g.Enabled = false
+						end
+					end
+				end
+				btnLabel = button:FindFirstChildWhichIsA("TextLabel", true)
+				if btnLabel then
+					btnLabel.Text = "VOTE"
+				end
+				addButtonFeedback(button)
+				local id = opt.id
+				button.Activated:Connect(function()
+					if myVote == id then
+						return
+					end
+					myVote = id
+					styleSelection()
+					if voteRemote then
+						voteRemote:FireServer(id)
+					end
+				end)
+			end
+
+			-- selection rides the card's own outline; remember its resting look
+			local stroke = card:FindFirstChildOfClass("UIStroke")
 			cards[opt.id] = {
-				cell = cell,
-				stroke = button:FindFirstChildOfClass("UIStroke"),
+				card = card,
+				stroke = stroke,
+				strokeColor = stroke and stroke.Color or INK,
+				strokeThick = stroke and stroke.Thickness or 2.5,
+				strokeTransp = stroke and stroke.Transparency or 0,
 				count = countLabel,
+				btnLabel = btnLabel,
 			}
 		end
 	end
@@ -4356,7 +4715,10 @@ do
 			return
 		end
 		for id, c in cards do
-			c.count.Text = tostring(tonumber(counts[id]) or 0)
+			if c.count then
+				local n = tonumber(counts[id]) or 0
+				c.count.Text = n .. (if n == 1 then " vote" else " votes")
+			end
 		end
 	end
 

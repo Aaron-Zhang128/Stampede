@@ -26,7 +26,13 @@
 	    "CLAIMED" { day, streak, reward = Config.DAILY.REWARDS[day], money,
 	                nextClaim, -- plus for a box reward: bullId, rarity, isNew, refund
 	                spins }    -- current banked spins (spin/box rewards touch this)
+	    "CLAIMED_ALL" { rewards = { {day, reward, +box fields}... }, streak,
+	                money, spins, nextClaim } -- the DAILY_CLAIM_ALL Robux product
 	    "DENIED"  { reason = "COOLDOWN" (+ nextClaim) | "DATA_NOT_LOADED" }
+
+	The "Claim all" button prompts the Config.PRODUCTS.DAILY_CLAIM_ALL dev
+	product (client-side, like every other Robux prompt); the receipt lands in
+	MonetizationService and calls grantClaimAll, which banks all 7 days at once.
 
 	State replicates as player attributes (no fetch remote, same as SpinService):
 	  DailyStreak     consecutive claims
@@ -48,6 +54,7 @@ local Remotes = ReplicatedStorage.Bullrush.Remotes
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
 
 local NotifyService = require(script.Parent.NotifyService)
+local MonetizationService = require(script.Parent.MonetizationService)
 
 local REQUEST_GAP = 0.5 -- silent spam guard; the client paces itself anyway
 local SWEEP_TICK = 30 -- how often DailyReady is re-checked while in-game
@@ -238,11 +245,66 @@ function DailyRewardService.requestClaim(player)
 end
 
 --==============================================================================
+-- "Claim all" dev product (DAILY_CLAIM_ALL): pay Robux to bank the whole 7-day
+-- loop at once, skipping every cooldown. Registered with MonetizationService.
+--==============================================================================
+
+-- Grants every day (1..DAYS) of the loop in one shot and rolls the streak up to
+-- the next loop boundary, so the player's next FREE claim starts clean at day 1
+-- on a fresh cooldown (LastDailyClaim = now). Returns the aggregated ack
+-- payload, or nil if the profile can't safely take a grant (buyer left / data
+-- not loaded) so the receipt handler can defer the receipt.
+function DailyRewardService.grantClaimAll(player): { [string]: any }?
+	if not profileReady(player) then
+		return nil
+	end
+
+	local rewards = {} -- one entry per day, in loop order, for the client reveal
+	for day = 1, DAYS do
+		local entry: { [string]: any } = { day = day, reward = Config.DAILY.REWARDS[day] }
+		for key, value in grantReward(player, day) do -- box days add bullId/rarity/isNew/refund
+			entry[key] = value
+		end
+		table.insert(rewards, entry)
+	end
+
+	-- Land the streak on a loop boundary (multiple of DAYS) so DailyDay resets to
+	-- 1 next, and stamp the claim time so the normal cooldown resumes from now.
+	local streak = DataHandler.GetStat(player, "DailyStreak") or 0
+	local newStreak = math.ceil((streak + 1) / DAYS) * DAYS
+	DataHandler.SetStat(player, "DailyStreak", newStreak)
+	DataHandler.SetStat(player, "LastDailyClaim", os.time())
+	refreshAttributes(player)
+
+	local payload: { [string]: any } = {
+		rewards = rewards,
+		streak = newStreak,
+		money = DataHandler.GetStat(player, "Money"),
+		spins = DataHandler.GetStat(player, "Spins"),
+		nextClaim = os.time() + Config.DAILY.CLAIM_COOLDOWN,
+	}
+	ack(player, "CLAIMED_ALL", payload)
+	if typeof(player) == "Instance" then
+		NotifyService.send(player, ("Claimed all %d daily rewards!"):format(DAYS), "green", 5)
+	end
+	return payload -- smoke tests assert on this
+end
+
+--==============================================================================
 -- Ready clock: lazy sweep, so DailyReady flips (and a lapsed streak re-computes
 -- its day) while the player is in-game, not only on rejoin.
 --==============================================================================
 
 function DailyRewardService.init()
+	-- "Claim all" Robux product: grant the full loop, or defer the receipt if
+	-- the buyer's data isn't safely writable (Roblox retries, then refunds).
+	MonetizationService.registerProduct(Config.PRODUCTS.DAILY_CLAIM_ALL, function(_receipt, player)
+		if not player or not DailyRewardService.grantClaimAll(player) then
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end)
+
 	-- Prompt per-join seed: the client auto-opens the window on join when a
 	-- reward is ready, so the attributes must be set as soon as the profile
 	-- loads - not up to SWEEP_TICK later. Polls until the profile is ready (it

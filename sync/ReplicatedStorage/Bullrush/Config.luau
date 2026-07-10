@@ -56,6 +56,7 @@ Config.PRODUCTS = {
 	BULL_ROLL_10 = 0,             -- 10 bull rolls for Robux
 	SPIN_1 = 0,                   -- 1 fortune-wheel spin (SpinService); UI prices it 99 R$
 	SPIN_10 = 0,                  -- 10 fortune-wheel spins; UI prices it 699 R$
+	DAILY_CLAIM_ALL = 0,          -- claim the whole 7-day daily loop at once (DailyRewardService)
 }
 
 -- Robux game passes (permanent perks; fill the IDs in after publishing). 0 =
@@ -83,7 +84,7 @@ Config.SPINNER = {
 	FREE_SPIN_INTERVAL = 12 * 3600,  -- a free spin banks twice a day
 	SPIN_DURATION = 6,            -- seconds of wheel animation (classic decelerate)
 	REWARDS = {
-		{ kind = "bull",  bullId = "CELESTIAL", label = "Celestial Bull", weight = 4,  consolation = 1000 },
+		{ kind = "bull",  bullId = "DIABLO", label = "El Diablo", weight = 4,  consolation = 1000 },
 		{ kind = "money", amount = 5000, label = "$5,000",   weight = 8 },   -- biggest money win
 		{ kind = "money", amount = 2500, label = "$2,500",   weight = 18 },  -- medium money win 2
 		{ kind = "box",   boxId = "MEGA", label = "Mega Box", weight = 10 },  -- lucky block: free Mega box roll

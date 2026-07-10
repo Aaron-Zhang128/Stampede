@@ -40,11 +40,9 @@ BullCatalog.Bulls = {
 	-- default profile in DataHandler; old saves pick it up on load merge).
 	STARTER     = { name = "Ranch Bull",      rarity = "COMMON",    speed = 50, rollable = false },
 
-	-- COMMON is the variety rarity: DUSTY keeps the default BullTemplate rig;
-	-- the rest are distinct Meshy skins, each its own model in
-	-- BullrushAssets.Bulls (Bull_COMMON_*). Higher rarities share one tier model
-	-- each (STARTER shares the default rig, CELESTIAL the EPIC rig).
-	DUSTY       = { name = "Dusty",           rarity = "COMMON",    speed = 50 },
+	-- COMMON is the variety rarity: four distinct Meshy skins, each its own model
+	-- in BullrushAssets.Bulls (Bull_COMMON_*). Higher rarities share one tier
+	-- model each; STARTER (the granted starter) uses the default BullTemplate rig.
 	RED         = { name = "Red",             rarity = "COMMON",    speed = 48, modelName = "Bull_COMMON_RED" },
 	YELLOW      = { name = "Yellow",          rarity = "COMMON",    speed = 49, modelName = "Bull_COMMON_YELLOW" },
 	GREEN       = { name = "Green",           rarity = "COMMON",    speed = 51, modelName = "Bull_COMMON_GREEN" },
@@ -54,11 +52,8 @@ BullCatalog.Bulls = {
 
 	MIDNIGHT    = { name = "Midnight",        rarity = "RARE",      speed = 60, modelName = "Bull_RARE" },
 
+	-- The EPIC bull, rollable AND the fortune-wheel prize (Config.SPINNER slice 1).
 	DIABLO      = { name = "El Diablo",       rarity = "EPIC",      speed = 68, modelName = "Bull_EPIC" },
-
-	-- Fortune-wheel exclusive (Config.SPINNER slice 1, granted by SpinService);
-	-- rollable=false keeps it out of the Money/Robux roll pool.
-	CELESTIAL   = { name = "Celestial Bull",  rarity = "EPIC",      speed = 67, rollable = false, modelName = "Bull_EPIC" },
 
 	GOLDEN      = { name = "The Golden Bull", rarity = "LEGENDARY", speed = 74, modelName = "Bull_LEGENDARY" },
 }

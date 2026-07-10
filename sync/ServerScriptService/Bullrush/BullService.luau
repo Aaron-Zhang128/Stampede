@@ -71,13 +71,20 @@ local function templateFor(bullId: string?): Model
 	return BullTemplate
 end
 
+-- chargeAlong runs a bull straight from startPos to endPos (Root-center world
+-- positions) at `speed`, killing players inside the axis-aligned kill box around
+-- crossCoord. `axis` ("row" | "col") is the travel axis the kill box measures
+-- along. onCharge(duration) / onCleared() are optional hooks fired at launch /
+-- exit (the main game wires the ChargeStart / LaneCleared remotes there; the
+-- practice arena passes none, so no client is told about its bulls).
+-- parentFolder overrides where the bull model lives (defaults to the main
+-- arena's ActiveBulls). This is the origin-agnostic core; BullService.charge
+-- below maps a main-arena lane onto it.
 -- style.bullId: the thrower's equipped BullCatalog id (revenge throws only) —
 -- picks the model via templateFor above.
-function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string? }?): number
-	local startPos, endPos = GridUtil.lanePath(lane, bounds)
+function BullService.chargeAlong(startPos: Vector3, endPos: Vector3, crossCoord: number, axis: string, speed: number, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string? }?, onCharge, onCleared, parentFolder): number
 	local duration = (endPos - startPos).Magnitude / speed
 	local rotation = CFrame.lookAt(startPos, endPos).Rotation
-	local crossCoord = GridUtil.laneCrossCoord(lane)
 
 	local bull = templateFor(style and style.bullId):Clone()
 	bull:PivotTo(CFrame.lookAt(startPos, endPos))
@@ -128,7 +135,7 @@ function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill
 		end
 	end
 
-	bull.Parent = getActiveBullsFolder()
+	bull.Parent = parentFolder or getActiveBullsFolder()
 
 	-- Positional hooves: the charge is HEARD coming from where the bull is,
 	-- not just felt as a flat stampede layer. Dies with the model.
@@ -184,7 +191,9 @@ function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill
 		emitter.Rate = math.clamp(speed * 1.6, 60, 110) -- harder charges kick up more dust
 	end
 
-	Remotes.ChargeStart:FireAllClients(lane, duration, bounds)
+	if onCharge then
+		onCharge(duration)
+	end
 
 	local killed: { [Player]: boolean } = {} -- onKill fires once per player
 	local elapsed = 0
@@ -222,15 +231,15 @@ function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill
 		end
 
 		-- Kill check: axis-aligned box around the bull's root position.
-		local bullAlong = if lane.axis == "row" then position.X else position.Z
+		local bullAlong = if axis == "row" then position.X else position.Z
 		for _, player in getAlivePlayers() do
 			if not killed[player] then
 				local character = player.Character
 				local root = character and character:FindFirstChild("HumanoidRootPart")
 				if root then
 					local p = root.Position
-					local along = if lane.axis == "row" then p.X else p.Z
-					local cross = if lane.axis == "row" then p.Z else p.X
+					local along = if axis == "row" then p.X else p.Z
+					local cross = if axis == "row" then p.Z else p.X
 					if math.abs(along - bullAlong) < Config.BULL_HIT_HALF_LENGTH
 						and math.abs(cross - crossCoord) < Config.BULL_HIT_HALF_WIDTH
 					then
@@ -245,9 +254,29 @@ function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill
 		end
 	end
 
-	Remotes.LaneCleared:FireAllClients(lane)
+	if onCleared then
+		onCleared()
+	end
 	bull:Destroy()
 	return duration
+end
+
+-- charge runs a lane across the ACTIVE window of the MAIN arena, mapping it
+-- through GridUtil (ARENA_ORIGIN-bound) and firing the ChargeStart / LaneCleared
+-- remotes so every client renders the telegraph/clear. Signature unchanged for
+-- Main.runWaves and RevengeService.
+function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string? }?): number
+	local startPos, endPos = GridUtil.lanePath(lane, bounds)
+	local crossCoord = GridUtil.laneCrossCoord(lane)
+	return BullService.chargeAlong(
+		startPos, endPos, crossCoord, lane.axis, speed, getAlivePlayers, onKill, style,
+		function(duration)
+			Remotes.ChargeStart:FireAllClients(lane, duration, bounds)
+		end,
+		function()
+			Remotes.LaneCleared:FireAllClients(lane)
+		end
+	)
 end
 
 return BullService
