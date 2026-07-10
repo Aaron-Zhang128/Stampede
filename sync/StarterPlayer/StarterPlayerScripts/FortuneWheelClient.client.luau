@@ -1,13 +1,16 @@
 --[[
-	FortuneWheelClient - spins the lobby wheel model (Workspace.FortuneWheel)
-	whenever anyone's spin lands, so the physical wheel and the Spinner UI
-	tell the same story.
+	FortuneWheelClient - spins the lobby wheel model (Workspace.FortuneWheel).
+
+	The disc rotates on its own with a slow, continuous "attract" idle so the
+	lobby wheel always looks alive. When anyone's spin lands, the committed
+	SpinStarted broadcast takes the disc over with the SAME cubic ease-out the
+	UI wheel uses (Main's section 10) and lands it on the winning slice; the
+	idle then resumes from that resting angle. So the physical wheel and the
+	Spinner UI still tell the same story.
 
 	SpinService broadcasts SpinStarted { index, revolutions, jitter,
-	duration } to every client; this script replays it on the wheel's Disc
-	sub-model (pivot pre-set at the hub in edit mode) with the SAME cubic
-	ease-out the UI wheel uses (Main's section 10), plus a positional peg
-	clack per slice edge for anyone standing nearby.
+	duration } to every client; slice edges tick a positional peg clack for
+	anyone standing nearby during a real spin (idle stays quiet).
 
 	World FX only - all fortune-wheel UI lives in StarterGui.Main.Main, per
 	the house rule. Rotation is a RenderStepped lerp, not a tween (see the
@@ -21,6 +24,7 @@ local SoundService = game:GetService("SoundService")
 local Debris = game:GetService("Debris")
 
 local SLICE_ANGLE = 60
+local IDLE_SPEED = 20 -- degrees/sec of continuous attract rotation while idle
 
 local sfxGroup = SoundService:FindFirstChild("GameSFX")
 local tickerTemplate = sfxGroup and sfxGroup:FindFirstChild("Ticker")
@@ -72,51 +76,65 @@ local function clack()
 	Debris:AddItem(sound, 3)
 end
 
--- currentAngle accumulates across spins so back-to-back spins keep flowing
+-- currentAngle accumulates across idle + spins so everything keeps flowing
 -- from wherever the disc rests; the UI's Rotation is clockwise-positive, and
 -- -Z here reads clockwise to a player facing the wheel from the lobby side.
 local basePivot = disc:GetPivot()
 local currentAngle = 0
-local spinToken = 0
+local lastEdge = 0
+
+-- nil while idling; set to a committed spin's params while one is playing.
+local activeSpin = nil
 
 local function applyAngle(angle)
 	disc:PivotTo(basePivot * CFrame.Angles(0, 0, -math.rad(angle % 360)))
 end
 
-startedRemote.OnClientEvent:Connect(function(data)
-	if typeof(data) ~= "table" then
-		return
-	end
-	spinToken += 1
-	local token = spinToken -- a newer broadcast takes the wheel over mid-spin
+-- one persistent loop: gently rotates the disc while idle, then hands the
+-- wheel to a committed spin when SpinStarted arrives, then idles again.
+RunService.RenderStepped:Connect(function(dt)
+	local spin = activeSpin
+	if spin then
+		spin.elapsed = math.min(spin.elapsed + dt, spin.duration)
+		local alpha = 1 - (1 - spin.elapsed / spin.duration) ^ 3
+		currentAngle = spin.startAngle + spin.delta * alpha
 
-	local startAngle = currentAngle
-	local targetMod = -((tonumber(data.index) or 1) - 1) * SLICE_ANGLE + (tonumber(data.jitter) or 0)
-	local delta = (targetMod - startAngle) % 360 + (tonumber(data.revolutions) or 4) * 360
-	local duration = tonumber(data.duration) or 6
-
-	local lastEdge = math.floor((startAngle + SLICE_ANGLE / 2) / SLICE_ANGLE)
-	local elapsed = 0
-	local connection
-	connection = RunService.RenderStepped:Connect(function(dt)
-		if token ~= spinToken then
-			connection:Disconnect()
-			return
-		end
-		elapsed = math.min(elapsed + dt, duration)
-		local alpha = 1 - (1 - elapsed / duration) ^ 3
-		currentAngle = startAngle + delta * alpha
-
+		-- clack once per slice edge the pointer crosses during a real spin
 		local edge = math.floor((currentAngle + SLICE_ANGLE / 2) / SLICE_ANGLE)
 		if edge ~= lastEdge then
 			lastEdge = edge
 			clack()
 		end
 
-		if elapsed >= duration then
-			currentAngle = targetMod % 360
-			connection:Disconnect()
+		if spin.elapsed >= spin.duration then
+			currentAngle = spin.targetMod % 360
+			if activeSpin == spin then
+				activeSpin = nil
+			end
 		end
-		applyAngle(currentAngle)
-	end)
+	else
+		currentAngle = (currentAngle + IDLE_SPEED * dt) % 360
+	end
+	applyAngle(currentAngle)
+end)
+
+startedRemote.OnClientEvent:Connect(function(data)
+	if typeof(data) ~= "table" then
+		return
+	end
+
+	local startAngle = currentAngle
+	local targetMod = -((tonumber(data.index) or 1) - 1) * SLICE_ANGLE + (tonumber(data.jitter) or 0)
+	local delta = (targetMod - startAngle) % 360 + (tonumber(data.revolutions) or 4) * 360
+
+	-- assigning activeSpin hands the wheel over; a newer broadcast simply
+	-- replaces it, and the loop picks up the new params on the next frame.
+	lastEdge = math.floor((startAngle + SLICE_ANGLE / 2) / SLICE_ANGLE)
+	activeSpin = {
+		startAngle = startAngle,
+		delta = delta,
+		duration = tonumber(data.duration) or 6,
+		targetMod = targetMod,
+		elapsed = 0,
+	}
 end)

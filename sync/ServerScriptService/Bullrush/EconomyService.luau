@@ -30,7 +30,6 @@
 ]]
 
 local Players = game:GetService("Players")
-local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
@@ -38,6 +37,7 @@ local Config = require(ReplicatedStorage.Bullrush.Config)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
 local NotifyService = require(script.Parent.NotifyService)
+local MonetizationService = require(script.Parent.MonetizationService)
 
 local ECON = Config.ECONOMY
 
@@ -229,31 +229,13 @@ function EconomyService.settle(winnerInfo: { [string]: any })
 end
 
 --==============================================================================
--- Dev products: registered handlers + the built-in "2x Rewards?"
+-- "2x Rewards?" dev product (DOUBLE_ROUND)
 --==============================================================================
 
--- Other services sell products too (BullRollService's Robux rolls), but this
--- module owns the game's single ProcessReceipt - they register here instead.
--- Handlers get (receipt, player?) and return a ProductPurchaseDecision.
-local productHandlers: { [number]: (receipt: any, player: Player?) -> Enum.ProductPurchaseDecision } = {}
-
-function EconomyService.registerProduct(productId: number, handler: (receipt: any, player: Player?) -> Enum.ProductPurchaseDecision)
-	if productId ~= 0 then -- 0 = not configured yet (place unpublished)
-		productHandlers[productId] = handler
-	end
-end
-
-local function onReceipt(receipt)
-	local handler = productHandlers[receipt.ProductId]
-	if handler then
-		return handler(receipt, Players:GetPlayerByUserId(receipt.PlayerId))
-	end
-	if Config.PRODUCTS.DOUBLE_ROUND == 0
-		or receipt.ProductId ~= Config.PRODUCTS.DOUBLE_ROUND
-	then
-		return Enum.ProductPurchaseDecision.NotProcessedYet
-	end
-	local player = Players:GetPlayerByUserId(receipt.PlayerId)
+-- MonetizationService owns the game's single ProcessReceipt; we hand it this
+-- one handler for DOUBLE_ROUND and it dispatches the receipt to us. Grants the
+-- buyer their last settled round total again, once.
+local function grantDoubleRound(receipt, player: Player?): Enum.ProductPurchaseDecision
 	local record = lastSettled[receipt.PlayerId]
 	if not player or not record or record.doubled or record.total <= 0 then
 		-- Nothing to double (left the server / already doubled / empty round):
@@ -278,14 +260,7 @@ end
 
 function EconomyService.init(awardMoneyFn: (Player, number) -> number)
 	awardMoney = awardMoneyFn
-	-- Sole game-wide receipt callback (nothing else in the place sets one).
-	-- pcall so edit-mode test harnesses without receipt access still load us.
-	local ok, err = pcall(function()
-		MarketplaceService.ProcessReceipt = onReceipt
-	end)
-	if not ok then
-		warn("Bullrush: ProcessReceipt not installed:", err)
-	end
+	MonetizationService.registerProduct(Config.PRODUCTS.DOUBLE_ROUND, grantDoubleRound)
 end
 
 Players.PlayerRemoving:Connect(function(player)

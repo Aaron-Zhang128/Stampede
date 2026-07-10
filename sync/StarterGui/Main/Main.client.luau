@@ -352,6 +352,216 @@ local function playHover()
 	playUiSound(0.9, 1.5)
 end
 
+---------------------------------------------------------------- 2c) HUD push button
+-- Combat shove button. Cloned from the Index side button (so it inherits the
+-- HUD kit look) and dropped on the right edge, below the deal-pack buttons and
+-- clear of every other element. Its icon is swapped to a boxing glove and the
+-- decorative ring recolored green.
+--
+-- All the gameplay — targeting the NEAREST player, the red target aura, F /
+-- gamepad input, cooldown timing — lives in StarterPlayerScripts.PushClient;
+-- this button only presents state and forwards taps (the one-LocalScript UI
+-- rule). The two meet at ReplicatedStorage.PushBridge, created by PushClient:
+--     a tap        -> PushBridge:Fire()
+--     its attributes drive the look:
+--        Enabled          -> button shown at all (you're alive; lobby included)
+--        HasTarget        -> bright (someone in range this round) vs dim (nobody)
+--        CooldownDuration -> the drain sweep's length
+--        ReadyAt          -> os.clock() the cooldown lapses; drives the sweep
+do
+	-- PLACEHOLDER art: paste your boxing-glove image id here. For now this is
+	-- the Index button's own book icon (a guaranteed-loadable in-game image) so
+	-- the center isn't blank while you find the real glove.
+	local GLOVE_IMAGE = "rbxassetid://138787751104353"
+	local RING_GREEN = Color3.fromRGB(85, 255, 127) -- same green as the self-aura
+
+	-- The HUD ships in a few layout variants (Lef1 / Left2 / Left3); grab the
+	-- first Index button that exists as the clone template.
+	local template
+	for _, d in ipairs(SideUI:GetDescendants()) do
+		if d.Name == "Index" and d:IsA("ImageButton") then
+			template = d
+			break
+		end
+	end
+
+	if template then
+		-- Square holder pinned to the right edge, mid-lower (clear of other HUD).
+		local holder = Instance.new("Frame")
+		holder.Name = "PushButton"
+		holder.BackgroundTransparency = 1
+		holder.AnchorPoint = Vector2.new(1, 0.5)
+		holder.Position = UDim2.fromScale(0.985, 0.72)
+		-- Both axes scaled: a zero-width Size collapses to 0x0 under the aspect
+		-- constraint. The constraint then squares it off the height.
+		holder.Size = UDim2.fromScale(0.11, 0.11)
+		holder.Visible = false
+		holder.Parent = gui
+
+		local aspect = Instance.new("UIAspectRatioConstraint")
+		aspect.AspectRatio = 1
+		aspect.DominantAxis = Enum.DominantAxis.Height
+		aspect.Parent = holder
+
+		local btn = template:Clone()
+		btn.Name = "Push"
+		btn.AnchorPoint = Vector2.new(0.5, 0.5)
+		btn.Position = UDim2.fromScale(0.5, 0.5)
+		btn.Size = UDim2.fromScale(1, 1)
+		btn.Visible = true
+		btn.Active = true
+		btn.Parent = holder
+
+		-- Swap the glyph for the glove and recolor the decorative ring green.
+		local icon = btn:FindFirstChild("Icon")
+		if icon and icon:IsA("ImageLabel") then
+			icon.Image = GLOVE_IMAGE
+			icon.ImageColor3 = Color3.new(1, 1, 1)
+		end
+		local decor = btn:FindFirstChild("Decor")
+		local ring = decor and decor:FindFirstChild("Highlight")
+		local ringStroke = ring and ring:FindFirstChild("UIStroke")
+		if ringStroke and ringStroke:IsA("UIStroke") then
+			ringStroke.Color = RING_GREEN
+		end
+		local nameLabel = btn:FindFirstChild("Name")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			nameLabel.Text = "PUSH"
+		end
+
+		-- Compact keybind badge that pops out past the button's top-left edge,
+		-- keyed to the player's current input device (F on keyboard, TAP on
+		-- touch, Y on gamepad) and updated live so switching device relabels it.
+		-- Rides along with the button (child of btn), so it shows/hides with it.
+		-- Overhangs the TOP edge biased left (the button hugs the right screen
+		-- edge, so popping it up-and-in keeps the whole badge on-screen).
+		local UserInputService = game:GetService("UserInputService")
+
+		local function activationHint(): string
+			local lastInput = UserInputService:GetLastInputType()
+			if lastInput == Enum.UserInputType.Touch then
+				return "TAP"
+			elseif lastInput.Name:find("Gamepad") then
+				return "Y"
+			elseif not UserInputService.KeyboardEnabled and UserInputService.TouchEnabled then
+				return "TAP"
+			end
+			return "F"
+		end
+
+		local hintLabel = Instance.new("TextLabel")
+		hintLabel.Name = "PushHint"
+		hintLabel.AnchorPoint = Vector2.new(1, 0)
+		hintLabel.Position = UDim2.fromScale(0.80, -0.22) -- popped out above the top edge, biased top-left
+		hintLabel.Size = UDim2.fromScale(0.46, 0.30)
+		hintLabel.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+		hintLabel.BackgroundTransparency = 0.2
+		hintLabel.Font = Enum.Font.GothamBold
+		hintLabel.TextScaled = true
+		hintLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		hintLabel.TextXAlignment = Enum.TextXAlignment.Center
+		hintLabel.Text = activationHint()
+		hintLabel.ZIndex = 21 -- above the cooldown curtain
+		hintLabel.Parent = btn
+		local hintPad = Instance.new("UIPadding")
+		hintPad.PaddingTop = UDim.new(0.06, 0)
+		hintPad.PaddingBottom = UDim.new(0.06, 0)
+		hintPad.PaddingLeft = UDim.new(0.12, 0)
+		hintPad.PaddingRight = UDim.new(0.12, 0)
+		hintPad.Parent = hintLabel
+		local hintCorner = Instance.new("UICorner")
+		hintCorner.CornerRadius = UDim.new(0.3, 0)
+		hintCorner.Parent = hintLabel
+		local hintStroke = Instance.new("UIStroke")
+		hintStroke.Color = Color3.fromRGB(0, 0, 0)
+		hintStroke.Thickness = 2
+		hintStroke.Parent = hintLabel
+		UserInputService.LastInputTypeChanged:Connect(function()
+			hintLabel.Text = activationHint()
+		end)
+
+		-- Cooldown drain: a dark curtain over the button that shrinks from full
+		-- height down to nothing across the cooldown.
+		local curtain = Instance.new("Frame")
+		curtain.Name = "Cooldown"
+		curtain.AnchorPoint = Vector2.new(0.5, 1)
+		curtain.Position = UDim2.fromScale(0.5, 1)
+		curtain.Size = UDim2.fromScale(1, 0)
+		curtain.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		curtain.BackgroundTransparency = 0.5
+		curtain.BorderSizePixel = 0
+		curtain.ZIndex = 20
+		curtain.Visible = false
+		curtain.Parent = btn
+		local curtainCorner = Instance.new("UICorner")
+		curtainCorner.CornerRadius = UDim.new(0.25, 0)
+		curtainCorner.Parent = curtain
+
+		local ICON_BRIGHT = 0 -- glove opacity when a target is in range and ready
+		local ICON_DIM = 0.2 -- still clearly visible with nobody in range / while cooling
+		local RING_BRIGHT = 0.1
+		local RING_DIM = 0.4
+
+		-- Wait for PushClient to publish the bridge, then bind the look + taps.
+		task.spawn(function()
+			local bridge = ReplicatedStorage:WaitForChild("PushBridge", 30)
+			if not bridge then
+				return
+			end
+
+			local function isCooling()
+				return os.clock() < (bridge:GetAttribute("ReadyAt") or 0)
+			end
+
+			local function applyLook()
+				holder.Visible = bridge:GetAttribute("Enabled") == true
+				hintLabel.Visible = holder.Visible
+				if not holder.Visible then
+					curtain.Visible = false
+					return
+				end
+				local cooling = isCooling()
+				local bright = bridge:GetAttribute("HasTarget") == true and not cooling
+				if icon then
+					icon.ImageTransparency = bright and ICON_BRIGHT or ICON_DIM
+				end
+				if ringStroke then
+					ringStroke.Transparency = bright and RING_BRIGHT or RING_DIM
+				end
+				curtain.Visible = cooling
+			end
+
+			bridge:GetAttributeChangedSignal("Enabled"):Connect(applyLook)
+			bridge:GetAttributeChangedSignal("HasTarget"):Connect(applyLook)
+			bridge:GetAttributeChangedSignal("ReadyAt"):Connect(applyLook)
+
+			-- Drain the curtain only while the button is up and on cooldown.
+			RunService.RenderStepped:Connect(function()
+				if not (holder.Visible and curtain.Visible) then
+					return
+				end
+				local readyAt = bridge:GetAttribute("ReadyAt") or 0
+				local duration = bridge:GetAttribute("CooldownDuration") or 0
+				local remaining = readyAt - os.clock()
+				if remaining <= 0 then
+					curtain.Visible = false
+					applyLook() -- restore the bright/dim look now the shove is ready
+					return
+				end
+				curtain.Size = UDim2.fromScale(1, duration > 0 and math.clamp(remaining / duration, 0, 1) or 0)
+			end)
+
+			btn.Activated:Connect(function()
+				bridge:Fire()
+				playClick()
+			end)
+			btn.MouseEnter:Connect(playHover)
+
+			applyLook()
+		end)
+	end
+end
+
 -- Settings audio sliders: drag the handle across a row (or click the track) to
 -- set the matching SoundGroup volume live. "Music" -> SoundService.BackgroundMusic,
 -- "Sound Effects" -> SoundService.GameSFX. Missing group/slider -> silent no-op.
@@ -927,8 +1137,12 @@ task.spawn(function()
 end)
 
 -- Elimination side feed: eliminations skip the notif card stack and show on
--- the right edge instead — just the victim's head shot and red ELIMINATED
--- lettering, newest on top. Lives in notifGui so panels can't cover it.
+-- the right edge instead, newest on top. Three row shapes, keyed by the
+-- cause the server sends with Remotes.Eliminated:
+--   PUSH   [pusher head] Pusher ELIMINATED Victim [victim head]
+--   FELL   Victim FELL [victim head]           (boundary / void / reset)
+--   other  Victim ELIMINATED [victim head]     (BULL, REVENGE, LEFT)
+-- Lives in notifGui so panels can't cover it.
 local ELIM_LIFETIME = 3
 local ELIM_MAX = 6
 
@@ -936,7 +1150,7 @@ local elimStack = Instance.new("Frame")
 elimStack.Name = "ElimStack"
 elimStack.AnchorPoint = Vector2.new(1, 0.5)
 elimStack.Position = UDim2.new(1, -10, 0.45, 0)
-elimStack.Size = UDim2.new(0, 230, 0, 320)
+elimStack.Size = UDim2.new(0, 340, 0, 320)
 elimStack.BackgroundTransparency = 1
 elimStack.Parent = notifGui
 
@@ -950,55 +1164,95 @@ elimLayout.Parent = elimStack
 
 local elimCounter = 0
 
-local function pushElim(playerName)
+local ELIM_VERB_RED = "#FF4A3C" -- ELIMINATED lettering
+local ELIM_VERB_ICE = "#A8CEFF" -- FELL lettering
+
+-- Names land inside RichText markup, and display names are player-typed.
+local function richEscape(s)
+	return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
+end
+
+-- Display name + UserId for the head shot. Bots aren't real players (no
+-- UserId to thumbnail), so they resolve to their raw name and no head.
+local function elimIdentity(name)
+	local p = Players:FindFirstChild(name)
+	if p and p:IsA("Player") and p.UserId > 0 then
+		return p.DisplayName, p.UserId
+	end
+	return name, nil
+end
+
+local function makeElimHead(userId, order)
+	local head = Instance.new("ImageLabel")
+	head.Name = "Head"
+	head.LayoutOrder = order
+	head.Size = UDim2.new(0, 34, 0, 34)
+	head.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+	head.BackgroundTransparency = 0.25
+	head.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=48&h=48"):format(userId)
+	local headCorner = Instance.new("UICorner")
+	headCorner.CornerRadius = UDim.new(1, 0)
+	headCorner.Parent = head
+	return head
+end
+
+local function pushElim(victimName, cause, byName)
 	elimCounter += 1
 	local row = Instance.new("Frame")
 	row.Name = "Elim" .. elimCounter
 	row.LayoutOrder = -elimCounter -- newest on top
-	row.Size = UDim2.new(1, 0, 0, 44)
+	row.AutomaticSize = Enum.AutomaticSize.X
+	row.Size = UDim2.new(0, 0, 0, 40)
 	row.BackgroundTransparency = 1
 
-	-- Head banner: the victim's avatar head shot, on the LEFT of the row
-	-- (ELIMINATED lettering right-aligned beside it). Bots aren't real
-	-- players (no UserId to thumbnail), so their rows are lettering only.
-	local victim = Players:FindFirstChild(playerName)
-	local head
-	if victim and victim:IsA("Player") and victim.UserId > 0 then
-		head = Instance.new("ImageLabel")
-		head.Name = "Head"
-		head.AnchorPoint = Vector2.new(0, 0.5)
-		head.Position = UDim2.new(0, 0, 0.5, 0)
-		head.Size = UDim2.new(0, 40, 0, 40)
-		head.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-		head.BackgroundTransparency = 0.25
-		head.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=48&h=48"):format(victim.UserId)
-		local headCorner = Instance.new("UICorner")
-		headCorner.CornerRadius = UDim.new(1, 0)
-		headCorner.Parent = head
-		head.Parent = row
+	-- Heads and lettering flow right-to-left off the screen edge; the
+	-- victim's head is always the rightmost element, so "who died" reads
+	-- as a steady column even when row shapes mix.
+	local rowLayout = Instance.new("UIListLayout")
+	rowLayout.FillDirection = Enum.FillDirection.Horizontal
+	rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rowLayout.Padding = UDim.new(0, 6)
+	rowLayout.Parent = row
+
+	local victimDisplay, victimId = elimIdentity(victimName)
+	local text
+	if cause == "PUSH" and typeof(byName) == "string" and byName ~= "" then
+		local pusherDisplay, pusherId = elimIdentity(byName)
+		if pusherId then
+			makeElimHead(pusherId, 1).Parent = row
+		end
+		text = ('%s <font color="%s">ELIMINATED</font> %s'):format(
+			richEscape(pusherDisplay), ELIM_VERB_RED, richEscape(victimDisplay))
+	elseif cause == "FELL" then
+		text = ('%s <font color="%s">FELL</font>'):format(
+			richEscape(victimDisplay), ELIM_VERB_ICE)
+	else -- BULL, REVENGE, LEFT, and anything untagged
+		text = ('%s <font color="%s">ELIMINATED</font>'):format(
+			richEscape(victimDisplay), ELIM_VERB_RED)
 	end
 
 	local label = Instance.new("TextLabel")
 	label.Name = "Text"
-	label.AnchorPoint = Vector2.new(1, 0.5)
-	label.Position = UDim2.new(1, 0, 0.5, 0)
-	label.Size = UDim2.new(1, if head then -46 else 0, 0, 26)
+	label.LayoutOrder = 2
+	label.AutomaticSize = Enum.AutomaticSize.X
+	label.Size = UDim2.new(0, 0, 0, 24)
 	label.BackgroundTransparency = 1
 	label.Font = Enum.Font.GothamBlack
-	label.Text = "ELIMINATED"
-	label.TextScaled = true
-	label.TextXAlignment = Enum.TextXAlignment.Right
+	label.RichText = true
+	label.Text = text
+	label.TextSize = 22
 	label.TextColor3 = Color3.fromRGB(255, 255, 255)
 	local stroke = Instance.new("UIStroke")
 	stroke.Color = Color3.fromRGB(0, 0, 0)
 	stroke.Thickness = 2
 	stroke.Parent = label
-	-- Same red glyph ramp as the notif cards' "red" style.
-	local textGradient = Instance.new("UIGradient")
-	textGradient.Rotation = 90
-	textGradient.Color = NOTIF_TEXT_TINTS.red
-	textGradient.Parent = label
 	label.Parent = row
+
+	if victimId then
+		makeElimHead(victimId, 3).Parent = row
+	end
 
 	row.Parent = elimStack
 
@@ -1026,11 +1280,13 @@ local function pushElim(playerName)
 		end
 		tween(label, TweenInfo.new(0.35), { TextTransparency = 1 })
 		tween(stroke, TweenInfo.new(0.35), { Transparency = 1 })
-		if head then
-			tween(head, TweenInfo.new(0.35), {
-				ImageTransparency = 1,
-				BackgroundTransparency = 1,
-			})
+		for _, child in ipairs(row:GetChildren()) do
+			if child:IsA("ImageLabel") then
+				tween(child, TweenInfo.new(0.35), {
+					ImageTransparency = 1,
+					BackgroundTransparency = 1,
+				})
+			end
 		end
 		task.delay(0.4, function()
 			row:Destroy()
@@ -1046,11 +1302,11 @@ task.spawn(function()
 		warn("[Main] Eliminated remote missing; elimination feed disabled")
 		return
 	end
-	elimRemote.OnClientEvent:Connect(function(playerName)
+	elimRemote.OnClientEvent:Connect(function(playerName, _aliveCount, cause, byName)
 		if typeof(playerName) ~= "string" or playerName == "" then
 			return
 		end
-		pushElim(playerName)
+		pushElim(playerName, cause, byName)
 	end)
 end)
 
@@ -1104,7 +1360,7 @@ end
 local speedLabel = counters and counters:FindFirstChild("Speed")
 speedLabel = speedLabel and speedLabel:FindFirstChild("Amount")
 if speedLabel then
-	speedLabel.Text = "16" -- default WalkSpeed, shown until the humanoid binds
+	speedLabel.Text = "24" -- default WalkSpeed, shown until the humanoid binds
 	local walkSpeedConn
 	local function bindCharacter(character)
 		if walkSpeedConn then
@@ -1579,6 +1835,28 @@ do
 		end
 	end
 
+	-- The kit's Stud texture tiles by SCALE (TileSize {0.5,0},{2,0}), tuned to
+	-- the WIDE Button1. Cloned onto our skinny ◀ ▶ buttons — whose aspect ratio
+	-- is nothing like Button1's — that scale tiling squishes each stud into a
+	-- tall, thin smear. Fix: retile every revenge button by a fixed PIXEL size
+	-- (the template's own rendered tile) so studs stay square and uniform. The
+	-- template is a laid-out SideUI element, so its AbsoluteSize is real here; a
+	-- square fallback covers the off chance layout hasn't resolved yet.
+	local studTile: UDim2
+	do
+		local tmplStud = kitTemplate and kitTemplate:FindFirstChild("Stud", true)
+		local abs = tmplStud and tmplStud.AbsoluteSize
+		if tmplStud and abs and abs.X > 0 and abs.Y > 0 then
+			local ts = tmplStud.TileSize
+			studTile = UDim2.fromOffset(
+				math.round(ts.X.Scale * abs.X + ts.X.Offset),
+				math.round(ts.Y.Scale * abs.Y + ts.Y.Offset)
+			)
+		else
+			studTile = UDim2.fromOffset(72, 72) -- square fallback ≈ template stud
+		end
+	end
+
 	local selLabel = Instance.new("TextLabel")
 	selLabel.Name = "Selection"
 	selLabel.BackgroundTransparency = 1
@@ -1639,6 +1917,12 @@ do
 		btn.AnchorPoint = Vector2.new(anchorX, 1)
 		btn.Position = UDim2.new(xScale, 0, 1, 0)
 		btn.Size = UDim2.new(0, width, 0, 64)
+		-- retile the stud texture in fixed pixels so it isn't scale-squished on
+		-- the skinny arrows (see studTile above)
+		local stud = btn:FindFirstChild("Stud", true)
+		if stud and (stud:IsA("ImageLabel") or stud:IsA("ImageButton")) then
+			stud.TileSize = studTile
+		end
 		setButtonState(btn, true)
 		btn.Parent = panel
 		addButtonFeedback(btn)
@@ -1847,6 +2131,15 @@ do
 					pushNotif(("Duplicate %s — +%s Money"):format(
 						tostring(reward.label), comma(tonumber(data.consolation) or 0)), "green", 5)
 				end
+			elseif reward.kind == "box" then
+				-- the lucky block: the slice label is the box, data.bullName is what dropped
+				local won = tostring(data.bullName or data.bullId)
+				if data.isNew then
+					pushNotif(("%s opened — %s, a new bull!"):format(tostring(reward.label), won), "green", 5)
+				else
+					pushNotif(("%s opened — %s (duplicate), +%s Money"):format(
+						tostring(reward.label), won, comma(tonumber(data.refund) or 0)), "green", 5)
+				end
 			elseif reward.kind == "spin" then
 				pushNotif("Free spin! Spin again", "green", 4)
 			elseif reward.label == "JACKPOT" then
@@ -1855,7 +2148,9 @@ do
 				pushNotif(("You won +%s Money!"):format(comma(tonumber(reward.amount) or 0)), "green", 4)
 			end
 			playSfx("winner!", 0.6)
-			if reward.kind == "money" or (reward.kind == "bull" and not data.isNew) then
+			if reward.kind == "money"
+				or (reward.kind == "bull" and not data.isNew)
+				or (reward.kind == "box" and not data.isNew) then
 				playSfx("Cash", 0.6)
 			end
 		end
@@ -2144,17 +2439,21 @@ end
 -- tag, a RichText odds line, a $cost buy button). Buying a box fires
 -- BullRoll:FireServer(boxId); the "ROLLED" ack AUTO-OPENS the reveal wheel
 -- (rollFrame) — the shop window closes itself via openFrame's one-at-a-time
--- rule. The wheel's green button re-buys the same box ("ROLL AGAIN").
+-- rule. The wheel's green button re-buys the same box ("ROLL AGAIN"); the gold
+-- button is the ROBUX ROLL shell — it prompts the Config.PRODUCTS.BULL_ROLL dev
+-- product and the server-side receipt opens a Config.BULLS.ROBUX_BOX box (id 0
+-- until published -> "coming soon" card).
 --
 -- The server rolls the result and answers the caller: BullRoll:FireServer(boxId)
 -- -> BullAck "ROLLED" { results = {{bullId,rarity,isNew,refund}}, boxId, money,
 -- source }. The reveal is pure presentation: a horizontal strip of rarity-tinted
--- placeholder cards (swap the "🐂" TextLabel for a ViewportFrame/thumbnail once
--- the models land) scrolls fast, cubic-eases to a stop with the won bull under
--- the center marker, ticks per card, drumroll on the final crawl. A 10x roll runs
--- ONE carousel (landing on the rarest of the ten) then pops a 5x2 results grid.
--- All motion is manual RenderStepped math, never a TweenService loop (Run-mode
--- tween freeze — see the marquee/ambient sections).
+-- cards — each showing the bull's REAL model in a ViewportFrame (section 12's
+-- 3/4-front camera recipe) — scrolls fast, cubic-eases to a stop with the won
+-- bull under the center marker, ticks per card, drumroll on the final crawl. A
+-- multi-result ack (e.g. the 10-roll BULL_ROLL_10 product, if it's ever sold)
+-- still runs ONE carousel (landing on the rarest of the batch) then pops the
+-- results grid. All motion is manual RenderStepped math, never a TweenService
+-- loop (Run-mode tween freeze — see the marquee/ambient sections).
 do
 	-- resolved async (remotes + Config + Catalog) at the bottom of this block
 	local BullCatalog = nil
@@ -2163,6 +2462,8 @@ do
 	local BOXES = nil             -- Config.BULLS.BOXES once Config resolves
 	local lastBoxId = nil         -- box behind the current reveal (ROLL AGAIN re-buys it)
 	local productIds = { BULL_ROLL = 0, BULL_ROLL_10 = 0 }
+	local modelsFolder = nil      -- ReplicatedStorage.BullrushAssets.Bulls (tier skins)
+	local fallbackModel = nil     -- ...BullrushAssets.BullTemplate (default look)
 
 	-- geometry (pixels): the strip lives in a clipped viewport and only its X
 	-- offset animates; the won bull always sits at WINNER_INDEX in the strip.
@@ -2425,36 +2726,40 @@ do
 	rollButton.Size = UDim2.new(0, 240, 0, BTN_H)
 	rollButton.Parent = rollFrame
 
-	-- gold Store x10 button. Its native layout floats the label above the plate and
-	-- shows a Store price row — recenter the label and hide that row so it's a clean
+	-- gold ROBUX ROLL button (cloned from the Store's premium gold button): a
+	-- SHELL for buying a roll with Robux — prompts the Config.PRODUCTS.BULL_ROLL
+	-- dev product (the receipt opens a Config.BULLS.ROBUX_BOX box server-side).
+	-- Until the product id is published (id 0) it answers with a "coming soon"
+	-- card. The clone's native layout floats the label above the plate and shows
+	-- a Store price row — recenter the label and hide that row so it's a clean
 	-- single-label gold button mirroring the green one.
-	local tenButton, tenLabel = cloneButton(SRC_GOLD10, "ROLL x10")
-	tenButton.Name = "RollX10"
-	tenButton.AnchorPoint = Vector2.new(0.5, 1)
-	tenButton.Position = UDim2.new(0.69, 0, 1, 0)
-	tenButton.Size = UDim2.new(0, 240, 0, BTN_H)
-	if tenLabel then
+	local robuxButton, robuxLabel = cloneButton(SRC_GOLD10, "ROBUX ROLL")
+	robuxButton.Name = "RobuxRoll"
+	robuxButton.AnchorPoint = Vector2.new(0.5, 1)
+	robuxButton.Position = UDim2.new(0.69, 0, 1, 0)
+	robuxButton.Size = UDim2.new(0, 240, 0, BTN_H)
+	if robuxLabel then
 		-- match the green button's Name label geometry exactly so both read centered.
 		-- the gold button's label ships TextXAlignment=Left, so force center too or the
 		-- text hugs the left edge.
-		tenLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-		tenLabel.Position = UDim2.new(0.5, 0, 0.45, 0)
-		tenLabel.Size = UDim2.new(0.9, 0, 0.575, 0)
-		tenLabel.TextXAlignment = Enum.TextXAlignment.Center
-		tenLabel.TextYAlignment = Enum.TextYAlignment.Center
+		robuxLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+		robuxLabel.Position = UDim2.new(0.5, 0, 0.45, 0)
+		robuxLabel.Size = UDim2.new(0.9, 0, 0.575, 0)
+		robuxLabel.TextXAlignment = Enum.TextXAlignment.Center
+		robuxLabel.TextYAlignment = Enum.TextYAlignment.Center
 	end
-	local tenInfo = tenButton:FindFirstChild("Info")
-	if tenInfo then
-		tenInfo.Visible = false
+	local robuxInfo = robuxButton:FindFirstChild("Info")
+	if robuxInfo then
+		robuxInfo.Visible = false
 	end
 	-- the gold button ships with chunkier stud tiling than the green one; copy the
 	-- green button's finer TileSize so both stud textures read identically
-	local tenStud = tenButton:FindFirstChild("Stud", true)
+	local robuxStud = robuxButton:FindFirstChild("Stud", true)
 	local greenStud = SRC_GREEN and SRC_GREEN:FindFirstChild("Stud", true)
-	if tenStud and greenStud then
-		tenStud.TileSize = greenStud.TileSize
+	if robuxStud and greenStud then
+		robuxStud.TileSize = greenStud.TileSize
 	end
-	tenButton.Parent = rollFrame
+	robuxButton.Parent = rollFrame
 
 	-- results grid overlay (10x rolls): a full-screen modal parented to the ScreenGui
 	-- (the roll screen itself has no background, so the grid brings its own dim
@@ -2522,8 +2827,53 @@ do
 	-- with a thin INK outline + a cyan Highlight rim; a nested "IconFrame" whose border
 	-- is a rarity-colored GRADIENT stroke, holding the icon; and white GothamBlack Name
 	-- + a rarity label whose text carries the tier gradient. opts = { badge, badgeColor,
-	-- zIndex }. (🐂 icon is a placeholder — swap for a ViewportFrame/thumbnail later.)
+	-- zIndex }.
 	local CYAN = Color3.fromRGB(118, 214, 255) -- the shop cards' fixed Highlight-rim accent
+
+	-- The icon = a ViewportFrame rendering the bull's REAL model (tier skins from
+	-- BullrushAssets.Bulls, BullTemplate for commons) with section 12's 3/4-front
+	-- camera — bulls face -Z, so the eye sits off the -Z side, high and to the
+	-- left. Falls back to the old 🐂 glyph until the assets resolve or if a
+	-- modelName ever goes missing.
+	local function buildBullPreview(parent, bull, z)
+		local source = bull
+			and ((bull.modelName and modelsFolder and modelsFolder:FindFirstChild(bull.modelName)) or fallbackModel)
+		if not source then
+			local icon = Instance.new("TextLabel")
+			icon.BackgroundTransparency = 1
+			icon.Size = UDim2.fromScale(1, 1)
+			icon.Text = "🐂"
+			icon.TextScaled = true
+			icon.Font = KIT_FONT
+			icon.TextColor3 = PAPER
+			icon.ZIndex = z
+			icon.Parent = parent
+			return
+		end
+		local viewport = Instance.new("ViewportFrame")
+		viewport.Name = "BullPreview"
+		viewport.BackgroundTransparency = 1
+		viewport.AnchorPoint = Vector2.new(0.5, 0.5)
+		viewport.Position = UDim2.fromScale(0.5, 0.5)
+		viewport.Size = UDim2.fromScale(0.96, 0.92)
+		viewport.ZIndex = z
+		viewport.Ambient = Color3.fromRGB(165, 160, 155)
+		viewport.LightColor = Color3.fromRGB(255, 250, 240)
+		viewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
+		local model = source:Clone()
+		model:PivotTo(CFrame.new())
+		local center, size = Vector3.zero, Vector3.new(10, 10, 10)
+		pcall(function()
+			local cf, bbox = model:GetBoundingBox()
+			center, size = cf.Position, bbox
+		end)
+		local camera = Instance.new("Camera")
+		camera.CFrame = CFrame.lookAt(center + Vector3.new(-0.55, 0.42, -1).Unit * size.Magnitude * 0.72, center)
+		camera.Parent = viewport
+		viewport.CurrentCamera = camera
+		model.Parent = viewport
+		viewport.Parent = parent
+	end
 	local function makeCard(bullId, size, opts)
 		opts = opts or {}
 		local z = opts.zIndex or 1
@@ -2585,15 +2935,7 @@ do
 			local rarStroke = Instance.new("UIStroke"); rarStroke.Thickness = 2.5; rarStroke.Parent = iconFrame
 			tierGradient(90).Parent = rarStroke -- lit-top -> shaded-bottom tier border
 		end
-		local icon = Instance.new("TextLabel")
-		icon.BackgroundTransparency = 1
-		icon.Size = UDim2.fromScale(1, 1)
-		icon.Text = "🐂"
-		icon.TextScaled = true
-		icon.Font = KIT_FONT
-		icon.TextColor3 = PAPER
-		icon.ZIndex = z
-		icon.Parent = iconFrame
+		buildBullPreview(iconFrame, bull, z)
 		iconFrame.Parent = card
 
 		local nameLabel = kitLabel((bull and bull.name) or "???", INK)
@@ -2792,10 +3134,14 @@ do
 		rollRemote:FireServer(lastBoxId)
 	end)
 
-	tenButton.Activated:Connect(function()
-		local pid = tonumber(productIds.BULL_ROLL_10) or 0
+	-- Robux roll shell: prompt the dev product and let the server-side receipt
+	-- do the rolling (BullRollService.init registers the handler; the "ROLLED"
+	-- ack with source="ROBUX" drives the same reveal). No product id yet ->
+	-- "coming soon" card, so the button is safe to ship before publishing.
+	robuxButton.Activated:Connect(function()
+		local pid = tonumber(productIds.BULL_ROLL) or 0
 		if pid <= 0 then
-			pushNotif("10x rolls are coming soon!", "red", 3)
+			pushNotif("Robux rolls are coming soon!", "red", 3)
 			return
 		end
 		local ok = pcall(function()
@@ -2808,66 +3154,6 @@ do
 
 	-- (The old "press B" test opener is gone: buying a lucky box in Shop1 —
 	-- opened from the lobby shop stall — auto-opens this reveal.)
-
-	-- TEMP on-screen test buttons (left edge): fire a FAKE local reveal so the
-	-- carousel can be watched without working data (a real roll denies
-	-- DATA_NOT_LOADED in the unpublished place). Uses BullCatalog.roll for
-	-- realistic rarity variety. Delete this whole block for production.
-	local function debugFakeReveal(count)
-		if rolling then
-			return
-		end
-		local rng = Random.new()
-		local results = {}
-		for _ = 1, count do
-			local id = BullCatalog and BullCatalog.roll(rng) or "PLOW"
-			local bull = BullCatalog and BullCatalog.get(id) or nil
-			local rarity = (bull and bull.rarity) or "COMMON"
-			local isNew = rng:NextNumber() < 0.55
-			local refund = 0
-			if not isNew and BullCatalog then
-				local box = (BOXES and lastBoxId) and BOXES[lastBoxId] or nil
-				local costBasis = (box and box.cost) or 200
-				refund = math.floor(costBasis * (BullCatalog.Rarities[rarity].dupeRefund or 0.25))
-			end
-			table.insert(results, { bullId = id, rarity = rarity, isNew = isNew, refund = refund })
-		end
-		if not rollFrame.Visible then
-			openFrame(rollFrame)
-		end
-		setRolling(true)
-		animateReveal(results)
-	end
-
-	local testHolder = Instance.new("Frame")
-	testHolder.Name = "BullRollTEST"
-	testHolder.AnchorPoint = Vector2.new(0, 0.5)
-	testHolder.Position = UDim2.new(0.012, 0, 0.5, 0)
-	testHolder.Size = UDim2.new(0.1, 0, 0.14, 0)
-	testHolder.BackgroundTransparency = 1
-	testHolder.ZIndex = 50
-	do
-		local l = Instance.new("UIListLayout")
-		l.FillDirection = Enum.FillDirection.Vertical
-		l.Padding = UDim.new(0, 6)
-		l.HorizontalAlignment = Enum.HorizontalAlignment.Center
-		l.VerticalAlignment = Enum.VerticalAlignment.Center
-		l.Parent = testHolder
-	end
-	local function makeTestBtn(text, order, count)
-		local b = cloneButton(SRC_ORANGE, text)
-		b.Size = UDim2.new(1, 0, 0.45, 0)
-		b.LayoutOrder = order
-		b.ZIndex = 50
-		b.Parent = testHolder
-		b.Activated:Connect(function()
-			debugFakeReveal(count)
-		end)
-		return b
-	end
-	makeTestBtn("🐂 TEST ROLL", 1, 1)
-	makeTestBtn("TEST x10", 2, 10)
-	testHolder.Parent = gui
 
 	-------------------------------------------------- lucky box shop (Frames.Shop1)
 	-- Reworks the kit's "Pickaxes" shop into the LUCKY BOXES window: one kit card
@@ -2909,7 +3195,9 @@ do
 			local w = math.max(tonumber(weights[r]) or 0, 0)
 			if w > 0 then
 				local pct = w / total * 100
-				local figure = (pct % 1 == 0) and ("%d%%"):format(pct) or ("%.1f%%"):format(pct)
+				-- one decimal, trailing ".0" stripped (float dust otherwise turns
+				-- a clean 7 into "7.0%")
+				local figure = (("%.1f%%"):format(pct):gsub("%.0%%", "%%"))
 				table.insert(parts, ('<font color="%s">%s</font>'):format(colorHex(rarityColor(r)), figure))
 			end
 		end
@@ -2926,6 +3214,20 @@ do
 		local headerName = header and header:FindFirstChild("Name")
 		if headerName and headerName:IsA("TextLabel") then
 			headerName.Text = "Lucky Boxes"
+		end
+		-- the kit header ships a pickaxe glyph; swap it for a box emoji in the
+		-- same slot
+		local headerIcon = header and header:FindFirstChild("Icon")
+		if headerIcon and headerIcon:IsA("ImageLabel") then
+			headerIcon.Image = ""
+			local glyph = Instance.new("TextLabel")
+			glyph.Name = "BoxGlyph"
+			glyph.BackgroundTransparency = 1
+			glyph.Size = UDim2.fromScale(1, 1)
+			glyph.Text = "📦"
+			glyph.TextScaled = true
+			glyph.Font = KIT_FONT
+			glyph.Parent = headerIcon
 		end
 
 		-- keep one kit card as the template, clear the demo pickaxes (cards =
@@ -3073,6 +3375,12 @@ do
 				fillerIds = { "STARTER" }
 			end
 		end
+
+		-- model sources for the card previews (same folders section 12 uses);
+		-- missing assets just mean cards keep the 🐂 glyph fallback
+		local assets = ReplicatedStorage:WaitForChild("BullrushAssets", 10)
+		modelsFolder = assets and assets:FindFirstChild("Bulls")
+		fallbackModel = assets and assets:FindFirstChild("BullTemplate")
 
 		local okConfig, config = pcall(require, bullrush:WaitForChild("Config"))
 		if okConfig and typeof(config) == "table" then
@@ -3476,4 +3784,667 @@ do
 			rebuild()
 		end)
 	end
+end
+
+---------------------------------------------------------------- 13) daily reward
+-- Frames.Daily wired to DailyRewardService: the kit's 7 prebuilt day-cards
+-- (Container.1..7) become the 7-day loop, each painted from Config.DAILY.REWARDS.
+-- The claimable day shows the bright "Claim" button (fires DailyRequest); days
+-- already claimed THIS cycle read "Claimed", future days + the current day while
+-- it's still on cooldown read "Locked" (the kit's three-state button = a Claim
+-- gradient vs a Claimed/Locked gradient toggled by .Enabled, plus a text label).
+-- State + countdown ride the DailyDay/DailyReady/DailyStreak/NextDailyClaim
+-- player attributes (DailyRewardService, no fetch remote), so the window stays
+-- current even while closed. The HUD "Gifts" button already opens it (FRAME_MAP).
+do
+	local dailyFrame = Frames:FindFirstChild("Daily")
+	local container = dailyFrame and dailyFrame:FindFirstChild("Container")
+	if dailyFrame and container then
+		local header = dailyFrame:FindFirstChild("Header")
+		local headerName = header and header:FindFirstChild("Name")
+		local nextReward = dailyFrame:FindFirstChild("NextReward")
+		if headerName and headerName:IsA("TextLabel") then
+			headerName.Text = "Daily Rewards"
+		end
+
+		-- kit cards ship with brainrot placeholder icons; swap in the fortune
+		-- wheel's own slice art (section 10) so the daily track matches the
+		-- wheel instead of flat emoji (user request 2026-07-09): the coin for
+		-- money days, the spin token for spin days, and the La Vacca bull for
+		-- the Lucky Box day (its reward IS a bull).
+		local KIND_ICON = {
+			money = "rbxassetid://92705764395288", -- wheel "+100" coin
+			spin = "rbxassetid://135276741715203", -- spin icon placed on the Day 3 card
+			box = "rbxassetid://82545220922324", -- wheel "La Vacca" bull
+		}
+		-- per-day icon overrides beat the kind default: Day 1 wears fortune
+		-- wheel slice #6's art instead of the shared money coin (user request
+		-- 2026-07-09).
+		local DAY_ICON = {
+			[1] = "rbxassetid://107981444977206", -- fortune wheel slice #6 icon
+		}
+		-- emoji fallback for any reward kind without a wheel icon
+		local GLYPH = { money = "💰", spin = "🎡", box = "📦" }
+
+		task.spawn(function()
+			local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+			local remotes = bullrush and bullrush:FindFirstChild("Remotes")
+			local requestRemote = remotes and remotes:WaitForChild("DailyRequest", 30)
+			local ackRemote = remotes and remotes:WaitForChild("DailyAck", 30)
+			local okConfig, Config = pcall(require, bullrush:WaitForChild("Config"))
+			if not (requestRemote and ackRemote and okConfig and typeof(Config) == "table"
+				and typeof(Config.DAILY) == "table" and typeof(Config.DAILY.REWARDS) == "table") then
+				warn("[Main] Daily reward prerequisites missing; daily UI disabled")
+				return
+			end
+			local REWARDS = Config.DAILY.REWARDS
+			local COOLDOWN = Config.DAILY.CLAIM_COOLDOWN
+
+			-- Locked cards (future days + the current day while on cooldown) show a
+			-- red tint + a live unlock countdown instead of a flat "Locked" (user
+			-- request 2026-07-09). Each card owns its own Claimed/Locked gradient, so
+			-- we recolour per-card: red while locked, its original grey restored once
+			-- the day is "Claimed". originalDim caches that grey per card.
+			local LOCKED_RED = ColorSequence.new(Color3.fromRGB(255, 96, 84), Color3.fromRGB(196, 40, 40))
+			-- the claimable day is painted green (user request 2026-07-09) — claimed
+			-- cards stay grey, future/locked cards red, the one ready-to-claim green
+			local CLAIM_GREEN = ColorSequence.new(Color3.fromRGB(126, 217, 87), Color3.fromRGB(46, 160, 67))
+			local originalDim: { [number]: ColorSequence } = {}
+
+			-- "5h 12m" / "8m 3s" / "12s" — shared by the card countdowns + NextReward
+			local function formatDuration(seconds: number): string
+				seconds = math.max(0, math.floor(seconds))
+				if seconds >= 3600 then
+					return ("%dh %dm"):format(seconds // 3600, (seconds % 3600) // 60)
+				elseif seconds >= 60 then
+					return ("%dm %ds"):format(seconds // 60, seconds % 60)
+				end
+				return ("%ds"):format(seconds)
+			end
+
+			-- map the kit's day-cards (named "1".."7") to their reward
+			local cards: { [number]: Instance } = {}
+			for _, reward in ipairs(REWARDS) do
+				local card = container:FindFirstChild(tostring(reward.day))
+				if card then
+					cards[reward.day] = card
+				end
+			end
+
+			-- money-day amounts wear the HUD Cash counter's green (user request
+			-- 2026-07-09): copy its colour + gradient + stroke off the live
+			-- bottom-left label so a future retint of the counter carries here too
+			-- (section 7 / the round summary style money the same way).
+			local cashStyleSource = counters and counters:FindFirstChild("Cash")
+			cashStyleSource = cashStyleSource and cashStyleSource:FindFirstChild("Amount")
+			local function paintMoneyStyle(label)
+				if not (cashStyleSource and label) then
+					return
+				end
+				label.TextColor3 = cashStyleSource.TextColor3
+				local srcGrad = cashStyleSource:FindFirstChildOfClass("UIGradient")
+				if srcGrad then
+					local grad = label:FindFirstChildOfClass("UIGradient")
+					if not grad then
+						grad = Instance.new("UIGradient")
+						grad.Parent = label
+					end
+					grad.Color = srcGrad.Color
+					grad.Transparency = srcGrad.Transparency
+					grad.Rotation = srcGrad.Rotation
+				end
+				local srcStroke = cashStyleSource:FindFirstChildOfClass("UIStroke")
+				local stroke = label:FindFirstChildOfClass("UIStroke")
+				if srcStroke and stroke then
+					stroke.Color = srcStroke.Color -- keep the label's own thickness
+				end
+			end
+
+			-- paint each card's static content once: "Day N", the reward label,
+			-- and the wheel icon (or an emoji glyph fallback) over the kit icon
+			for day, card in cards do
+				local reward = REWARDS[day]
+				local nameLabel = card:FindFirstChild("Name")
+				local amountLabel = card:FindFirstChild("Amount")
+				if nameLabel and nameLabel:IsA("TextLabel") then
+					nameLabel.Text = "Day " .. day
+				end
+				if amountLabel and amountLabel:IsA("TextLabel") then
+					amountLabel.Text = reward.label
+					if reward.kind == "money" then
+						paintMoneyStyle(amountLabel)
+					end
+				end
+				local icon = card:FindFirstChild("Icon")
+				if icon and icon:IsA("ImageLabel") then
+					local assetId = DAY_ICON[day] or KIND_ICON[reward.kind]
+					if assetId then
+						-- reuse the fortune wheel's slice art (no placeholder tint)
+						icon.Image = assetId
+						icon.BackgroundTransparency = 1
+						icon.ScaleType = Enum.ScaleType.Fit
+						local stale = icon:FindFirstChild("Glyph")
+						if stale then
+							stale:Destroy()
+						end
+					else
+						-- no wheel icon for this kind: fall back to an emoji glyph
+						icon.Image = ""
+						icon.BackgroundTransparency = 1
+						local glyph = icon:FindFirstChild("Glyph")
+						if not glyph then
+							glyph = Instance.new("TextLabel")
+							glyph.Name = "Glyph"
+							glyph.BackgroundTransparency = 1
+							glyph.Size = UDim2.fromScale(1, 1)
+							glyph.Font = Enum.Font.GothamBlack
+							glyph.TextScaled = true
+							glyph.Parent = icon
+						end
+						glyph.Text = GLYPH[reward.kind] or "🎁"
+					end
+				end
+				-- remember the card's stock grey so "Claimed" can restore it after
+				-- a locked card was tinted red
+				local button = card:FindFirstChild("Claim/Claimed/Locked")
+				local dimGrad = button and button:FindFirstChild("Claimed/Locked")
+				if dimGrad and dimGrad:IsA("UIGradient") then
+					originalDim[day] = dimGrad.Color
+				end
+			end
+
+			-- CLAIMED = a past day this cycle (day < the day-to-claim-next);
+			-- CLAIM   = the day-to-claim-next, and a reward is ready right now;
+			-- LOCKED  = a future day, or the current day still on cooldown.
+			-- DailyDay resets to 1 at the top of each new cycle, so this wraps.
+			local function stateOf(day: number): string
+				local currentDay = tonumber(player:GetAttribute("DailyDay")) or 1
+				local ready = player:GetAttribute("DailyReady") == true
+				if day < currentDay then
+					return "CLAIMED"
+				elseif day == currentDay and ready then
+					return "CLAIM"
+				end
+				return "LOCKED"
+			end
+
+			local function renderCard(day: number)
+				local card = cards[day]
+				local button = card and card:FindFirstChild("Claim/Claimed/Locked")
+				if not button then
+					return
+				end
+				local claimGrad = button:FindFirstChild("Claim")           -- bright, "claimable" look
+				local dimGrad = button:FindFirstChild("Claimed/Locked")    -- grey/red, inactive look
+				local btnLabel = button:FindFirstChild("Claim/Claimed/Locked") -- the TextLabel child
+				local currentDay = tonumber(player:GetAttribute("DailyDay")) or 1
+				local ready = player:GetAttribute("DailyReady") == true
+				local state = stateOf(day)
+				local isClaim = state == "CLAIM"
+
+				if claimGrad and claimGrad:IsA("UIGradient") then
+					claimGrad.Enabled = isClaim
+					if isClaim then
+						claimGrad.Color = CLAIM_GREEN
+					end
+				end
+				if dimGrad and dimGrad:IsA("UIGradient") then
+					dimGrad.Enabled = not isClaim
+					-- red while locked, the stock grey once it's been claimed
+					if state == "LOCKED" then
+						dimGrad.Color = LOCKED_RED
+					elseif originalDim[day] then
+						dimGrad.Color = originalDim[day]
+					end
+				end
+				if btnLabel and btnLabel:IsA("TextLabel") then
+					if state == "CLAIMED" then
+						btnLabel.Text = "Claimed"
+					elseif isClaim then
+						btnLabel.Text = "Claim"
+					else
+						-- LOCKED: only the SOONEST-to-unlock day previews a countdown;
+						-- every later day just reads "Locked" (user request 2026-07-09,
+						-- no more 40h/60h chain). The soonest locked day is today while
+						-- it's still on cooldown, or tomorrow once a reward is ready.
+						local nextLockedDay = if ready then currentDay + 1 else currentDay
+						if day == nextLockedDay then
+							local now = workspace:GetServerTimeNow()
+							local base = if ready then now else (tonumber(player:GetAttribute("NextDailyClaim")) or now)
+							local unlockAt = base + (day - currentDay) * COOLDOWN
+							btnLabel.Text = formatDuration(unlockAt - now)
+						else
+							btnLabel.Text = "Locked"
+						end
+					end
+				end
+				-- only the ready card reacts to clicks (the Activated guard below
+				-- double-checks, but this also kills the hover-depress on dead cards)
+				button.Active = isClaim
+				button.AutoButtonColor = isClaim
+			end
+
+			local function renderAll()
+				for day in cards do
+					renderCard(day)
+				end
+			end
+
+			-- Auto-open the window ONCE on join when a reward is waiting (user
+			-- request 2026-07-09). Gated to the FIRST attribute seed: a player who
+			-- joins on cooldown is disarmed then, so the window never pops itself
+			-- later when the timer laps mid-session. Only opens when nothing else
+			-- is already up, so it never steals focus from the round summary etc.
+			local autoOpenChecked = false
+			local function maybeAutoOpen()
+				if autoOpenChecked then
+					return
+				end
+				local ready = player:GetAttribute("DailyReady")
+				if ready == nil then
+					return -- attributes not seeded yet; wait for the server
+				end
+				autoOpenChecked = true
+				if ready == true and currentFrame == nil then
+					openFrame(dailyFrame)
+				end
+			end
+
+			-- NextReward = the countdown; mirrors the wheel's timer (section 10),
+			-- reading NextDailyClaim against the synced server clock.
+			local function refreshTimer()
+				if not (nextReward and nextReward:IsA("TextLabel")) then
+					return
+				end
+				if player:GetAttribute("DailyReady") == true then
+					nextReward.Text = ""
+					return
+				end
+				local nextAt = tonumber(player:GetAttribute("NextDailyClaim"))
+				if not nextAt or nextAt <= 0 then
+					nextReward.Text = ""
+					return
+				end
+				local remaining = nextAt - workspace:GetServerTimeNow()
+				if remaining <= 0 then
+					nextReward.Text = ""
+				else
+					nextReward.Text = "Next reward in: " .. formatDuration(remaining)
+				end
+			end
+
+			-- claim wiring: every card's button is connected, but only the one
+			-- that's actually claimable right now fires the request
+			for day, card in cards do
+				local button = card:FindFirstChild("Claim/Claimed/Locked")
+				if button and button:IsA("GuiButton") then
+					button.Activated:Connect(function()
+						if stateOf(day) == "CLAIM" then
+							requestRemote:FireServer()
+						end
+					end)
+				end
+			end
+
+			-- reward feedback (the attribute changes re-render the track)
+			ackRemote.OnClientEvent:Connect(function(kind, data)
+				if kind == "CLAIMED" and typeof(data) == "table" then
+					local reward = typeof(data.reward) == "table" and data.reward or {}
+					if reward.kind == "money" then
+						if pushNotif then
+							pushNotif(("Daily reward: +$%s!"):format(comma(tonumber(reward.amount) or 0)), "green", 4)
+						end
+					elseif reward.kind == "spin" then
+						local n = tonumber(reward.amount) or 0
+						if pushNotif then
+							pushNotif(("Daily reward: +%d wheel spin%s!"):format(n, if n == 1 then "" else "s"), "green", 4)
+						end
+					elseif reward.kind == "box" then
+						local okCat, BullCatalog = pcall(require, bullrush:FindFirstChild("BullCatalog"))
+						local bull = okCat and typeof(BullCatalog) == "table" and data.bullId and BullCatalog.Bulls[data.bullId]
+						local bullName = (bull and bull.name or tostring(data.bullId)):upper()
+						if pushNotif then
+							if data.isNew then
+								pushNotif(("Daily reward: %s — a new bull!"):format(bullName), "green", 5)
+							else
+								pushNotif(("Daily reward: %s (duplicate) +$%s"):format(bullName, comma(tonumber(data.refund) or 0)), "green", 5)
+							end
+						end
+					end
+					renderAll()
+					refreshTimer()
+				elseif kind == "DENIED" and typeof(data) == "table" and pushNotif then
+					if data.reason == "COOLDOWN" then
+						pushNotif("Your daily reward isn't ready yet!", "red", 4)
+					elseif data.reason == "DATA_NOT_LOADED" then
+						pushNotif("Your data is still loading — try again in a moment.", "red", 4)
+					end
+				end
+			end)
+
+			-- the server seeds/flips DailyReady / advances DailyDay; re-render on
+			-- any of it, and take the one-shot join auto-open on the first seed
+			for _, attr in { "DailyDay", "DailyReady", "DailyStreak", "NextDailyClaim" } do
+				player:GetAttributeChangedSignal(attr):Connect(function()
+					renderAll()
+					refreshTimer()
+					maybeAutoOpen()
+				end)
+			end
+
+			renderAll()
+			maybeAutoOpen() -- in case the attributes were already seeded before this ran
+			task.spawn(function()
+				while true do
+					renderAll() -- ticks the locked cards' live unlock countdowns
+					refreshTimer()
+					task.wait(1)
+				end
+			end)
+		end)
+	end
+end
+
+---------------------------------------------------------------- 14) round vote
+-- Bottom-center HUD panel shown during intermission: vote for the next round's
+-- game type among the server's random ballot (Remotes.RoundState.voteOptions),
+-- with a live counter per option (info.voteCounts). Clicking casts/changes the
+-- vote via Remotes.VoteMode; the server echoes new counts on the next resend.
+-- The buttons are CLONES of the real HUD buttons (retinted per mode) so they
+-- match the rest of the game, same trick as the Bull Roll section's cloneButton.
+-- Self-contained on its own overlay so it shows over whatever frame is open.
+-- The panel holds off until the player has respawned back in the lobby, then
+-- waits a short beat, so it never pops up over the arena / winner banner.
+do
+	local INK = Color3.fromRGB(15, 15, 15)
+	local PAPER = Color3.fromRGB(255, 255, 255)
+	local SELECT_GOLD = Color3.fromRGB(255, 214, 64)
+	local REVEAL_PAUSE = 2 -- seconds after the lobby respawn before the panel slides in
+	-- mode.name -> accent colour (matches the CurrentArea banner's GAME_TYPE map)
+	local MODE_COLOR = {
+		["Classic"] = Color3.fromRGB(95, 175, 255),
+		["Mega Grid"] = Color3.fromRGB(255, 150, 40),
+		["Small Grid"] = Color3.fromRGB(90, 220, 110),
+		["Stampede"] = Color3.fromRGB(255, 80, 70),
+		["Team Rush"] = Color3.fromRGB(200, 120, 255),
+		["Low Gravity"] = Color3.fromRGB(120, 220, 255),
+	}
+
+	-- Same "clone a real HUD button" approach as the Bull Roll section: grab the
+	-- green Sell button (rounded plate + stud + gradient + GothamBlack label) so
+	-- the vote buttons are pixel-identical to the rest of the UI.
+	local function resolve(...)
+		local node = gui
+		for _, name in ipairs({ ... }) do
+			node = node and node:FindFirstChild(name)
+		end
+		return node
+	end
+	local SRC_BTN = resolve("SideUI", "Top", "Buttons", "Sell")
+
+	local voteRemote = nil -- Remotes.VoteMode, resolved off-thread below
+
+	local voteGui = Instance.new("ScreenGui")
+	voteGui.Name = "VoteGui"
+	voteGui.DisplayOrder = 9000 -- under the notif/elim overlay (10000), above frames
+	voteGui.ResetOnSpawn = false
+	voteGui.IgnoreGuiInset = false
+	voteGui.Enabled = false
+	voteGui.Parent = gui.Parent
+
+	local panel = Instance.new("Frame")
+	panel.Name = "Panel"
+	panel.AnchorPoint = Vector2.new(0.5, 1)
+	panel.Position = UDim2.new(0.5, 0, 1, -18)
+	panel.Size = UDim2.new(0, 490, 0, 168)
+	panel.BackgroundTransparency = 1
+	panel.Parent = voteGui
+	ensureScale(panel)
+
+	local header = Instance.new("TextLabel")
+	header.Name = "Header"
+	header.AnchorPoint = Vector2.new(0.5, 0)
+	header.Position = UDim2.new(0.5, 0, 0, 0)
+	header.Size = UDim2.new(1, 0, 0, 30)
+	header.BackgroundTransparency = 1
+	header.Font = Enum.Font.GothamBlack
+	header.TextColor3 = PAPER
+	header.TextStrokeColor3 = INK
+	header.TextStrokeTransparency = 0.2
+	header.TextScaled = false
+	header.TextSize = 24
+	header.Text = "VOTE NEXT MODE"
+	header.Parent = panel
+
+	local row = Instance.new("Frame")
+	row.Name = "Row"
+	row.AnchorPoint = Vector2.new(0.5, 1)
+	row.Position = UDim2.new(0.5, 0, 1, 0)
+	row.Size = UDim2.new(1, 0, 0, 128)
+	row.BackgroundTransparency = 1
+	row.Parent = panel
+
+	local rowLayout = Instance.new("UIListLayout")
+	rowLayout.FillDirection = Enum.FillDirection.Horizontal
+	rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rowLayout.Padding = UDim.new(0, 14)
+	rowLayout.Parent = row
+
+	-- id -> { cell, stroke, count } for the cards currently on the row
+	local cards = {}
+	local currentKey = nil -- concat of the ballot's ids; rebuild when it changes
+	local myVote = nil
+
+	local function styleSelection()
+		for id, c in cards do
+			local selected = (id == myVote)
+			if c.stroke then
+				c.stroke.Color = if selected then SELECT_GOLD else INK
+				c.stroke.Thickness = if selected then 4 else 2.5
+			end
+			c.count.TextColor3 = if selected then SELECT_GOLD else PAPER
+		end
+	end
+
+	local function buildCards(options)
+		for _, c in cards do
+			c.cell:Destroy()
+		end
+		table.clear(cards)
+		for i, opt in options do
+			local name = tostring(opt.name or opt.id or "?")
+			local col = MODE_COLOR[name] or Color3.fromRGB(150, 150, 150)
+
+			-- transparent cell stacks the live count over the cloned button
+			local cell = Instance.new("Frame")
+			cell.Name = "Cell_" .. tostring(opt.id)
+			cell.LayoutOrder = i
+			cell.Size = UDim2.new(0, 150, 0, 116)
+			cell.BackgroundTransparency = 1
+			cell.Parent = row
+
+			-- big live count above the button
+			local countLabel = Instance.new("TextLabel")
+			countLabel.Name = "Count"
+			countLabel.AnchorPoint = Vector2.new(0.5, 0)
+			countLabel.Position = UDim2.new(0.5, 0, 0, 0)
+			countLabel.Size = UDim2.new(1, 0, 0, 44)
+			countLabel.BackgroundTransparency = 1
+			countLabel.Font = Enum.Font.GothamBlack
+			countLabel.TextColor3 = PAPER
+			countLabel.TextStrokeColor3 = INK
+			countLabel.TextStrokeTransparency = 0.2
+			countLabel.TextScaled = true
+			countLabel.Text = "0"
+			countLabel.Parent = cell
+
+			-- clone the real HUD button (falls back to a plain plate if it moved)
+			local button
+			if SRC_BTN and SRC_BTN:IsA("GuiButton") then
+				button = SRC_BTN:Clone()
+				for _, d in ipairs(button:GetDescendants()) do
+					if d:IsA("UIAspectRatioConstraint") then
+						d:Destroy()
+					end
+				end
+			else
+				button = Instance.new("ImageButton")
+				button.BackgroundColor3 = col
+				local c = Instance.new("UICorner")
+				c.CornerRadius = UDim.new(0, 10)
+				c.Parent = button
+				local s = Instance.new("UIStroke")
+				s.Color = INK
+				s.Thickness = 2.5
+				s.Parent = button
+			end
+			button.Name = "Vote_" .. tostring(opt.id)
+			button.Visible = true
+			button.Active = true
+			button.AnchorPoint = Vector2.new(0.5, 1)
+			button.Position = UDim2.new(0.5, 0, 1, 0)
+			button.Size = UDim2.new(1, 0, 0, 60)
+			button.Parent = cell
+
+			-- retint the button's colour ramp to the mode colour (same 4-stop kit
+			-- shape the HUD buttons ship with; mirrors the CurrentArea banner)
+			local grad = button:FindFirstChildOfClass("UIGradient")
+			if grad then
+				grad.Rotation = 90
+				grad.Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, col:Lerp(PAPER, 0.35)),
+					ColorSequenceKeypoint.new(0.1, col:Lerp(PAPER, 0.35)),
+					ColorSequenceKeypoint.new(0.9, col),
+					ColorSequenceKeypoint.new(1, col),
+				})
+			end
+
+			-- retext the kit label to the mode name
+			local nameLabel = button:FindFirstChild("Name")
+			if not (nameLabel and nameLabel:IsA("TextLabel")) then
+				nameLabel = button:FindFirstChildWhichIsA("TextLabel", true)
+			end
+			if nameLabel then
+				nameLabel.Text = name
+			end
+
+			addButtonFeedback(button)
+			local id = opt.id
+			button.Activated:Connect(function()
+				if myVote == id then
+					return
+				end
+				myVote = id
+				styleSelection()
+				if voteRemote then
+					voteRemote:FireServer(id)
+				end
+			end)
+
+			cards[opt.id] = {
+				cell = cell,
+				stroke = button:FindFirstChildOfClass("UIStroke"),
+				count = countLabel,
+			}
+		end
+	end
+
+	local function applyCounts(counts)
+		if typeof(counts) ~= "table" then
+			return
+		end
+		for id, c in cards do
+			c.count.Text = tostring(tonumber(counts[id]) or 0)
+		end
+	end
+
+	local shown = false
+	local function show()
+		if shown then
+			return
+		end
+		shown = true
+		voteGui.Enabled = true
+		local scale = ensureScale(panel)
+		scale.Scale = 0.6
+		tween(scale, POP_IN, { Scale = 1 })
+	end
+	local function hide()
+		if not shown then
+			return
+		end
+		shown = false
+		local scale = ensureScale(panel)
+		local tw = tween(scale, POP_OUT, { Scale = 0.6 })
+		tw.Completed:Connect(function()
+			if not shown then
+				voteGui.Enabled = false
+			end
+		end)
+	end
+
+	-- Hold the panel back until the local player is actually spawned in the lobby
+	-- (respawned after the round), then wait REVEAL_PAUSE for a deliberate beat.
+	-- The token cancels a pending reveal if the round starts before it fires.
+	local revealToken = 0
+	local function characterReady(): boolean
+		local char = player.Character
+		local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+		return humanoid ~= nil and humanoid.Health > 0 and char:FindFirstChild("HumanoidRootPart") ~= nil
+	end
+	local function scheduleReveal()
+		revealToken += 1
+		local token = revealToken
+		task.spawn(function()
+			while token == revealToken and not characterReady() do
+				task.wait(0.1)
+			end
+			if token ~= revealToken then
+				return
+			end
+			task.wait(REVEAL_PAUSE)
+			if token == revealToken then
+				show()
+			end
+		end)
+	end
+
+	-- Hook the remotes off the main thread; UI must never stall if Bullrush is
+	-- missing from a place copy.
+	task.spawn(function()
+		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+		local remotes = bullrush and bullrush:FindFirstChild("Remotes")
+		local stateRemote = remotes and remotes:FindFirstChild("RoundState")
+		voteRemote = remotes and remotes:FindFirstChild("VoteMode")
+		if not (stateRemote and stateRemote:IsA("RemoteEvent")) then
+			return
+		end
+		stateRemote.OnClientEvent:Connect(function(state, info)
+			info = if typeof(info) == "table" then info else {}
+			local options = info.voteOptions
+			if state == "INTERMISSION" and typeof(options) == "table" and #options > 0 then
+				local key = ""
+				for _, opt in options do
+					key ..= tostring(opt.id) .. ","
+				end
+				if key ~= currentKey then
+					currentKey = key
+					myVote = nil -- fresh ballot
+					buildCards(options)
+					scheduleReveal() -- reveal once we're back in the lobby, after a beat
+				end
+				applyCounts(info.voteCounts)
+				styleSelection()
+				local seconds = math.max(0, math.floor((tonumber(info.timeLeft) or 0) + 0.5))
+				header.Text = ("VOTE NEXT MODE — %ds"):format(seconds)
+			else
+				currentKey = nil
+				myVote = nil
+				revealToken += 1 -- cancel any pending reveal
+				hide()
+			end
+		end)
+	end)
 end

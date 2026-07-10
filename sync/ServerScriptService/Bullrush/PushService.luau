@@ -129,6 +129,9 @@ function PushService.init()
 		end
 
 		lastPushAt[pusher] = now
+		-- Credit window: if the victim falls to their death within
+		-- PUSH.KILL_CREDIT seconds, the feed names this pusher.
+		RoundService.notePush(victim, pusher)
 
 		if typeof(victim) == "Instance" then
 			-- Real player: they own their character, so their client applies

@@ -23,7 +23,7 @@
 
 	Robux rolls (Config.PRODUCTS.BULL_ROLL = 1 roll, BULL_ROLL_10 = 10): the
 	client prompts the purchase itself via MarketplaceService; the receipts
-	land in EconomyService's ProcessReceipt (the game's ONLY one) and are
+	land in MonetizationService's ProcessReceipt (the game's ONLY one) and are
 	dispatched to the handlers this module registers in init(). Ids are 0
 	until the place is published - unconfigured products never register.
 ]]
@@ -39,7 +39,7 @@ local Remotes = ReplicatedStorage.Bullrush.Remotes
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
 
 local NotifyService = require(script.Parent.NotifyService)
-local EconomyService = require(script.Parent.EconomyService)
+local MonetizationService = require(script.Parent.MonetizationService)
 
 local REQUEST_GAP = 0.5 -- silent spam guard shared by roll + equip
 
@@ -249,8 +249,8 @@ function BullRollService.init()
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 	end
-	EconomyService.registerProduct(Config.PRODUCTS.BULL_ROLL, makeHandler(1))
-	EconomyService.registerProduct(Config.PRODUCTS.BULL_ROLL_10, makeHandler(10))
+	MonetizationService.registerProduct(Config.PRODUCTS.BULL_ROLL, makeHandler(1))
+	MonetizationService.registerProduct(Config.PRODUCTS.BULL_ROLL_10, makeHandler(10))
 end
 
 rollRemote.OnServerEvent:Connect(function(player, boxId)

@@ -13,7 +13,8 @@
 	- SpinRequest:FireServer()      spend one banked spin
 	- SpinAck:FireClient(player, kind, data) answers the caller only:
 	    "SPUN"    { index, reward = REWARDS[index], revolutions, jitter,
-	                duration, isNew, consolation, spins, money }
+	                duration, spins, money, isNew, consolation (bull slice),
+	                bullId/bullName/rarity/isNew/refund (box "lucky block" slice) }
 	    "GRANTED" { granted, spins }   (a Robux spin purchase landed)
 	    "DENIED"  { reason = "NO_SPINS" | "DATA_NOT_LOADED" }
 	- SpinStarted:FireAllClients(payload) - same index/revolutions/jitter/
@@ -42,7 +43,7 @@ local Remotes = ReplicatedStorage.Bullrush.Remotes
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
 
 local NotifyService = require(script.Parent.NotifyService)
-local EconomyService = require(script.Parent.EconomyService)
+local MonetizationService = require(script.Parent.MonetizationService)
 
 local REQUEST_GAP = 1 -- silent spam guard; the client paces itself anyway
 local ACCRUAL_TICK = 30 -- how often the free-spin clock is checked
@@ -140,16 +141,50 @@ local function rollSlice(): number
 	return #rewards -- float dust at the top of the range
 end
 
--- Applies REWARDS[index] to the profile. Returns isNew (bull slices) and
--- consolation (Money paid instead of a duplicate bull).
-local function grantReward(player, index: number): (boolean?, number?)
+-- Opens one Config.BULLS.BOXES box as a free roll (the "lucky block" slice):
+-- adds the bull if new (EPIC/LEGENDARY broadcast), else refunds
+-- box.cost * dupeRefund Money - same economics as a bought box, minus the cost.
+local function grantBox(player, boxId: string): { [string]: any }
+	local box = Config.BULLS.BOXES[boxId]
+	if not box then -- misconfigured slice: fall back to any box so a spin never dead-ends
+		boxId, box = next(Config.BULLS.BOXES)
+	end
+	local bullId = BullCatalog.roll(rng, box.weights)
+	local bull = BullCatalog.get(bullId) :: BullCatalog.Bull
+	local isNew = not DataHandler.HasBull(player, bullId)
+	local refund = 0
+	if isNew then
+		DataHandler.AddBull(player, bullId)
+		if typeof(player) == "Instance" then
+			local ok, bulls = pcall(DataHandler.GetStat, player, "Bulls")
+			if ok and bulls then
+				player:SetAttribute("Bulls", HttpService:JSONEncode(bulls))
+			end
+			if bull.rarity == "EPIC" or bull.rarity == "LEGENDARY" then
+				NotifyService.broadcast(
+					("%s won %s from a lucky block!"):format(player.DisplayName, bull.name:upper()), "green", 5)
+			end
+		end
+	else
+		refund = math.floor(box.cost * BullCatalog.Rarities[bull.rarity].dupeRefund)
+		DataHandler.SetStat(player, "Money", (DataHandler.GetStat(player, "Money") or 0) + refund)
+	end
+	return { boxId = boxId, bullId = bullId, bullName = bull.name, rarity = bull.rarity, isNew = isNew, refund = refund }
+end
+
+-- Applies REWARDS[index] to the profile. Returns a table of reward-specific ack
+-- fields (bull isNew/consolation, box roll bullId/rarity/isNew/refund, ...) that
+-- requestSpin merges into the SPUN payload for the client's reveal.
+local function grantReward(player, index: number): { [string]: any }
 	local reward = Config.SPINNER.REWARDS[index]
 	if reward.kind == "money" then
 		DataHandler.SetStat(player, "Money", (DataHandler.GetStat(player, "Money") or 0) + reward.amount)
-		return nil, nil
+		return {}
 	elseif reward.kind == "spin" then
 		DataHandler.SetStat(player, "Spins", (DataHandler.GetStat(player, "Spins") or 0) + reward.amount)
-		return nil, nil
+		return {}
+	elseif reward.kind == "box" then
+		return grantBox(player, reward.boxId)
 	elseif reward.kind == "bull" then
 		local isNew = not DataHandler.HasBull(player, reward.bullId)
 		if isNew then
@@ -164,13 +199,13 @@ local function grantReward(player, index: number): (boolean?, number?)
 					("%s won %s on the wheel!"):format(player.DisplayName, (bull and bull.name or reward.bullId):upper()),
 					"green", 5)
 			end
-			return true, nil
+			return { isNew = true }
 		end
 		local consolation = reward.consolation or 0
 		DataHandler.SetStat(player, "Money", (DataHandler.GetStat(player, "Money") or 0) + consolation)
-		return false, consolation
+		return { isNew = false, consolation = consolation }
 	end
-	return nil, nil
+	return {}
 end
 
 -- Public (not just the remote's target) so smoke tests can call it directly.
@@ -194,7 +229,7 @@ function SpinService.requestSpin(player)
 	DataHandler.SetStat(player, "Spins", spins - 1)
 
 	local index = rollSlice()
-	local isNew, consolation = grantReward(player, index)
+	local extra = grantReward(player, index)
 	refreshAttributes(player)
 
 	-- Commit the whole animation server-side so the UI wheel and the lobby
@@ -207,8 +242,9 @@ function SpinService.requestSpin(player)
 		jitter = rng:NextNumber(-20, 20),
 		duration = Config.SPINNER.SPIN_DURATION,
 	}
-	payload.isNew = isNew
-	payload.consolation = consolation
+	for key, value in extra do -- bull isNew/consolation, or box bullId/rarity/isNew/refund
+		payload[key] = value
+	end
 	payload.spins = DataHandler.GetStat(player, "Spins")
 	payload.money = DataHandler.GetStat(player, "Money")
 
@@ -240,8 +276,8 @@ function SpinService.init()
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 	end
-	EconomyService.registerProduct(Config.PRODUCTS.SPIN_1, makeHandler(1))
-	EconomyService.registerProduct(Config.PRODUCTS.SPIN_10, makeHandler(10))
+	MonetizationService.registerProduct(Config.PRODUCTS.SPIN_1, makeHandler(1))
+	MonetizationService.registerProduct(Config.PRODUCTS.SPIN_10, makeHandler(10))
 
 	-- Free-spin clock: lazy sweep, so the "Free spin ready" flip happens
 	-- while playing, not just on rejoin. Profiles load async, so the same

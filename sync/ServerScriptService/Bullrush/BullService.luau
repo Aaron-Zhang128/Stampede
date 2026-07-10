@@ -134,16 +134,30 @@ function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill
 	-- not just felt as a flat stampede layer. Dies with the model.
 	local soundRoot = bull.PrimaryPart or bull:FindFirstChild("Root")
 	if soundRoot then
-		local gallop = Instance.new("Sound")
-		gallop.Name = "GallopLoop"
-		gallop.SoundId = "rbxassetid://3300268152" -- "horse gallopping sound" (verified loadable)
-		gallop.Looped = true
-		gallop.Volume = 0.315
-		gallop.PlaybackSpeed = math.clamp(speed / 50, 0.85, 1.25) -- faster charge, faster hooves
-		gallop.RollOffMinDistance = 15
-		gallop.RollOffMaxDistance = 200
-		gallop.Parent = soundRoot
-		gallop:Play()
+		-- Stampede, not one horse: stack the same verified gallop clip at spread
+		-- pitches so the hooves overlap like a herd, plus a deep sub-pitched layer
+		-- that reads as the ground thundering. Detune + phase offset keep the
+		-- loops from beating together into an obvious single sample.
+		local chargePitch = math.clamp(speed / 50, 0.85, 1.25) -- faster charge, faster hooves
+		local HERD = {
+			{ pitch = 0.55, volume = 0.28 }, -- ground rumble (sub layer)
+			{ pitch = 0.86, volume = 0.20 },
+			{ pitch = 1.00, volume = 0.20 },
+			{ pitch = 1.17, volume = 0.16 },
+		}
+		for i, layer in ipairs(HERD) do
+			local gallop = Instance.new("Sound")
+			gallop.Name = "GallopLoop" .. i
+			gallop.SoundId = "rbxassetid://3300268152" -- "horse gallopping sound" (verified loadable)
+			gallop.Looped = true
+			gallop.Volume = layer.volume
+			gallop.PlaybackSpeed = chargePitch * layer.pitch
+			gallop.RollOffMinDistance = 15
+			gallop.RollOffMaxDistance = 200
+			gallop.Parent = soundRoot
+			gallop:Play()
+			gallop.TimePosition = (i - 1) * 0.13 -- phase offset so loops don't sync
+		end
 		if style then
 			-- Launch bellow for revenge bulls: a pitched-down moo reads as an
 			-- angry bull; only the first bawl of the long clip plays.

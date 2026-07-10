@@ -40,22 +40,25 @@ BullCatalog.Bulls = {
 	-- default profile in DataHandler; old saves pick it up on load merge).
 	STARTER     = { name = "Ranch Bull",      rarity = "COMMON",    speed = 50, rollable = false },
 
-	PLOW        = { name = "Plow Bull",       rarity = "COMMON",    speed = 48 },
+	-- COMMON is the variety rarity: DUSTY keeps the default BullTemplate rig;
+	-- the rest are distinct Meshy skins, each its own model in
+	-- BullrushAssets.Bulls (Bull_COMMON_*). Higher rarities share one tier model
+	-- each (STARTER shares the default rig, CELESTIAL the EPIC rig).
 	DUSTY       = { name = "Dusty",           rarity = "COMMON",    speed = 50 },
-	BRINDLE     = { name = "Brindle",         rarity = "COMMON",    speed = 52 },
+	RED         = { name = "Red",             rarity = "COMMON",    speed = 48, modelName = "Bull_COMMON_RED" },
+	YELLOW      = { name = "Yellow",          rarity = "COMMON",    speed = 49, modelName = "Bull_COMMON_YELLOW" },
+	GREEN       = { name = "Green",           rarity = "COMMON",    speed = 51, modelName = "Bull_COMMON_GREEN" },
+	BLUE        = { name = "Blue",            rarity = "COMMON",    speed = 52, modelName = "Bull_COMMON_STEEL" },
 
 	LONGHORN    = { name = "Longhorn",        rarity = "UNCOMMON",  speed = 55, modelName = "Bull_UNCOMMON" },
-	IRONHIDE    = { name = "Ironhide",        rarity = "UNCOMMON",  speed = 57, modelName = "Bull_UNCOMMON" },
 
 	MIDNIGHT    = { name = "Midnight",        rarity = "RARE",      speed = 60, modelName = "Bull_RARE" },
-	CRIMSON     = { name = "Crimson Fury",    rarity = "RARE",      speed = 62, modelName = "Bull_RARE" },
 
-	THUNDERHOOF = { name = "Thunderhoof",     rarity = "EPIC",      speed = 66, modelName = "Bull_EPIC" },
 	DIABLO      = { name = "El Diablo",       rarity = "EPIC",      speed = 68, modelName = "Bull_EPIC" },
 
 	-- Fortune-wheel exclusive (Config.SPINNER slice 1, granted by SpinService);
 	-- rollable=false keeps it out of the Money/Robux roll pool.
-	LA_VACCA    = { name = "La Vacca",        rarity = "EPIC",      speed = 67, rollable = false, modelName = "Bull_EPIC" },
+	CELESTIAL   = { name = "Celestial Bull",  rarity = "EPIC",      speed = 67, rollable = false, modelName = "Bull_EPIC" },
 
 	GOLDEN      = { name = "The Golden Bull", rarity = "LEGENDARY", speed = 74, modelName = "Bull_LEGENDARY" },
 }

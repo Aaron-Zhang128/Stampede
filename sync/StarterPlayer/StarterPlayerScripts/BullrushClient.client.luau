@@ -144,10 +144,11 @@ fxFolder.Parent = workspace
 --==============================================================================
 
 local SOUND_IDS = {
-	rumble = 12222030, -- HalloweenThunder.wav (Roblox)
+	rumble = 12222030, -- HalloweenThunder.wav (Roblox) — used pitched-down as a ground bed
 	chargeWhoosh = 12222095, -- Rocket whoosh 01.wav (Roblox)
 	slam = 146163534, -- Slap Hit (Stickmasterluke)
 	thud = 12221944, -- bass.wav (Roblox)
+	gallop = 3300268152, -- "horse gallopping sound" (verified loadable) — layered into a herd
 }
 
 local function makeSound(idKey: string, props: { [string]: any }?, parent: Instance?): Sound
@@ -206,15 +207,26 @@ local function playLibSfx(name: string, volume: number?, pitch: number?)
 	Debris:AddItem(s, 8)
 end
 
-local function fadeOutAndDestroy(sound: Sound?, fadeTime: number?)
+local function fadeOutAndDestroy(sound: Instance?, fadeTime: number?)
 	if not sound then
 		return
 	end
-	local tween = TweenService:Create(sound, TweenInfo.new(fadeTime or 0.3), { Volume = 0 })
-	tween.Completed:Once(function()
-		sound:Destroy()
-	end)
-	tween:Play()
+	if sound:IsA("Sound") then
+		local tween = TweenService:Create(sound, TweenInfo.new(fadeTime or 0.3), { Volume = 0 })
+		tween.Completed:Once(function()
+			sound:Destroy()
+		end)
+		tween:Play()
+	else
+		-- Container of layers (the stampede herd): fade every child sound, then
+		-- drop the whole folder once they've gone silent.
+		for _, child in ipairs(sound:GetDescendants()) do
+			if child:IsA("Sound") then
+				TweenService:Create(child, TweenInfo.new(fadeTime or 0.3), { Volume = 0 }):Play()
+			end
+		end
+		Debris:AddItem(sound, (fadeTime or 0.3) + 0.1)
+	end
 end
 
 --==============================================================================
@@ -257,6 +269,12 @@ end
 -- color every frame and pulses them all in unison.
 local tilePulse: { [BasePart]: boolean } = {}
 
+-- Tiles currently wearing the local viewer's revenge-lane selection tint (green).
+-- Declared up here because the danger pulse loop and claimTile (below) both read
+-- it: YOUR selected lane outranks the red danger claim, so those tiles are left
+-- green instead of pulsed red — your chosen throw lane always stays visible.
+local selectionTinted: { [BasePart]: boolean } = {}
+
 -- A lane starts threatening this tile. New claims take priority instantly: the
 -- tile snaps to full red this frame, then the paint loop takes over the pulse.
 local function claimTile(part: BasePart)
@@ -267,7 +285,9 @@ local function claimTile(part: BasePart)
 	end
 	stopTileTween(part) -- cancel any in-flight scorch restore
 	tilePulse[part] = true
-	part.Color = WARN_COLOR -- instant priority: a fresh danger tile reads red at once
+	if not selectionTinted[part] then
+		part.Color = WARN_COLOR -- instant priority: a fresh danger tile reads red at once
+	end -- ...unless it's your selected lane; that stays green (repaint tick owns it)
 end
 
 -- A lane stops threatening this tile. Only when the LAST lane releases it does
@@ -324,8 +344,9 @@ local function abandonTile(part: BasePart)
 end
 
 -- The danger paint loop: every frame, every claimed tile pulses in UNISON over
--- a red floor. This is the SOLE owner of a claimed tile's color, so a live
--- danger claim always wins over the selection tint, scorch, and restore.
+-- a red floor. It owns a claimed tile's color against scorch and restore, but
+-- YIELDS to the local viewer's own revenge-lane selection (green): those tiles
+-- are skipped so your chosen throw lane stays visible over the danger pulse.
 RunService.RenderStepped:Connect(function()
 	if next(tilePulse) == nil then
 		return
@@ -333,9 +354,11 @@ RunService.RenderStepped:Connect(function()
 	local wave = 0.5 + 0.5 * math.sin(os.clock() / PULSE_WAVE_PERIOD * 2 * math.pi)
 	local a = PULSE_FLOOR + (1 - PULSE_FLOOR) * wave
 	for part in pairs(tilePulse) do
-		local base = originalColors[part]
-		if base then
-			part.Color = base:Lerp(WARN_COLOR, a)
+		if not selectionTinted[part] then -- your selected lane keeps its green
+			local base = originalColors[part]
+			if base then
+				part.Color = base:Lerp(WARN_COLOR, a)
+			end
 		end
 	end
 end)
@@ -773,10 +796,10 @@ local revengeWasCooling = false -- edge-detects the cooldown lapping for the rea
 -- point around the ACTIVE window; the selected lane's tiles tint green with
 -- the ENTRY tile brightest (that's where the bull spawns). Selection state +
 -- inputs live with the bull-cam sections below; this layer only owns the ring
--- math and the tile colors. Danger claims (red pulses) always outrank the
--- selection tint: claimed tiles are skipped here, and since claimTile pulses
--- from the startup originals, the 0.1s repaint tick just re-asserts the tint
--- on whatever is unclaimed.
+-- math and the tile colors. The local viewer's OWN selected lane outranks the
+-- red danger pulse: its tiles are painted green here AND skipped by the danger
+-- loop, so your revenge throw lane is always visible. The 0.1s repaint tick
+-- re-asserts the green, and hands a tile back to the pulse when you move off it.
 --==============================================================================
 
 local SELECT_COLOR = Color3.fromRGB(70, 200, 100)
@@ -784,7 +807,7 @@ local SELECT_ENTRY_COLOR = Color3.fromRGB(180, 255, 200) -- the bull spawns off 
 
 local selectionRing: { GridUtil.Lane } = {} -- clockwise entry points, screen order
 local selectionIndex = 0 -- 0 = nothing selected yet this session
-local selectionTinted: { [BasePart]: boolean } = {}
+-- selectionTinted is declared up by tilePulse — the danger loop reads it
 
 -- Clockwise ring in SCREEN order under the bull-cam (screen-up = north = row
 -- rowMin): top edge left->right, right edge top->bottom, bottom edge
@@ -823,9 +846,10 @@ local function selectionLaneText(lane: GridUtil.Lane?): string
 end
 
 -- Re-asserted every repaint tick (and immediately on selection moves);
--- active=false clears everything. Direct color sets, no tweens — the claim
--- system's tweens must never be fought, only deferred to: a claimed tile
--- keeps its danger pulse, and when the claim lapses the next tick re-tints.
+-- active=false clears everything. Direct color sets, no tweens. Your selected
+-- lane paints green even OVER a live danger claim (the pulse loop skips these
+-- tiles), so it's always visible; when a tile leaves the selection it's handed
+-- back to the pulse if a claim still owns it, else restored to its original.
 local function paintSelectionTint(active: boolean, window: GridUtil.Bounds?)
 	local wanted: { [BasePart]: Color3 } = {}
 	local lane = if active then selectionRing[selectionIndex] else nil
@@ -840,8 +864,12 @@ local function paintSelectionTint(active: boolean, window: GridUtil.Bounds?)
 	for part in pairs(selectionTinted) do
 		if not wanted[part] then
 			selectionTinted[part] = nil
-			-- only restore what nothing else owns; a live claim keeps its pulse
-			if not tileRefCount[part] then
+			if tileRefCount[part] then
+				-- a live danger claim still owns it: hand it straight back to the
+				-- pulse (which resumes owning it now that it's off the selection)
+				part.Color = WARN_COLOR
+			else
+				-- nothing else owns it: restore the startup original
 				stopTileTween(part)
 				part.Color = originalColors[part]
 			end
@@ -849,10 +877,10 @@ local function paintSelectionTint(active: boolean, window: GridUtil.Bounds?)
 	end
 	for part, color in pairs(wanted) do
 		selectionTinted[part] = true
-		if not tileRefCount[part] then
-			stopTileTween(part) -- a lapsing scorch-restore would repaint over us
-			part.Color = color
-		end
+		-- YOUR lane always reads green, even over a live claim — the danger loop
+		-- skips selectionTinted tiles, so nothing repaints it red
+		stopTileTween(part) -- a lapsing scorch-restore would repaint over us
+		part.Color = color
 	end
 end
 
@@ -1539,14 +1567,34 @@ chargeStartRemote.OnClientEvent:Connect(function(lane, duration, bounds)
 		end
 	end
 
-	playOneShot("chargeWhoosh", { Volume = 0.35, PlaybackSpeed = 0.85 })
-	local stampede = makeSound("rumble", { Volume = 0.315, Looped = true, PlaybackSpeed = 1.2 }, SoundService)
-	entry.chargeSound = stampede
-	safePlay(stampede)
+	playOneShot("chargeWhoosh", { Volume = 0.075, PlaybackSpeed = 0.85 }) -- faint kick under the herd; the rocket-whoosh must not read as a jet engine
+
+	-- Stampede: a low thunder rumble for the ground under a detuned herd of
+	-- galloping hooves. Layering the one gallop clip at spread pitches (with a
+	-- small phase offset so the loops don't sync) reads as many charging animals
+	-- instead of a single looping sample. Levels sit ABOVE the whoosh and the
+	-- battle-music bed so the charge is HEARD as a stampede, not felt behind it.
+	local herd = Instance.new("Folder")
+	herd.Name = "Stampede"
+	herd.Parent = SoundService
+	makeSound("rumble", { Volume = 0.52, Looped = true, PlaybackSpeed = 0.8 }, herd) -- ground bed
+	local HERD = {
+		{ pitch = 0.86, volume = 0.48 },
+		{ pitch = 1.00, volume = 0.52 },
+		{ pitch = 1.18, volume = 0.40 },
+	}
+	for i, layer in ipairs(HERD) do
+		local hoof = makeSound("gallop", { Volume = layer.volume, Looped = true, PlaybackSpeed = layer.pitch }, herd)
+		hoof.TimePosition = (i - 1) * 0.13
+	end
+	for _, s in ipairs(herd:GetChildren()) do
+		safePlay(s :: Sound)
+	end
+	entry.chargeSound = herd
 	task.delay(chargeTime + 0.25, function()
-		if entry.chargeSound == stampede then
+		if entry.chargeSound == herd then
 			entry.chargeSound = nil
-			fadeOutAndDestroy(stampede, 0.35)
+			fadeOutAndDestroy(herd, 0.35)
 		end
 	end)
 end)

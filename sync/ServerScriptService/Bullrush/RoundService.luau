@@ -16,6 +16,7 @@ local Config = require(ReplicatedStorage.Bullrush.Config)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
 local FriendBoostService = require(script.Parent.FriendBoostService)
+local MonetizationService = require(script.Parent.MonetizationService)
 local EconomyService = require(script.Parent.EconomyService)
 
 local RoundService = {}
@@ -41,6 +42,15 @@ local function isRealPlayer(player): boolean
 	return typeof(player) == "Instance"
 end
 
+-- Last shove each victim took (PushService.notePush). A fall within
+-- Config.PUSH.KILL_CREDIT seconds of a shove is credited to the pusher:
+-- the feed shows "<pusher> ELIMINATED <victim>" instead of "<victim> FELL".
+local recentPush: { [Player]: { byName: string, at: number } } = {}
+
+function RoundService.notePush(victim: Player, pusher: Player)
+	recentPush[victim] = { byName = pusher.Name, at = os.clock() }
+end
+
 -- A missing profile (player left mid-round, data still loading, ...) must
 -- never break the round loop, so every DataHandler call goes through pcall.
 local function safeData(fn, ...)
@@ -63,20 +73,24 @@ function RoundService.startRound(participants: { Player }, deferStreaks: boolean
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if humanoid then
-			-- Death by ANY cause (bull, fall, reset) counts as elimination.
+			-- Death by ANY cause counts as elimination. Bull hits eliminate
+			-- BEFORE they set Health = 0, so anything that reaches this
+			-- handler still alive died to the world: void, boundary, reset.
 			table.insert(connections, humanoid.Died:Connect(function()
-				RoundService.eliminate(player)
+				RoundService.eliminate(player, "FELL")
 			end))
 		end
 	end
 	aliveDirty = true
 	table.insert(connections, Players.PlayerRemoving:Connect(function(player)
-		RoundService.eliminate(player)
+		RoundService.eliminate(player, "LEFT")
 	end))
 end
 
 -- Idempotent: safe to call from bull hits, Died, and PlayerRemoving alike.
--- cause is optional flavor for the elimination feed ("REVENGE" today).
+-- cause tags the elimination for the client feed: "BULL" (wave bulls),
+-- "REVENGE" (thrown bulls), "FELL" (void/boundary/reset), "LEFT" (quit).
+-- A FELL right after a shove upgrades to "PUSH" + the pusher's name.
 function RoundService.eliminate(player: Player, cause: string?)
 	if not alive[player] then
 		return
@@ -84,6 +98,15 @@ function RoundService.eliminate(player: Player, cause: string?)
 	alive[player] = nil
 	aliveCountValue -= 1
 	aliveDirty = true
+
+	local pushedBy: string? = nil
+	local push = recentPush[player]
+	recentPush[player] = nil
+	if cause == "FELL" and push
+		and os.clock() - push.at <= (Config.PUSH.KILL_CREDIT or 6) then
+		cause = "PUSH"
+		pushedBy = push.byName
+	end
 
 	-- Bull hits kill the character; Health = 0 re-triggers Died ->
 	-- eliminate, which is a no-op now that the player left the alive set.
@@ -101,8 +124,8 @@ function RoundService.eliminate(player: Player, cause: string?)
 	EconomyService.noteElimination(player, remaining, RoundService.getAlive())
 	-- Clients render the elimination feed themselves off this remote (head
 	-- shot + ELIMINATED on the screen edge); it no longer goes through the
-	-- NotifyService card stack.
-	Remotes.Eliminated:FireAllClients(player.Name, remaining, cause)
+	-- NotifyService card stack. pushedBy rides along for "PUSH" rows.
+	Remotes.Eliminated:FireAllClients(player.Name, remaining, cause, pushedBy)
 end
 
 -- Participant of the current round who has since been eliminated. Gates who
@@ -112,13 +135,15 @@ function RoundService.isEliminatedParticipant(player: Player): boolean
 end
 
 -- Shared money grant through the safeData/DataHandler pattern (bots excluded).
--- Every grant is scaled by the friend boost (+50% per friend in the server);
+-- Every grant is scaled by the friend boost (+50% per friend in the server)
+-- and by owned money game passes (VIP / Double Money), stacked together;
 -- returns the amount actually paid so callers can report the real number.
 function RoundService.awardMoney(player: Player, amount: number): number
 	if not isRealPlayer(player) then
 		return 0
 	end
-	local paid = math.floor(amount * FriendBoostService.getMultiplier(player) + 0.5)
+	local mult = FriendBoostService.getMultiplier(player) * MonetizationService.getMoneyMultiplier(player)
+	local paid = math.floor(amount * mult + 0.5)
 	safeData(function()
 		DataHandler.SetStat(player, "Money",
 			(DataHandler.GetStat(player, "Money") or 0) + paid)
@@ -193,6 +218,7 @@ function RoundService.cleanup()
 	table.clear(connections)
 	table.clear(alive)
 	table.clear(participantSet)
+	table.clear(recentPush)
 	table.clear(aliveListCache)
 	aliveCountValue = 0
 	aliveDirty = true

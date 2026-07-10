@@ -35,6 +35,13 @@ function DataHandler.GetDefaultProfile()
 		-- next join (new players and old saves alike get one on first sight).
 		Spins = 0,
 		LastFreeSpin = 0,
+
+		-- Daily reward (DailyRewardService): DailyStreak = consecutive days
+		-- claimed (the day to claim next is DailyStreak % 7 + 1); LastDailyClaim
+		-- = unix time of the last claim. 0 means never claimed, so the first
+		-- reward is ready immediately on join (new saves and old saves alike).
+		DailyStreak = 0,
+		LastDailyClaim = 0,
 	}
 end
 

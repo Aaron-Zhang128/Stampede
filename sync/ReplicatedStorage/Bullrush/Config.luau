@@ -19,6 +19,12 @@ Config.MIN_PLAYERS = 1            -- solo rounds run for practice; wins only awa
 Config.INTERMISSION_TIME = 15
 Config.MONEY_PER_WIN = 100
 
+-- Next-mode voting: during intermission, players vote among VOTE_OPTION_COUNT
+-- random eligible modes for the round to play; most votes wins (ties broken
+-- randomly). Disable to fall back to the plain weighted-random pickMode.
+Config.VOTING_ENABLED = true
+Config.VOTE_OPTION_COUNT = 3
+
 -- Friend boost: every money grant is multiplied by 1 + PER_FRIEND for each of
 -- the player's Roblox friends currently in the server (FriendBoostService).
 Config.FRIEND_BOOST = {
@@ -42,13 +48,24 @@ Config.ECONOMY = {
 
 -- Robux developer products (fill the IDs in after publishing). 0 = not
 -- configured: the client's purchase prompt fails to a red card and
--- ProcessReceipt leaves unknown products untouched.
+-- MonetizationService's ProcessReceipt leaves unknown products untouched.
+-- All of these are dispatched by MonetizationService (the game's Robux hub).
 Config.PRODUCTS = {
 	DOUBLE_ROUND = 0,             -- Summary tab "2x Rewards?": doubles that round's payout
 	BULL_ROLL = 0,                -- 1 bull roll for Robux (BullRollService)
 	BULL_ROLL_10 = 0,             -- 10 bull rolls for Robux
 	SPIN_1 = 0,                   -- 1 fortune-wheel spin (SpinService); UI prices it 99 R$
 	SPIN_10 = 0,                  -- 10 fortune-wheel spins; UI prices it 699 R$
+}
+
+-- Robux game passes (permanent perks; fill the IDs in after publishing). 0 =
+-- not configured: MonetizationService treats the pass as owned-by-nobody, so
+-- its perk stays off and prompts no-op. Perks are declared in
+-- MonetizationService.PASS_BENEFITS; add a pass by publishing it, pasting its
+-- id here, and adding a benefits row there.
+Config.PASSES = {
+	VIP = 0,                      -- perk bundle + IsVIP attribute; +50% Money (getMoneyMultiplier)
+	DOUBLE_MONEY = 0,             -- permanent 2x Money on every grant (stacks with VIP + friend boost)
 }
 
 -- Fortune wheel (Frames.Spinner UI + the lobby wheel model): one free spin
@@ -58,17 +75,20 @@ Config.PRODUCTS = {
 -- its odds. weights sum to 100. kind:
 --   money  grants amount (raw - a prize, not round earnings, so no boosts)
 --   bull   grants bullId from BullCatalog; already owned -> consolation Money
---   spin   grants amount spins back (the "free respin" slice)
+--   box    opens one Config.BULLS.BOXES[boxId] free roll (dupe refunds like a
+--          bought box) - the "lucky block" slice
+--   spin   grants amount spins back (the "free respin" slice; no slice uses it
+--          today but SpinService still supports it)
 Config.SPINNER = {
 	FREE_SPIN_INTERVAL = 12 * 3600,  -- a free spin banks twice a day
 	SPIN_DURATION = 6,            -- seconds of wheel animation (classic decelerate)
 	REWARDS = {
-		{ kind = "bull",  bullId = "LA_VACCA", label = "La Vacca", weight = 4, consolation = 400 },
-		{ kind = "money", amount = 100,  label = "+100",     weight = 30 },
-		{ kind = "money", amount = 250,  label = "+250",     weight = 22 },
-		{ kind = "money", amount = 2000, label = "JACKPOT",  weight = 5 },
-		{ kind = "spin",  amount = 1,    label = "+1 Spin",  weight = 15 },
-		{ kind = "money", amount = 500,  label = "+500",     weight = 24 },
+		{ kind = "bull",  bullId = "CELESTIAL", label = "Celestial Bull", weight = 4,  consolation = 1000 },
+		{ kind = "money", amount = 5000, label = "$5,000",   weight = 8 },   -- biggest money win
+		{ kind = "money", amount = 2500, label = "$2,500",   weight = 18 },  -- medium money win 2
+		{ kind = "box",   boxId = "MEGA", label = "Mega Box", weight = 10 },  -- lucky block: free Mega box roll
+		{ kind = "money", amount = 500,  label = "$500",     weight = 30 },  -- small money
+		{ kind = "money", amount = 1000, label = "$1,000",   weight = 30 },  -- medium money 1
 	},
 }
 
@@ -102,6 +122,31 @@ Config.BULLS = {
 	ROBUX_BOX = "MEGA",           -- Robux rolls (BULL_ROLL/BULL_ROLL_10) open this box
 }
 
+-- Daily reward (Frames.Daily UI + the "Gifts" HUD button): a 7-day escalating
+-- loop (DailyRewardService). A reward is ready CLAIM_COOLDOWN after the last
+-- claim; claim within RESET_WINDOW of the last claim to keep the streak going,
+-- else it resets to day 1 (one busy day won't punish you - RESET_WINDOW gives
+-- a grace period past the cooldown). After day 7 the loop returns to day 1.
+-- REWARDS is indexed by day (1-7); the client paints each day's tile from it,
+-- so the UI can never lie about what a day gives. kind:
+--   money  grants amount Money (raw - a gift, not round earnings, no boosts)
+--   spin   grants amount banked fortune-wheel spins (SpinService's pool)
+--   box    opens one Config.BULLS.BOXES[boxId] (a free bull roll); a duplicate
+--          pull refunds box.cost * rarity.dupeRefund Money, same as a bought box
+Config.DAILY = {
+	CLAIM_COOLDOWN = 20 * 3600,   -- a reward is ready 20h after the last claim
+	RESET_WINDOW = 48 * 3600,     -- claim within 48h of the last claim to keep the streak
+	REWARDS = {                   -- day 1-7, then loops back to day 1
+		{ day = 1, kind = "money", amount = 150,          label = "$150" },
+		{ day = 2, kind = "money", amount = 300,          label = "$300" },
+		{ day = 3, kind = "spin",  amount = 1,            label = "1 Spin" },
+		{ day = 4, kind = "money", amount = 600,          label = "$600" },
+		{ day = 5, kind = "spin",  amount = 2,            label = "2 Spins" },
+		{ day = 6, kind = "money", amount = 1200,         label = "$1,200" },
+		{ day = 7, kind = "box",   boxId = "MEGA",        label = "Mega Box" },
+	},
+}
+
 -- Revenge bulls: eliminated participants may send a bull down a lane of the
 -- CURRENT window while the round is ACTIVE. Cooldown is server-enforced.
 Config.REVENGE = {
@@ -120,6 +165,7 @@ Config.PUSH = {
 	UP = 14,                      -- upward pop so the victim briefly loses footing
 	TIME = 0.2,                   -- burst hold; ~10 studs, a bit over one tile
 	COOLDOWN = 4,                 -- seconds between shoves, per pusher
+	KILL_CREDIT = 6,              -- a fall this soon after a shove credits the pusher
 }
 
 -- TESTING: fake players so multiplayer modes can be playtested alone. When
@@ -147,7 +193,8 @@ Config.SHRINK = {
 -- whole START/FINAL pair (see MODES below).
 Config.DIFFICULTY = {
 	RAMP_TIME = 90,
-	START = { telegraph = 1.4, gap = 1.3, speed = 44, bulls = 2 },
+	-- speed starts 30% below FINAL and ramps up over RAMP_TIME (was 44).
+	START = { telegraph = 1.4, gap = 1.3, speed = 31, bulls = 2 },
 	FINAL = { telegraph = 0.9, gap = 0.55, speed = 62, bulls = 4 },
 }
 
@@ -165,6 +212,7 @@ Config.DIFFICULTY = {
 --   moneyMult      round-earnings multiplier (harder modes pay more; default 1)
 --   teams          split players into Red/Blue; the last team with a member
 --                  standing wins as a group (every member gets the win)
+--   gravity        workspace gravity for the round (default ~196; lower = floaty)
 Config.MODES = {
 	{
 		id = "CLASSIC", name = "Classic", weight = 3, minPlayers = 1,
@@ -186,7 +234,7 @@ Config.MODES = {
 		rampTime = 60,
 		moneyMult = 1.15,
 		difficulty = {
-			START = { telegraph = 1.4, gap = 1.3, speed = 40, bulls = 2 },
+			START = { telegraph = 1.4, gap = 1.3, speed = 28, bulls = 2 },
 			FINAL = { telegraph = 0.9, gap = 0.55, speed = 56, bulls = 3 },
 		},
 	},
@@ -197,7 +245,7 @@ Config.MODES = {
 		rampTime = 75,
 		moneyMult = 1.25,
 		difficulty = {
-			START = { telegraph = 1.4, gap = 1.4, speed = 44, bulls = 2 },
+			START = { telegraph = 1.4, gap = 1.4, speed = 31, bulls = 2 },
 			FINAL = { telegraph = 0.85, gap = 0.5, speed = 62, bulls = 5 },
 		},
 	},
@@ -207,6 +255,14 @@ Config.MODES = {
 		startSize = 7,
 		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
 		rampTime = 90,
+	},
+	{
+		id = "LOWGRAV", name = "Low Gravity", weight = 2, minPlayers = 1,
+		startSize = 7,
+		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
+		rampTime = 90,
+		gravity = 70,                 -- floaty moon-jumps; default is ~196
+		moneyMult = 1.15,
 	},
 }
 

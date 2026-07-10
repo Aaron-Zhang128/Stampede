@@ -23,6 +23,19 @@ local Config = require(ReplicatedStorage.Bullrush.Config)
 local GridUtil = require(ReplicatedStorage.Bullrush.GridUtil)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
 
+-- Same ensure-on-require pattern as the other services: the Remotes folder is
+-- built in edit mode, so places that predate a feature still get its remotes.
+local function ensureRemote(name: string): RemoteEvent
+	local remote = Remotes:FindFirstChild(name)
+	if not (remote and remote:IsA("RemoteEvent")) then
+		remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = Remotes
+	end
+	return remote
+end
+local VoteMode = ensureRemote("VoteMode") -- client -> server: cast/change next-mode vote
+
 local WaveDirector = require(script.Parent.WaveDirector)
 local BullService = require(script.Parent.BullService)
 local RoundService = require(script.Parent.RoundService)
@@ -32,15 +45,19 @@ local RevengeService = require(script.Parent.RevengeService)
 local NotifyService = require(script.Parent.NotifyService)
 local FriendBoostService = require(script.Parent.FriendBoostService)
 local PushService = require(script.Parent.PushService)
+local MonetizationService = require(script.Parent.MonetizationService)
 local EconomyService = require(script.Parent.EconomyService)
 local BullRollService = require(script.Parent.BullRollService)
 local SpinService = require(script.Parent.SpinService)
+local DailyRewardService = require(script.Parent.DailyRewardService)
 
 FriendBoostService.init() -- friends-in-server tracking; scales all money grants
 PushService.init() -- player-vs-player shove (prompts are made client-side in PushClient)
-EconomyService.init(RoundService.awardMoney) -- round ledger + "2x Rewards?" receipts
+MonetizationService.init() -- Robux hub: owns ProcessReceipt + game passes; init before its registrants
+EconomyService.init(RoundService.awardMoney) -- round ledger; registers "2x Rewards?" receipt
 BullRollService.init() -- bull roll/equip backend; registers its Robux-roll receipts
 SpinService.init() -- fortune wheel: free-spin clock + Robux spin receipts
+DailyRewardService.init() -- daily login reward: 7-day loop + ready clock
 
 --==============================================================================
 -- Teams (created in edit mode; ensured here so a fresh place still works)
@@ -60,6 +77,22 @@ end
 
 local RED_TEAM = ensureTeam("Red Team", "Really red")
 local BLUE_TEAM = ensureTeam("Blue Team", "Really blue")
+
+--==============================================================================
+-- Per-round gravity (Low Gravity mode). workspace.Gravity replicates to every
+-- client, so setting it server-side makes the whole round floaty. Captured once
+-- so we always restore the place's real default, even if it was customized.
+--==============================================================================
+
+local DEFAULT_GRAVITY = workspace.Gravity
+
+local function applyModeGravity(mode)
+	workspace.Gravity = mode.gravity or DEFAULT_GRAVITY
+end
+
+local function restoreGravity()
+	workspace.Gravity = DEFAULT_GRAVITY
+end
 
 --==============================================================================
 -- Round state broadcast
@@ -135,6 +168,121 @@ local function pickMode(playerCount: number)
 	end
 	return eligible[#eligible]
 end
+
+--==============================================================================
+-- Next-mode voting: during intermission players vote among a few random
+-- eligible modes; the winner (ties broken randomly) is the round's mode. Falls
+-- back to pickMode when voting is disabled or produces no clear result.
+--==============================================================================
+
+local votes: { [Player]: string } = {} -- voter -> modeId
+local voteCandidates: { { id: string, name: string } } = {} -- current ballot
+local votingOpen = false
+
+-- Same eligibility rules as pickMode (respect minPlayers, drop the last mode
+-- when there's a choice), then a shuffled slice of up to N options.
+local function pickVoteCandidates(playerCount: number)
+	local eligible = {}
+	for _, mode in Config.MODES do
+		if playerCount >= (mode.minPlayers or 1) then
+			table.insert(eligible, mode)
+		end
+	end
+	if #eligible > 1 and lastModeId then
+		for i, mode in eligible do
+			if mode.id == lastModeId then
+				table.remove(eligible, i)
+				break
+			end
+		end
+	end
+	for i = #eligible, 2, -1 do
+		local j = math.random(i)
+		eligible[i], eligible[j] = eligible[j], eligible[i]
+	end
+	local ballot = {}
+	local count = math.min(Config.VOTE_OPTION_COUNT or 3, #eligible)
+	for i = 1, count do
+		table.insert(ballot, { id = eligible[i].id, name = eligible[i].name })
+	end
+	return ballot
+end
+
+-- Zero-filled tally over the current ballot only (stale votes are ignored).
+local function countVotes(): { [string]: number }
+	local counts = {}
+	for _, cand in voteCandidates do
+		counts[cand.id] = 0
+	end
+	for _, modeId in votes do
+		if counts[modeId] ~= nil then
+			counts[modeId] += 1
+		end
+	end
+	return counts
+end
+
+local function modeById(id: string?)
+	if id then
+		for _, mode in Config.MODES do
+			if mode.id == id then
+				return mode
+			end
+		end
+	end
+	return nil
+end
+
+-- Winner = most-voted candidate; ties broken randomly among the leaders. With
+-- no votes at all, a random candidate is chosen so the ballot still decides.
+local function resolveVoteWinner()
+	local counts = countVotes()
+	local best = -1
+	local leaders = {}
+	for _, cand in voteCandidates do
+		local n = counts[cand.id] or 0
+		if n > best then
+			best = n
+			leaders = { cand.id }
+		elseif n == best then
+			table.insert(leaders, cand.id)
+		end
+	end
+	if #leaders == 0 then
+		return nil
+	end
+	return modeById(leaders[math.random(#leaders)])
+end
+
+VoteMode.OnServerEvent:Connect(function(player, modeId)
+	if not votingOpen or typeof(modeId) ~= "string" then
+		return
+	end
+	local valid = false
+	for _, cand in voteCandidates do
+		if cand.id == modeId then
+			valid = true
+			break
+		end
+	end
+	if not valid or votes[player] == modeId then
+		return
+	end
+	votes[player] = modeId
+	-- Live counter update: repaint the current intermission info for everyone.
+	currentInfo.voteCounts = countVotes()
+	Remotes.RoundState:FireAllClients(currentState, currentInfo)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	if votes[player] then
+		votes[player] = nil
+		if votingOpen then
+			currentInfo.voteCounts = countVotes()
+			Remotes.RoundState:FireAllClients(currentState, currentInfo)
+		end
+	end
+end)
 
 --==============================================================================
 -- Team Rush bookkeeping
@@ -298,7 +446,7 @@ local function startBoundsWatcher(): () -> ()
 						end
 						if os.clock() - outSince[player] > Config.SHRINK.GRACE then
 							outSince[player] = nil
-							RoundService.eliminate(player)
+							RoundService.eliminate(player, "FELL")
 						end
 					end
 				end
@@ -380,7 +528,9 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 				-- once the round is decided; charging bulls finish their run.
 				if not roundDecided(soloRound, isTeams) then
 					BullService.charge(bull.lane, waveData.speed, bounds,
-						RoundService.getAliveCached, RoundService.eliminate)
+						RoundService.getAliveCached, function(victim)
+							RoundService.eliminate(victim, "BULL")
+						end)
 				end
 				airborne -= 1
 				-- nil (not 0) when the lane empties: WaveDirector's exclusion
@@ -407,17 +557,36 @@ while true do
 		task.wait(0.5)
 	end
 
-	local mode = pickMode(#playersWithCharacters() + AIService.botCount())
-	-- Round identity rides the client's sticky intermission countdown card
-	-- (Main §6), painted from the per-second INTERMISSION resends below — a
-	-- one-shot "NEXT:" card here would just double it up.
-	for timeLeft = Config.INTERMISSION_TIME, 1, -1 do
-		setRoundState("INTERMISSION", {
-			timeLeft = timeLeft,
-			modeName = mode.name,
-			modeId = mode.id,
-		})
-		task.wait(1)
+	local mode
+	if Config.VOTING_ENABLED then
+		-- Open the ballot: pick a few random eligible modes, clear last round's
+		-- votes, and let the per-second resends carry the live tally (Main §14).
+		voteCandidates = pickVoteCandidates(#playersWithCharacters() + AIService.botCount())
+		table.clear(votes)
+		votingOpen = true
+		for timeLeft = Config.INTERMISSION_TIME, 1, -1 do
+			setRoundState("INTERMISSION", {
+				timeLeft = timeLeft,
+				voteOptions = voteCandidates,
+				voteCounts = countVotes(),
+			})
+			task.wait(1)
+		end
+		votingOpen = false
+		-- Winner decided AFTER the ballot closes; fall back if it's empty.
+		mode = resolveVoteWinner() or pickMode(#playersWithCharacters() + AIService.botCount())
+	else
+		mode = pickMode(#playersWithCharacters() + AIService.botCount())
+		-- Round identity rides the client's sticky intermission countdown card
+		-- (Main §6), painted from the per-second INTERMISSION resends below.
+		for timeLeft = Config.INTERMISSION_TIME, 1, -1 do
+			setRoundState("INTERMISSION", {
+				timeLeft = timeLeft,
+				modeName = mode.name,
+				modeId = mode.id,
+			})
+			task.wait(1)
+		end
 	end
 
 	local participants = playersWithCharacters()
@@ -437,6 +606,9 @@ while true do
 		if isTeams then
 			assignTeams(participants)
 		end
+
+		-- Floaty round if the mode asks for it (restored after the waves).
+		applyModeGravity(mode)
 
 		-- Restore/configure the arena HERE (not at cleanup) so the sunken
 		-- tiles stay visible under the previous round's end banner.
@@ -488,6 +660,7 @@ while true do
 		runWaves(soloRound, roundStart, mode)
 		stopWatcher()
 		RevengeService.roundEnded()
+		restoreGravity() -- back to normal for the end banner + lobby
 
 		local aliveList = RoundService.getAlive()
 		local summaryWinner: { [string]: any } = {} -- for the Summary tab (EconomyService.settle)
