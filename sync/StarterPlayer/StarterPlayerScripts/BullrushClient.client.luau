@@ -86,6 +86,19 @@ local arenaShrinkRemote = waitFor(remotes, "ArenaShrink")
 -- in the folder a beat after join — hence the same generous waitFor.)
 local revengeAckRemote = waitFor(remotes, "RevengeAck")
 local revengeThrowRemote = waitFor(remotes, "RevengeThrow")
+-- BullVisual / BullVisualEnd are OPTIONAL the same way: bulls are client-
+-- rendered (the server charge is pure kill-box logic; see BullService), so
+-- without these remotes bulls simply don't render while everything else keeps
+-- working. BullCatalog picks each bull's model + mutation aura.
+local bullVisualRemote = waitFor(remotes, "BullVisual")
+local bullVisualEndRemote = waitFor(remotes, "BullVisualEnd")
+-- RagdollFling is server -> us when a bull connects: the server has already
+-- swapped our joints for ball-sockets and killed the humanoid, and hands us the
+-- launch vector so we simulate our own tumble locally (see the handler below).
+-- OPTIONAL like the others: without it a bull hit still ragdolls us limp, just
+-- without the launch arc.
+local ragdollFlingRemote = waitFor(remotes, "RagdollFling")
+local bullCatalogModule = waitFor(bullrushFolder, "BullCatalog")
 local assetsFolder = waitFor(ReplicatedStorage, "BullrushAssets")
 local bullTemplate = waitFor(assetsFolder, "BullTemplate")
 local arena = waitFor(workspace, "BullrushArena")
@@ -1375,8 +1388,8 @@ local function updateOverhead()
 end
 
 --==============================================================================
--- Near-miss detection: the server replicates live bull models into
--- BullrushArena.ActiveBulls and moves them every Heartbeat. Track each bull's
+-- Near-miss detection: the client-rendered bulls (see "client-rendered bulls"
+-- below) live in BullrushArena.ActiveBulls locally. Track each bull's
 -- closest planar approach to the local character; once it recedes past that
 -- minimum it has "passed" -- if the pass was close, punch the camera and play
 -- a whoosh by the ear. The kill box half-extents are ~3.5x3.9 studs, so
@@ -1528,6 +1541,324 @@ local function watchActiveBulls()
 	for _, bull in ipairs(folder:GetChildren()) do
 		task.defer(boostOwnRevengeBull, bull)
 	end
+end
+
+--==============================================================================
+-- Client-rendered bulls: the server charge is pure logic (kill-box math, see
+-- BullService.chargeAlong) and fires BullVisual once per launch; every client
+-- builds the bull model locally and drives it here on RenderStepped. Driving
+-- off elapsed = GetServerTimeNow() - launchTime keeps the local model glued to
+-- the server's kill box regardless of ping (a client that receives the event
+-- late spawns the bull that far along its path), and local interpolation means
+-- smooth motion instead of replication-stepped anchored-CFrame teleports.
+-- All the presentation that used to ride the server model lives here now:
+-- gallop bob/squash, positional herd audio, dust, revenge glow + thrower tag,
+-- mutation auras. Models parent into the same ActiveBulls folders as before,
+-- so the near-miss tracker and own-revenge-bull boost work unchanged.
+--==============================================================================
+
+local BULL_BOB_AMPLITUDE = 0.35 -- studs of gallop bounce
+local BULL_BOB_FREQ_PER_SPEED = 0.38 -- rad/s per stud/s: faster bulls gallop faster
+local BULL_PITCH_AMPLITUDE = 0.07 -- rad: nose dips with each stride
+local BULL_ROLL_AMPLITUDE = 0.06 -- rad: alternating shoulder lean
+
+-- Squash & stretch (the "bouncy but grounded" juice). The bull coils out of the
+-- gate STRETCHED along its travel axis (a lunge), eases back to normal, then
+-- SQUASHES as it slams through the far edge. Body faces -Z, so its local Z is
+-- the travel axis (scaled by `along`); X/Y are the cross-section (`cross`).
+local BULL_LUNGE_TIME = 0.16    -- seconds the launch stretch takes to settle
+local BULL_LUNGE_STRETCH = 0.30 -- +30% along travel at the very start of the charge
+local BULL_LUNGE_SQUASH = 0.14  -- -14% cross-section while stretched (fake volume)
+local BULL_IMPACT_TIME = 0.12   -- squash window as it barrels through the far edge
+local BULL_IMPACT_SQUASH = 0.20 -- -20% along / +cross as it slams flat
+
+local bullCatalog = nil -- optional: model + mutation lookups degrade to the template
+if bullCatalogModule then
+	local ok, catalog = pcall(require, bullCatalogModule)
+	if ok and type(catalog) == "table" then
+		bullCatalog = catalog
+	end
+end
+local bullModelsFolder = assetsFolder and assetsFolder:FindFirstChild("Bulls")
+local mutationRigs = ReplicatedStorage:FindFirstChild("Mutations")
+
+-- The model to charge: the bull's catalog modelName (per-bull skins in
+-- ReplicatedStorage.BullrushAssets.Bulls, same Root+Body build as
+-- BullTemplate), or BullTemplate for wave bulls / missing models.
+local function bullTemplateFor(bullId: string?): Model
+	if bullId and bullCatalog and type(bullCatalog.get) == "function" then
+		local ok, def = pcall(bullCatalog.get, bullId)
+		local modelName = ok and type(def) == "table" and def.modelName
+		local model = if modelName and bullModelsFolder then bullModelsFolder:FindFirstChild(modelName) else nil
+		if model and model:IsA("Model") then
+			return model
+		end
+	end
+	return bullTemplate :: Model
+end
+
+-- Mutation auras: the VFX rigs in ReplicatedStorage.Mutations are dead parts
+-- carrying tuned ParticleEmitters (some bare, some under Attachments); clone
+-- just the emitters/attachments onto the Body so no extra geometry rides the
+-- bull. Missing rig/catalog entry -> silently plain.
+local function attachBullMutationVfx(body: BasePart?, mutId: string)
+	if not (body and mutationRigs and bullCatalog and type(bullCatalog.getMutation) == "function") then
+		return
+	end
+	local ok, def = pcall(bullCatalog.getMutation, mutId)
+	local rig = if ok and type(def) == "table" then mutationRigs:FindFirstChild(def.vfxName) else nil
+	if not rig then
+		return
+	end
+	for _, child in ipairs(rig:GetChildren()) do
+		if child:IsA("ParticleEmitter") or child:IsA("Attachment") then
+			local copy = child:Clone()
+			if copy:IsA("ParticleEmitter") then
+				copy.Enabled = true
+			else
+				for _, d in ipairs(copy:GetDescendants()) do
+					if d:IsA("ParticleEmitter") then
+						d.Enabled = true
+					end
+				end
+			end
+			copy.Parent = body
+		end
+	end
+end
+
+-- Where the local model lives: the payload's folder override (practice arena),
+-- else the main arena's ActiveBulls — created locally if the server never made
+-- one (it has no models to put there anymore), so the near-miss tracker and
+-- the own-revenge-bull ChildAdded hook keep their original home.
+local function bullVisualFolder(override: Instance?): Instance
+	if typeof(override) == "Instance" then
+		return override
+	end
+	local folder = arena and arena:FindFirstChild("ActiveBulls")
+	if not folder and arena then
+		folder = Instance.new("Folder")
+		folder.Name = "ActiveBulls"
+		folder.Parent = arena
+	end
+	return folder or fxFolder
+end
+
+local bullVisuals: { [number]: {
+	model: Model,
+	body: BasePart?,
+	baseBodySize: Vector3?,
+	rotation: CFrame,
+	startPos: Vector3,
+	endPos: Vector3,
+	speed: number,
+	launchTime: number,
+	duration: number,
+} } = {}
+
+local function removeBullVisual(id: number)
+	local visual = bullVisuals[id]
+	if visual then
+		bullVisuals[id] = nil
+		visual.model:Destroy()
+	end
+end
+
+local function spawnBullVisual(data)
+	if type(data) ~= "table" or type(data.id) ~= "number" or bullVisuals[data.id] then
+		return
+	end
+	if typeof(data.startPos) ~= "Vector3" or typeof(data.endPos) ~= "Vector3" then
+		return
+	end
+	local speed = tonumber(data.speed)
+	local launchTime = tonumber(data.launchTime)
+	if not speed or speed <= 0 or not launchTime then
+		return
+	end
+	local duration = (data.endPos - data.startPos).Magnitude / speed
+	if duration <= 0 then
+		return
+	end
+	local style = if type(data.style) == "table" then data.style else nil
+
+	local bull = bullTemplateFor(style and style.bullId):Clone()
+	bull:PivotTo(CFrame.lookAt(data.startPos, data.endPos))
+
+	-- Body is the visible mesh; squash/stretch drives its Size around its center
+	-- each frame (Root, the invisible primary, is untouched so the model still
+	-- rides where PivotTo puts it).
+	local body = bull:FindFirstChild("Body")
+	local baseBodySize = if body and body:IsA("BasePart") then body.Size else nil
+
+	-- Revenge bulls read as PLAYER-SENT: a red glow, plus the thrower's name
+	-- over its head so victims know who to blame (and the thrower can spot
+	-- THEIR bull in a stampede).
+	if style then
+		-- Stamp the thrower so boostOwnRevengeBull (ChildAdded on the folder)
+		-- gives the thrower's own client the top-priority highlight.
+		if style.throwerName then
+			bull:SetAttribute("ThrowerName", style.throwerName)
+		end
+		if style.mutation then
+			attachBullMutationVfx(body :: BasePart?, style.mutation)
+		end
+		local glow = Instance.new("Highlight")
+		glow.Name = "RevengeGlow"
+		glow.FillColor = Color3.fromRGB(255, 60, 40)
+		glow.FillTransparency = 0.75
+		glow.OutlineColor = Color3.fromRGB(255, 90, 60)
+		glow.OutlineTransparency = 0.2
+		glow.DepthMode = Enum.HighlightDepthMode.Occluded
+		glow.Parent = bull
+		local root = bull.PrimaryPart or bull:FindFirstChild("Root")
+		if style.throwerName and root then
+			local tag = Instance.new("BillboardGui")
+			tag.Name = "RevengeTag"
+			tag.Size = UDim2.new(0, 130, 0, 26)
+			tag.StudsOffset = Vector3.new(0, 4, 0)
+			tag.AlwaysOnTop = true
+			tag.MaxDistance = 220
+			local label = Instance.new("TextLabel")
+			label.BackgroundTransparency = 1
+			label.Size = UDim2.fromScale(1, 1)
+			label.Font = Enum.Font.GothamBlack
+			label.TextScaled = true
+			label.TextColor3 = Color3.fromRGB(255, 90, 60)
+			label.TextStrokeColor3 = Color3.fromRGB(25, 0, 0)
+			label.TextStrokeTransparency = 0.3
+			label.Text = style.throwerName .. "'s bull!"
+			label.Parent = tag
+			tag.Parent = root
+		end
+	end
+
+	bull.Parent = bullVisualFolder(data.folder)
+
+	-- Positional hooves: the charge is HEARD coming from where the bull is,
+	-- not just felt as the flat stampede layer. Dies with the model.
+	local soundRoot = bull.PrimaryPart or bull:FindFirstChild("Root")
+	if soundRoot then
+		-- Stampede, not one horse: stack the same verified gallop clip at spread
+		-- pitches so the hooves overlap like a herd, plus a deep sub-pitched layer
+		-- that reads as the ground thundering. Detune + phase offset keep the
+		-- loops from beating together into an obvious single sample.
+		local chargePitch = math.clamp(speed / 50, 0.85, 1.25) -- faster charge, faster hooves
+		local HERD = {
+			{ pitch = 0.55, volume = 0.28 }, -- ground rumble (sub layer)
+			{ pitch = 0.86, volume = 0.20 },
+			{ pitch = 1.00, volume = 0.20 },
+			{ pitch = 1.17, volume = 0.16 },
+		}
+		for i, layer in ipairs(HERD) do
+			local gallop = Instance.new("Sound")
+			gallop.Name = "GallopLoop" .. i
+			gallop.SoundId = "rbxassetid://3300268152" -- "horse gallopping sound" (verified loadable)
+			gallop.Looped = true
+			gallop.Volume = layer.volume
+			gallop.PlaybackSpeed = chargePitch * layer.pitch
+			gallop.RollOffMinDistance = 15
+			gallop.RollOffMaxDistance = 200
+			gallop.Parent = soundRoot
+			gallop:Play()
+			gallop.TimePosition = (i - 1) * 0.13 -- phase offset so loops don't sync
+		end
+		if style then
+			-- Launch bellow for revenge bulls: a pitched-down moo reads as an
+			-- angry bull; only the first bawl of the long clip plays.
+			local bellow = Instance.new("Sound")
+			bellow.Name = "Bellow"
+			bellow.SoundId = "rbxassetid://130829741" -- "Cow moo sound effect" (verified loadable)
+			bellow.Volume = 0.63
+			bellow.PlaybackSpeed = 0.78
+			bellow.RollOffMinDistance = 25
+			bellow.RollOffMaxDistance = 350
+			bellow.Parent = soundRoot
+			bellow:Play()
+			task.delay(2.4, function()
+				if bellow.Parent then
+					bellow:Stop()
+				end
+			end)
+		end
+	end
+
+	local emitter = bull:FindFirstChild("DustEmitter", true)
+	if emitter and emitter:IsA("ParticleEmitter") then
+		emitter.Enabled = true
+		emitter.Rate = math.clamp(speed * 1.6, 60, 110) -- harder charges kick up more dust
+	end
+
+	bullVisuals[data.id] = {
+		model = bull,
+		body = if body and body:IsA("BasePart") then body else nil,
+		baseBodySize = baseBodySize,
+		rotation = CFrame.lookAt(data.startPos, data.endPos).Rotation,
+		startPos = data.startPos,
+		endPos = data.endPos,
+		speed = speed,
+		launchTime = launchTime,
+		duration = duration,
+	}
+end
+
+local function updateBullVisuals()
+	if not next(bullVisuals) then
+		return
+	end
+	local now = workspace:GetServerTimeNow()
+	for id, visual in pairs(bullVisuals) do
+		local raw = now - visual.launchTime
+		-- Safety net: BullVisualEnd normally lands first; the grace covers a
+		-- server heartbeat's slack past the nominal duration.
+		if raw >= visual.duration + 0.5 or not visual.model.Parent then
+			removeBullVisual(id)
+			continue
+		end
+		local elapsed = math.clamp(raw, 0, visual.duration)
+
+		local position = visual.startPos:Lerp(visual.endPos, elapsed / visual.duration)
+		local phase = elapsed * visual.speed * BULL_BOB_FREQ_PER_SPEED
+		local bob = BULL_BOB_AMPLITUDE * math.abs(math.sin(phase))
+		local nod = BULL_PITCH_AMPLITUDE * math.sin(2 * phase)
+		local sway = BULL_ROLL_AMPLITUDE * math.sin(phase)
+		visual.model:PivotTo(CFrame.new(position + Vector3.new(0, bob, 0)) * visual.rotation * CFrame.Angles(nod, 0, sway))
+
+		-- Coil-release lunge on the way out, slam-squash on arrival.
+		local body = visual.body
+		if body and visual.baseBodySize and body.Parent then
+			local along, cross = 1, 1
+			if elapsed < BULL_LUNGE_TIME then
+				local k = 1 - elapsed / BULL_LUNGE_TIME -- 1 -> 0
+				k = k * k                               -- quad ease-out of the stretch
+				along += BULL_LUNGE_STRETCH * k
+				cross -= BULL_LUNGE_SQUASH * k
+			end
+			local remain = visual.duration - elapsed
+			if remain < BULL_IMPACT_TIME then
+				local k = 1 - remain / BULL_IMPACT_TIME -- 0 -> 1 as it hits the far edge
+				k = k * k
+				along -= BULL_IMPACT_SQUASH * k
+				cross += BULL_IMPACT_SQUASH * 0.6 * k
+			end
+			body.Size = Vector3.new(
+				visual.baseBodySize.X * cross,
+				visual.baseBodySize.Y * cross,
+				visual.baseBodySize.Z * along
+			)
+		end
+	end
+end
+
+if bullVisualRemote and bullVisualRemote:IsA("RemoteEvent") then
+	bullVisualRemote.OnClientEvent:Connect(spawnBullVisual)
+end
+if bullVisualEndRemote and bullVisualEndRemote:IsA("RemoteEvent") then
+	bullVisualEndRemote.OnClientEvent:Connect(function(id)
+		if type(id) == "number" then
+			removeBullVisual(id)
+		end
+	end)
 end
 
 --==============================================================================
@@ -1823,6 +2154,58 @@ eliminatedRemote.OnClientEvent:Connect(function(playerName, aliveCount, cause)
 	-- (RoundService.eliminate -> NotifyService), not from this handler.
 end)
 
+-- Ragdoll fling: when a bull connects, the server has already swapped our joints
+-- for ball-sockets and killed the humanoid (BreakJointsOnDeath off), leaving us a
+-- limp rig we still own the network for. It hands us the launch vector here and
+-- we drive the tumble locally, so the ragdoll physics never touches the server
+-- and the motion replicates to everyone because we own the parts. PlatformStand
+-- + the Physics state stop our own control script fighting the launch in case
+-- this remote arrives a frame before the death itself replicates in.
+if ragdollFlingRemote then
+	local RunService = game:GetService("RunService")
+	ragdollFlingRemote.OnClientEvent:Connect(function(velocity: Vector3, spin: Vector3)
+		local character = player.Character
+		if not character then
+			return
+		end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.PlatformStand = true
+			pcall(function()
+				humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+			end)
+		end
+
+		local function applyImpulse()
+			for _, part in character:GetDescendants() do
+				if part:IsA("BasePart") then
+					part.AssemblyLinearVelocity = velocity
+					part.AssemblyAngularVelocity = spin
+				end
+			end
+		end
+
+		-- Re-assert the launch for a few frames rather than once: the server
+		-- builds the ball-socket joints and fires this remote in the same frame,
+		-- so the ragdoll topology can replicate in a beat AFTER we arrive. A
+		-- single impulse on a still-rigid (or just-asleep) assembly can be eaten;
+		-- re-setting the velocity each frame is idempotent (a SET, not an add, so
+		-- it never compounds) and guarantees the tumble reads once the joints are
+		-- loose. A handful of frames (~0.1s) is invisible and then we stop.
+		applyImpulse()
+		local framesLeft = 3
+		local conn
+		conn = RunService.Heartbeat:Connect(function()
+			framesLeft -= 1
+			if framesLeft <= 0 or not character.Parent then
+				conn:Disconnect()
+				return
+			end
+			applyImpulse()
+		end)
+	end)
+end
+
 if revengeAckRemote then
 	revengeAckRemote.OnClientEvent:Connect(function(kind, data)
 		if kind == "THROW_OK" then
@@ -1925,6 +2308,7 @@ RunService.RenderStepped:Connect(function(dt)
 		watchActiveBulls() -- (re)hook the thrower's-own-bull highlight boost
 	end
 
+	updateBullVisuals() -- move the local bulls BEFORE near-miss reads positions
 	updateNearMisses()
 
 	-- Hitstop wins the camera outright: while frozen, hold a constant displaced

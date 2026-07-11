@@ -7,13 +7,19 @@
 	Humanoid + Motor6D rig). Must run BEFORE anything sets Health = 0:
 	BreakJointsOnDeath has to be false at the moment of death.
 
-	Order inside launch(): joints -> death -> ownership/velocity. Ownership
-	must come last - the Network Ownership API rejects parts of a LIVE player
-	character, but allows them once the humanoid is dead. The server takes
-	ownership so the fling simulates authoritatively for everyone.
+	Ownership model: the SERVER only does the cheap, authoritative bits -
+	convert joints to ball-sockets (so every client agrees on the rig), mark the
+	limbs collidable, and kill the humanoid (which drives elimination). It then
+	hands the launch vector to the VICTIM'S CLIENT over RagdollFling and does no
+	physics itself: the victim already owns its character assembly, so its own
+	machine simulates the tumble and it replicates to everyone for free. That
+	keeps the ragdoll cost off the server entirely. Bot rigs have no client to
+	own them, so they fall back to the old server-authoritative fling.
 ]]
 
 local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local UP_SPEED = 26 -- vertical boost so victims arc instead of skidding
 local SPIN_MAX = 10 -- rad/s of random tumble
@@ -21,6 +27,23 @@ local IMPACT_COLOR = Color3.fromRGB(168, 138, 96) -- arena dust
 local IMPACT_SOUND_ID = 146163534 -- Slap Hit; same id the client uses for slams
 
 local rng = Random.new()
+
+-- Same ensure-on-require pattern the other services use: the Remotes folder is
+-- created by Main at boot, but we self-heal the one remote we need so require
+-- order never matters. server -> victim client: "you were hit; simulate your
+-- own tumble", carrying the pre-computed launch vector so the fling math lives
+-- in exactly one place.
+local Remotes = ReplicatedStorage.Bullrush.Remotes
+local function ensureRemote(name: string): RemoteEvent
+	local remote = Remotes:FindFirstChild(name)
+	if not (remote and remote:IsA("RemoteEvent")) then
+		remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = Remotes
+	end
+	return remote
+end
+local RagdollFling = ensureRemote("RagdollFling")
 
 local RagdollService = {}
 
@@ -85,6 +108,22 @@ local function impactBurst(position: Vector3)
 	Debris:AddItem(part, 2)
 end
 
+-- The launch vector: a horizontal shove along the bull's heading + an upward
+-- boost so victims arc instead of skidding, plus a random tumble. Computed
+-- server-side so the player path, the bot path, and every client share one
+-- source of truth.
+local function computeFling(direction: Vector3, speed: number): (Vector3, Vector3)
+	local horizontal = Vector3.new(direction.X, 0, direction.Z)
+	horizontal = if horizontal.Magnitude > 0.01 then horizontal.Unit else Vector3.zAxis
+	local velocity = horizontal * speed + Vector3.new(0, UP_SPEED, 0)
+	local spin = Vector3.new(
+		rng:NextNumber(-1, 1),
+		rng:NextNumber(-1, 1),
+		rng:NextNumber(-1, 1)
+	) * SPIN_MAX
+	return velocity, spin
+end
+
 -- direction: bull travel vector (any length, Y ignored); speed: horizontal
 -- fling speed in studs/s. No-op on missing/already-dead characters, so
 -- double hits in the same frame are safe.
@@ -100,10 +139,6 @@ function RagdollService.launch(character: Model?, direction: Vector3, speed: num
 
 	humanoid.BreakJointsOnDeath = false
 	humanoid.AutoRotate = false
-	-- Physics state stops the owning client's controller fighting the fling.
-	pcall(function()
-		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-	end)
 
 	impactBurst(root.Position)
 	ragdollJoints(character) -- may itself kill via RequiresNeck; that's fine
@@ -111,23 +146,42 @@ function RagdollService.launch(character: Model?, direction: Vector3, speed: num
 		humanoid.Health = 0
 	end
 
-	local horizontal = Vector3.new(direction.X, 0, direction.Z)
-	horizontal = if horizontal.Magnitude > 0.01 then horizontal.Unit else Vector3.zAxis
-	local velocity = horizontal * speed + Vector3.new(0, UP_SPEED, 0)
-	local spin = Vector3.new(
-		rng:NextNumber(-1, 1),
-		rng:NextNumber(-1, 1),
-		rng:NextNumber(-1, 1)
-	) * SPIN_MAX
-
+	-- Limbs collide so the corpse tumbles; the invisible root box would just
+	-- catch on things. Set server-side so the collision state replicates to
+	-- every client (and to the victim, who will simulate the tumble).
 	for _, part in character:GetDescendants() do
 		if part:IsA("BasePart") then
-			-- Limbs collide so the corpse tumbles; the invisible root box
-			-- would just catch on things.
 			part.CanCollide = part.Name ~= "HumanoidRootPart"
-			pcall(part.SetNetworkOwner, part, nil)
-			part.AssemblyLinearVelocity = velocity
-			part.AssemblyAngularVelocity = spin
+		end
+	end
+
+	local velocity, spin = computeFling(direction, speed)
+	local player = Players:GetPlayerFromCharacter(character)
+	if player then
+		-- Player victim: their client ALREADY owns this character, and Roblox
+		-- keeps that ownership through death until respawn (default death flops
+		-- are client-simulated for exactly this reason). So we deliberately do
+		-- NOT touch network ownership here - calling SetNetworkOwner would yank
+		-- the assembly out from under the client's own simulation and, racing the
+		-- client's velocity write, leave a window where NEITHER side simulates:
+		-- the body freezes mid-pose and reads as "stiff, not ragdolling". We just
+		-- hand the launch vector to the owning client and let it drive the tumble;
+		-- the server runs no ragdoll physics and the motion replicates to everyone
+		-- because the victim owns the parts.
+		RagdollFling:FireClient(player, velocity, spin)
+	else
+		-- Bot rig has no client to own it: keep the server-authoritative fling.
+		-- Physics state stops any controller fighting the launch; ownership must
+		-- come last (the API allows it now that the humanoid is dead).
+		pcall(function()
+			humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+		end)
+		for _, part in character:GetDescendants() do
+			if part:IsA("BasePart") then
+				pcall(part.SetNetworkOwner, part, nil)
+				part.AssemblyLinearVelocity = velocity
+				part.AssemblyAngularVelocity = spin
+			end
 		end
 	end
 end

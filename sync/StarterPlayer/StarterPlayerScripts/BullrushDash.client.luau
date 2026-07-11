@@ -178,15 +178,12 @@ local function dash()
 		return
 	end
 
+	-- Dash only fires when actively moving: the burst follows the movement input,
+	-- so no input = nothing to dash toward (no standing double-tap dash).
 	local direction = humanoid.MoveDirection
-	if direction.Magnitude < 0.1 then
-		local camera = workspace.CurrentCamera
-		local look = if camera then camera.CFrame.LookVector else root.CFrame.LookVector
-		direction = look
-	end
 	direction = Vector3.new(direction.X, 0, direction.Z)
-	if direction.Magnitude < 0.01 then
-		return -- looking straight down with no input: nowhere to go
+	if direction.Magnitude < 0.1 then
+		return -- no directional input: nowhere to go
 	end
 	direction = direction.Unit
 
@@ -235,20 +232,37 @@ local function dash()
 	end)
 end
 
--- Double jump = dash. JumpRequest fires on space / gamepad A / the mobile jump
--- button; if one lands while the character is already off the ground, it's the
--- second jump, so we spend it on a dash instead. Grounded requests are normal
--- jumps and pass through untouched.
-local function isAirborne(humanoid: Humanoid): boolean
-	local state = humanoid:GetState()
-	return state == Enum.HumanoidStateType.Freefall
-		or state == Enum.HumanoidStateType.Jumping
-		or humanoid.FloorMaterial == Enum.Material.Air
+-- Double-tap jump = dash. JumpRequest fires on space / gamepad A / the mobile
+-- jump button. The FIRST press is a normal jump; a SECOND press within
+-- DOUBLE_TAP_WINDOW spends the dash instead -- but ONLY if the button was
+-- released between the two presses (press -> release -> press). A held button,
+-- or the engine emitting a rapid JumpRequest pair, won't dash. dash() also
+-- no-ops unless moving, so a stationary double-tap is just a plain jump.
+local DOUBLE_TAP_WINDOW = 0.35 -- max seconds between the two presses to count as a double-tap
+local lastJumpAt = -math.huge
+local releasedSincePress = true -- true once the jump input has been let go again
+
+-- Which inputs count as "jump" for release detection (touch covers the mobile
+-- jump button; keyboard space and gamepad A cover the rest).
+local function isJumpInput(input: InputObject): boolean
+	return input.KeyCode == Enum.KeyCode.Space
+		or input.KeyCode == Enum.KeyCode.ButtonA
+		or input.UserInputType == Enum.UserInputType.Touch
 end
 
-UserInputService.JumpRequest:Connect(function()
-	local humanoid = select(1, aliveParts())
-	if humanoid and isAirborne(humanoid) then
-		dash()
+UserInputService.InputEnded:Connect(function(input)
+	if isJumpInput(input) then
+		releasedSincePress = true
 	end
+end)
+
+UserInputService.JumpRequest:Connect(function()
+	local now = os.clock()
+	if releasedSincePress and now - lastJumpAt <= DOUBLE_TAP_WINDOW then
+		lastJumpAt = -math.huge -- consume the pair so a 3rd press starts fresh
+		dash()
+	else
+		lastJumpAt = now -- (re)arm as the first press of a potential double-tap
+	end
+	releasedSincePress = false -- next press only counts after a fresh release
 end)

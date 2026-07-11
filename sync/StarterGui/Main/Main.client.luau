@@ -307,6 +307,11 @@ for _, d in ipairs(SideUI:GetDescendants()) do
 					pushNotif("Invites not available", "red", 3)
 				end
 			end)
+		elseif d.Name == "Gifts" then
+			-- Daily rewards temporarily disabled: hide the HUD button so the
+			-- Daily frame can't be opened (auto-open is also gated off below).
+			handled[d] = true
+			d.Visible = false
 		else
 			local target = FRAME_MAP[d.Name]
 			local frame = target and Frames:FindFirstChild(target)
@@ -1951,6 +1956,33 @@ elimLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 elimLayout.SortOrder = Enum.SortOrder.LayoutOrder
 elimLayout.Padding = UDim.new(0, 6)
 elimLayout.Parent = elimStack
+
+-- The feed is fixed-pixel (340-wide stack, 40px rows, 22px lettering), so on
+-- a phone viewport it eats a big slice of the right edge. One UIScale on the
+-- stack shrinks the whole feed toward the viewport (same 1280x720 baseline
+-- and 0.65 floor as the vote panel); desktop keeps scale 1. Scaling happens
+-- about the stack's (1, 0.5) AnchorPoint, so it stays pinned to the right
+-- edge, and each row's own pop-in UIScale composes on top.
+local elimStackScale = ensureScale(elimStack)
+local function elimFitScale(): number
+	local cam = workspace.CurrentCamera
+	local vp = if cam then cam.ViewportSize else Vector2.new(1280, 720)
+	return math.clamp(math.min(vp.X / 1280, vp.Y / 720), 0.65, 1)
+end
+local function refitElim()
+	elimStackScale.Scale = elimFitScale()
+end
+-- refit on rotation / window resize (the camera can be swapped out on
+-- respawn, so re-hook whenever CurrentCamera changes)
+local function watchElimViewport()
+	local cam = workspace.CurrentCamera
+	if cam then
+		cam:GetPropertyChangedSignal("ViewportSize"):Connect(refitElim)
+	end
+	refitElim()
+end
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchElimViewport)
+watchElimViewport()
 
 local elimCounter = 0
 
@@ -3662,7 +3694,7 @@ do
 	rollButton.Name = "RollX1"
 	rollButton.AnchorPoint = Vector2.new(0.5, 1)
 	rollButton.Position = UDim2.new(0.31, 0, 1, 0)
-	rollButton.Size = UDim2.new(0, 240, 0, BTN_H)
+	rollButton.Size = UDim2.new(0.36, 0, 0.2, 0)
 	rollButton.Parent = rollFrame
 
 	-- gold ROBUX ROLL button (cloned from the Store's premium gold button): a
@@ -3676,7 +3708,7 @@ do
 	robuxButton.Name = "RobuxRoll"
 	robuxButton.AnchorPoint = Vector2.new(0.5, 1)
 	robuxButton.Position = UDim2.new(0.69, 0, 1, 0)
-	robuxButton.Size = UDim2.new(0, 240, 0, BTN_H)
+	robuxButton.Size = UDim2.new(0.36, 0, 0.2, 0)
 	if robuxLabel then
 		-- match the green button's Name label geometry exactly so both read centered.
 		-- the gold button's label ships TextXAlignment=Left, so force center too or the
@@ -4035,14 +4067,28 @@ do
 		pointerBottom.TextColor3 = Color3.fromRGB(255, 220, 120)
 		buildStrip(headline)
 		RunService.Heartbeat:Wait() -- let the list layout resolve before measuring
+		RunService.Heartbeat:Wait() -- second frame so AbsolutePosition/Size are settled
 
 		local vpCenter = carousel.AbsoluteSize.X / 2
-		local function centerOf(i)
-			return (i - 1) * STEP + CARD_W / 2
+		-- Land the ACTUAL winner card on the ACTUAL marker using measured geometry
+		-- instead of index math: the pointer was resting one card off the bull that
+		-- actually pops and gets rewarded. Reading the winner's rendered centre and
+		-- the marker's centre live makes the pointer land on the rewarded card no
+		-- matter what the list layout does (padding, a stray leading child, etc.).
+		local function centerX(o)
+			return o.AbsolutePosition.X + o.AbsoluteSize.X / 2
 		end
-		local startOffset = vpCenter - centerOf(3)
-		local jitter = (math.random() * 2 - 1) * (CARD_W * 0.18)
-		local targetOffset = vpCenter - centerOf(WINNER_INDEX) + jitter
+		-- tiny jitter for a touch of life, never a whole slot (keeps pointer/pop/reward aligned)
+		local jitter = (math.random() * 2 - 1) * (CARD_W * 0.04)
+		local baseOffset = strip.Position.X.Offset
+		local targetOffset
+		if winnerCard then
+			targetOffset = baseOffset + (centerX(marker) - centerX(winnerCard)) + jitter
+		else -- shouldn't happen (buildStrip always sets it); fall back to index math
+			targetOffset = vpCenter - ((WINNER_INDEX - 1) * STEP + CARD_W / 2) + jitter
+		end
+		-- begin the scroll well to the right of the landing so it sweeps left onto the winner
+		local startOffset = targetOffset + (WINNER_INDEX - 3) * STEP
 		local delta = targetOffset - startOffset
 		strip.Position = UDim2.new(0, startOffset, 0.5, 0)
 
@@ -5168,9 +5214,10 @@ do
 					return -- attributes not seeded yet; wait for the server
 				end
 				autoOpenChecked = true
-				if ready == true and currentFrame == nil then
-					openFrame(dailyFrame)
-				end
+				-- Daily rewards temporarily disabled: never auto-open the window.
+				-- if ready == true and currentFrame == nil then
+				-- 	openFrame(dailyFrame)
+				-- end
 			end
 
 			-- NextReward = the countdown; mirrors the wheel's timer (section 10),
@@ -5646,14 +5693,16 @@ do
 	header.Name = "Header"
 	header.AnchorPoint = Vector2.new(0.5, 0)
 	header.Position = UDim2.new(0.5, 0, 0, 0)
-	header.Size = UDim2.new(1, 0, 0, 30)
+	header.Size = UDim2.new(1, 0, 0.127, 0) -- 30/236 of the panel height (scale)
 	header.BackgroundTransparency = 1
 	header.Font = Enum.Font.GothamBlack
 	header.TextColor3 = PAPER
 	header.TextStrokeColor3 = INK
 	header.TextStrokeTransparency = 0.2
-	header.TextScaled = false
-	header.TextSize = 24
+	header.TextScaled = true
+	local headerSizeCap = Instance.new("UITextSizeConstraint")
+	headerSizeCap.MaxTextSize = 24 -- preserve the original 24px cap on desktop
+	headerSizeCap.Parent = header
 	header.Text = "VOTE NEXT MODE"
 	local headerStroke = Instance.new("UIStroke")
 	headerStroke.Color = INK
@@ -5700,8 +5749,11 @@ do
 	end
 	closeBtn.Name = "Close"
 	closeBtn.AnchorPoint = Vector2.new(1, 0)
-	closeBtn.Position = UDim2.new(1, 6, 0, -6)
-	closeBtn.Size = UDim2.new(0, 34, 0, 34)
+	-- Scale-relative to the panel: 6/510 nudge right, -6/236 nudge up; size is
+	-- 34/510 x 34/236 of the panel. The panel is a fixed 510x236 that only ever
+	-- scales uniformly, so dual-axis scale stays square with no aspect constraint.
+	closeBtn.Position = UDim2.new(1.0118, 0, -0.0254, 0)
+	closeBtn.Size = UDim2.new(0.0667, 0, 0.144, 0)
 	closeBtn.Parent = panel
 	addButtonFeedback(closeBtn)
 

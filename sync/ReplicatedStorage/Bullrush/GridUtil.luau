@@ -19,6 +19,13 @@
 	- Telegraph:FireAllClients(lanes: {lane}, warnTime: number, bounds)
 	- ChargeStart:FireAllClients(lane, duration: number, bounds)
 	- LaneCleared:FireAllClients(lane)
+	- BullVisual:FireAllClients({ id: number, startPos: Vector3, endPos: Vector3,
+	  speed: number, launchTime: number (GetServerTimeNow), folder: Instance?,
+	  style: { throwerName: string?, bullId: string?, mutation: string? }? })
+	  Bulls are CLIENT-rendered: the server charge is pure kill-box logic and
+	  every client builds/drives the model locally from this one event.
+	- BullVisualEnd:FireAllClients(id: number) tears the local model down
+	  (fired on normal exit AND on round-cleanup cancels).
 	- Eliminated:FireAllClients(playerName: string, aliveCount: number, cause: string?)
 	  cause is flavor for the toast; "REVENGE" = a revenge bull did it.
 	- RoundState:FireAllClients(state: string, info: table)

@@ -52,6 +52,17 @@ local BullRollService = require(script.Parent.BullRollService)
 local SpinService = require(script.Parent.SpinService)
 local DailyRewardService = require(script.Parent.DailyRewardService)
 
+-- Onboarding funnel logger (start/finish of a player's first game). Loaded
+-- defensively like in UserData/Data.server: a missing/broken Analytics module
+-- must never disrupt the round loop, so guard every call with `if Analytics`.
+local Analytics do
+	local mod = game.ServerScriptService:FindFirstChild("Analytics")
+	if mod then
+		local ok, m = pcall(require, mod)
+		if ok then Analytics = m end
+	end
+end
+
 FriendBoostService.init() -- friends-in-server tracking; scales all money grants
 PushService.init() -- player-vs-player shove (prompts are made client-side in PushClient)
 MonetizationService.init() -- Robux hub: owns ProcessReceipt + game passes; init before its registrants
@@ -430,11 +441,9 @@ local function roundDecided(soloRound: boolean, isTeams: boolean): boolean
 end
 
 local function destroyLeftoverBulls()
-	local arena = Workspace:FindFirstChild("BullrushArena")
-	local activeBulls = arena and arena:FindFirstChild("ActiveBulls")
-	if activeBulls then
-		activeBulls:ClearAllChildren()
-	end
+	-- Bulls are client-rendered: cancelling the server charges makes each one
+	-- fire BullVisualEnd, which tears the local models down on every client.
+	BullService.cancelAll()
 end
 
 local function teleportToLobby()
@@ -701,6 +710,17 @@ while true do
 		RoundService.startRound(participants, isTeams)
 		EconomyService.roundStarted(participants, mode)
 		RevengeService.roundStarted()
+
+		-- Funnel: mark each real player as having started a game (bots are plain
+		-- tables; onFirstGameStart itself no-ops after the first call per player).
+		if Analytics then
+			for _, player in participants do
+				if typeof(player) == "Instance" then
+					Analytics.onFirstGameStart(player)
+				end
+			end
+		end
+
 		setRoundState("ACTIVE", {
 			aliveCount = RoundService.aliveCount(),
 			wave = 1,
@@ -817,6 +837,16 @@ while true do
 
 		-- Pay the round ledgers and open every participant's Summary tab.
 		EconomyService.settle(summaryWinner)
+
+		-- Funnel: the round is over for everyone who was in it, so mark each real
+		-- player as having finished a game (no-ops for anyone past their first).
+		if Analytics then
+			for _, player in participants do
+				if typeof(player) == "Instance" then
+					Analytics.onFirstGameFinish(player)
+				end
+			end
+		end
 
 		RoundService.cleanup()
 		if isTeams then
