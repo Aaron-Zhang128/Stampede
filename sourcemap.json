@@ -46238,7 +46238,14 @@
                             {
                               "name": "Hero",
                               "className": "ImageLabel",
-                              "guid": "14118"
+                              "guid": "14118",
+                              "children": [
+                                {
+                                  "name": "UICorner",
+                                  "className": "UICorner",
+                                  "guid": "21554936"
+                                }
+                              ]
                             },
                             {
                               "name": "Promo",
@@ -48063,71 +48070,72 @@
                   "name": "Mesh",
                   "className": "SpecialMesh",
                   "guid": "16576"
-                },
-                {
-                  "name": "Snap",
-                  "className": "Snap",
-                  "guid": "16545"
                 }
               ]
             },
             {
               "name": "Humanoid",
               "className": "Humanoid",
-              "guid": "13964"
-            },
-            {
-              "name": "Left Arm",
-              "className": "Part",
-              "guid": "16351",
+              "guid": "13964",
               "children": [
                 {
-                  "name": "Weld",
-                  "className": "Weld",
-                  "guid": "20069"
-                }
-              ]
-            },
-            {
-              "name": "Left Leg",
-              "className": "Part",
-              "guid": "16352",
-              "children": [
-                {
-                  "name": "Snap",
-                  "className": "Snap",
-                  "guid": "16546"
-                }
-              ]
-            },
-            {
-              "name": "Right Arm",
-              "className": "Part",
-              "guid": "16353",
-              "children": [
-                {
-                  "name": "Weld",
-                  "className": "Weld",
-                  "guid": "20070"
-                }
-              ]
-            },
-            {
-              "name": "Right Leg",
-              "className": "Part",
-              "guid": "16354",
-              "children": [
-                {
-                  "name": "Snap",
-                  "className": "Snap",
-                  "guid": "16547"
+                  "name": "Animator",
+                  "className": "Animator",
+                  "guid": "20186041"
                 }
               ]
             },
             {
               "name": "Torso",
               "className": "Part",
-              "guid": "16355"
+              "guid": "16355",
+              "children": [
+                {
+                  "name": "Neck",
+                  "className": "Motor6D",
+                  "guid": "20186032"
+                },
+                {
+                  "name": "Right Shoulder",
+                  "className": "Motor6D",
+                  "guid": "20186033"
+                },
+                {
+                  "name": "Right Hip",
+                  "className": "Motor6D",
+                  "guid": "20186035"
+                },
+                {
+                  "name": "Left Shoulder",
+                  "className": "Motor6D",
+                  "guid": "20186034"
+                },
+                {
+                  "name": "Left Hip",
+                  "className": "Motor6D",
+                  "guid": "20186036"
+                }
+              ]
+            },
+            {
+              "name": "HumanoidRootPart",
+              "className": "Part",
+              "guid": "20186030",
+              "children": [
+                {
+                  "name": "RootJoint",
+                  "className": "Motor6D",
+                  "guid": "20186031"
+                }
+              ]
+            },
+            {
+              "name": "NoobAnimator",
+              "className": "Script",
+              "guid": "20186039",
+              "filePaths": [
+                "sync/Workspace/Noob/NoobAnimator.server.luau"
+              ]
             }
           ]
         },

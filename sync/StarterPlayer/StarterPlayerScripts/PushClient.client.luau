@@ -14,7 +14,7 @@
 	  * the button fires PushBridge (a tap) -> we attempt a push
 	  * we broadcast state back via PushBridge attributes that drive the
 	    button's look + cooldown sweep:
-	        Enabled          bool    round ACTIVE and you're alive (button shown)
+	        Enabled          bool    you're an ACTIVE-round participant (button shown)
 	        HasTarget        bool    a target is highlighted (button bright vs dim)
 	        CooldownDuration number  PUSH.COOLDOWN, so the sweep knows its length
 	        ReadyAt          number  os.clock() when the local cooldown lapses
@@ -108,6 +108,15 @@ local function localRoot(): BasePart?
 	return nil
 end
 
+-- True only when we're an ACTIVE-round participant standing in the arena — the
+-- server sets the replicated InRound attribute at round start and clears it on
+-- elimination / round end. Lobby-sitters, AFK players and late-joiners have
+-- roundActive == true (RoundState fires to everyone) but InRound false, so this
+-- keeps the whole push system dark in the lobby.
+local function isParticipating(): boolean
+	return roundActive and player:GetAttribute("InRound") == true and localRoot() ~= nil
+end
+
 -- Alive, targetable character's root, or nil. Skips a character BullrushClient
 -- has hidden from us (an eliminated ghost: LocalTransparencyModifier ~= 0) —
 -- the server would reject shoving a non-participant anyway, so don't waste the
@@ -184,18 +193,19 @@ RunService.Heartbeat:Connect(function()
 	end
 	lastScan = now
 
-	-- The button is shown whenever you're alive (so you can always see it, even
-	-- in the lobby, dimmed); targeting + pushing only happen during an ACTIVE
-	-- round, so a lapsed round just clears the target and dims the button.
-	local root = localRoot()
-	pushBridge:SetAttribute("Enabled", root ~= nil)
-	if not (roundActive and root) then
+	-- The whole push system (HUD button + red target highlight) only lights up
+	-- while you're an ACTIVE-round participant in the arena. In the lobby you're
+	-- not participating, so the button hides and no target is ever painted.
+	if not isParticipating() then
+		pushBridge:SetAttribute("Enabled", false)
 		if currentTarget then
 			setTarget(nil, nil)
 		end
 		return
 	end
+	pushBridge:SetAttribute("Enabled", true)
 
+	local root = localRoot() :: BasePart
 	local participant, character = findNearest(root.Position)
 	setTarget(participant, character)
 end)
@@ -207,8 +217,8 @@ end)
 Remotes.RoundState.OnClientEvent:Connect(function(state: string)
 	roundActive = state == "ACTIVE"
 	if not roundActive then
-		-- keep the button visible (the scan re-asserts Enabled from "alive"); just
-		-- drop any target so it dims out.
+		-- Round lapsed: the scan will hide the button (no longer participating);
+		-- drop any target now so nothing lingers highlighted.
 		setTarget(nil, nil)
 	end
 end)
@@ -295,8 +305,8 @@ end
 --==============================================================================
 
 local function attemptPush()
-	if not roundActive then
-		return
+	if not isParticipating() then
+		return -- not an active-round participant (e.g. in the lobby)
 	end
 	if os.clock() < readyAt then
 		return -- still cooling down locally

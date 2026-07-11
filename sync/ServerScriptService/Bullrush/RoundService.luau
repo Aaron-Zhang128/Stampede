@@ -70,6 +70,13 @@ function RoundService.startRound(participants: { Player }, deferStreaks: boolean
 		end
 		alive[player] = true
 		participantSet[player] = true
+		-- Replicated flag the client reads to know it's an ACTIVE-round
+		-- participant (in the arena) vs a lobby-sitter / AFK / late-joiner.
+		-- Gates the red push-target highlight so the push system stays dark
+		-- in the lobby. Cleared on elimination and in cleanup().
+		if isRealPlayer(player) then
+			player:SetAttribute("InRound", true)
+		end
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if humanoid then
@@ -98,6 +105,12 @@ function RoundService.eliminate(player: Player, cause: string?)
 	alive[player] = nil
 	aliveCountValue -= 1
 	aliveDirty = true
+
+	-- No longer an active participant: drop the push-target highlight gate so
+	-- an eliminated ghost can't paint / be painted red.
+	if isRealPlayer(player) then
+		player:SetAttribute("InRound", false)
+	end
 
 	local pushedBy: string? = nil
 	local push = recentPush[player]
@@ -217,6 +230,13 @@ function RoundService.cleanup()
 	end
 	table.clear(connections)
 	table.clear(alive)
+	-- Clear the replicated participant flag for everyone the round started with
+	-- before we forget them, so the push system goes dark back in the lobby.
+	for player in participantSet do
+		if isRealPlayer(player) then
+			player:SetAttribute("InRound", false)
+		end
+	end
 	table.clear(participantSet)
 	table.clear(recentPush)
 	table.clear(aliveListCache)

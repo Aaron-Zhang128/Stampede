@@ -361,6 +361,33 @@ end
 local function playHover()
 	playUiSound(0.9, 1.5)
 end
+-- One-shot from any named SFX-library template (same clone-route-reap idea as
+-- playUiSound, but not locked to the Click tick). Used for the round-end reveal
+-- stings. Missing/moderated template -> silent no-op, never errors.
+local function playSfx(name, volume, pitch, lifetime)
+	local template = sfxGroup and sfxGroup:FindFirstChild(name)
+	if not template then
+		return
+	end
+	local ok, s = pcall(function()
+		return template:Clone()
+	end)
+	if not ok or not s then
+		return
+	end
+	s.SoundGroup = sfxGroup
+	if volume then
+		s.Volume = volume
+	end
+	if pitch then
+		s.PlaybackSpeed = pitch
+	end
+	s.Parent = SoundService
+	pcall(function()
+		s:Play()
+	end)
+	Debris:AddItem(s, lifetime or 6)
+end
 
 ---------------------------------------------------------------- 2c) HUD push button
 -- Combat shove button. Cloned from the Index side button (so it inherits the
@@ -393,6 +420,22 @@ do
 	end
 
 	if template then
+		-- The push button is combat-critical, so it gets its own ScreenGui at
+		-- the highest DisplayOrder in the place — above even NotifGui (10000),
+		-- so notif cards and the elimination feed can never sit on top of it.
+		-- Main resets on spawn but this gui doesn't, so drop the previous
+		-- life's copy before making a fresh one (same dance as NotifGui).
+		local oldPushGui = gui.Parent:FindFirstChild("PushGui")
+		if oldPushGui then
+			oldPushGui:Destroy()
+		end
+		local pushGui = Instance.new("ScreenGui")
+		pushGui.Name = "PushGui"
+		pushGui.DisplayOrder = 20000
+		pushGui.ResetOnSpawn = false
+		pushGui.IgnoreGuiInset = false
+		pushGui.Parent = gui.Parent
+
 		-- Square holder pinned to the right edge, mid-lower (clear of other HUD).
 		local holder = Instance.new("Frame")
 		holder.Name = "PushButton"
@@ -403,7 +446,7 @@ do
 		-- constraint. The constraint then squares it off the height.
 		holder.Size = UDim2.fromScale(0.11, 0.11)
 		holder.Visible = false
-		holder.Parent = gui
+		holder.Parent = pushGui
 
 		local aspect = Instance.new("UIAspectRatioConstraint")
 		aspect.AspectRatio = 1
@@ -1944,7 +1987,9 @@ local ELIM_MAX = 6
 local elimStack = Instance.new("Frame")
 elimStack.Name = "ElimStack"
 elimStack.AnchorPoint = Vector2.new(1, 0.5)
-elimStack.Position = UDim2.new(1, -10, 0.45, 0)
+-- Centered in the upper third of the right edge: high enough that a full
+-- stack can't spill over the push button parked at the edge's midpoint.
+elimStack.Position = UDim2.new(1, -10, 0.32, 0)
 elimStack.Size = UDim2.new(0, 340, 0, 320)
 elimStack.BackgroundTransparency = 1
 elimStack.Parent = notifGui
@@ -2601,6 +2646,15 @@ if summaryMain then
 		canDouble = data.canDouble == true
 		if doubleButton then
 			doubleButton.Visible = canDouble
+		end
+		-- Sting the reveal so the winner announcement actually lands: a triumphant
+		-- fanfare when someone claimed the round (punchier when the winner is YOU),
+		-- the defeat cue when the herd wiped everyone out.
+		if herdWon then
+			playSfx("Lose sound effects", 1.0, 1, 6)
+		else
+			local youWon = (tonumber(data.placement) or 0) == 1
+			playSfx("winner!", if youWon then 1.6 else 1.15, 1, 4)
 		end
 	end
 
@@ -4066,8 +4120,20 @@ do
 		pointer.TextColor3 = Color3.fromRGB(255, 220, 120)
 		pointerBottom.TextColor3 = Color3.fromRGB(255, 220, 120)
 		buildStrip(headline)
-		RunService.Heartbeat:Wait() -- let the list layout resolve before measuring
-		RunService.Heartbeat:Wait() -- second frame so AbsolutePosition/Size are settled
+		-- The strip is STRIP_LEN cards, each a ViewportFrame cloning a real bull
+		-- model — a heavy layout pass. Two fixed frames wasn't always enough for it
+		-- to settle, so the winner's MEASURED centre could still be stale and the
+		-- carousel would land a FILLER card (wrong name) under the pointer even
+		-- though the right bull was popped + granted. Wait until the list has
+		-- actually sized itself (frame-count safety cap) before measuring.
+		local EXPECTED_W = STRIP_LEN * STEP - PAD -- N cards + (N-1) gaps
+		local settleFrames = 0
+		repeat
+			RunService.Heartbeat:Wait()
+			settleFrames += 1
+		until (winnerCard and winnerCard.AbsoluteSize.X > 0
+				and strip.AbsoluteSize.X >= EXPECTED_W * 0.9)
+			or settleFrames >= 30
 
 		local vpCenter = carousel.AbsoluteSize.X / 2
 		-- Land the ACTUAL winner card on the ACTUAL marker using measured geometry
@@ -4110,6 +4176,15 @@ do
 			end
 
 			if elapsed >= DURATION then
+				-- Everything is fully laid out by now, so re-measure and snap the
+				-- ACTUAL winner card dead-centre under the marker (keeping the
+				-- intended jitter). Corrects any residual drift from measuring a
+				-- not-yet-settled strip up front, so the name under the pointer
+				-- ALWAYS matches the bull that was rolled. ~0px no-op when the
+				-- up-front measure was already good.
+				if winnerCard then
+					targetOffset += (centerX(marker) + jitter) - centerX(winnerCard)
+				end
 				strip.Position = UDim2.new(0, targetOffset, 0.5, 0)
 				activeConn:Disconnect()
 				activeConn = nil
@@ -6182,8 +6257,10 @@ end
 --   * SocialService:GetUpcomingExperienceEventsAsync() -> soonest upcoming event
 --   * SocialService:PromptRsvpToEventAsync(id) -> native RSVP / "notify me" prompt
 -- The board has two states: a minimal PROMO group (a big house-styled headline +
--- INVITE FRIENDS button, shown when no event is scheduled) and an EVENT group
--- (kicker pill, title, countdown, description, RSVP status). When no event is
+-- INVITE FRIENDS button, shown when no event is scheduled) and an EVENT group.
+-- With event artwork (ThumbnailIds) the image fills the whole board and only the
+-- countdown, RSVP pill and CTA overlay it; without artwork it falls back to the
+-- text layout (kicker pill, title, countdown, description). When no event is
 -- live a click opens the friend-invite flow instead of the RSVP prompt.
 -- Re-fetches every REFRESH_SECONDS; the countdown ticks between fetches.
 do
@@ -6221,7 +6298,10 @@ do
 		local whenL = eventGroup:WaitForChild("When")
 		local desc = eventGroup:WaitForChild("Desc")
 		local statusPill = eventGroup:WaitForChild("Status")
+		local kicker = eventGroup:FindFirstChild("Kicker")
 		local hero = root:WaitForChild("Hero")
+		-- When gets repositioned in image mode; remember its authored spot
+		local whenHomePos, whenHomeSize = whenL.Position, whenL.Size
 		local ctaFrame = root:WaitForChild("Cta")
 		local ctaLabel = ctaFrame:WaitForChild("Label")
 
@@ -6304,13 +6384,26 @@ do
 				title.Text = pick(ev, "DisplayTitle", "Title", "Upcoming Event")
 				desc.Text = pick(ev, "DisplayDescription", "Description", "")
 				whenL.Text = whenText(ev)
+				-- when the event ships artwork, that image IS the board face:
+				-- full-bleed hero, with only the countdown + RSVP pill + CTA
+				-- kept on top (the thumbnail already carries the title art)
 				local thumb = typeof(ev.ThumbnailIds) == "table" and ev.ThumbnailIds[1]
 				if thumb then
 					hero.Image = "rbxassetid://" .. tostring(thumb)
+					hero.ImageTransparency = 0 -- authored at 0.78 for the old faint-bg look
 					hero.Visible = true
+					whenL.Position = UDim2.fromScale(0, 0.85)
+					whenL.Size = UDim2.fromScale(1, 0.12)
 				else
 					hero.Visible = false
+					whenL.Position = whenHomePos
+					whenL.Size = whenHomeSize
 				end
+				if kicker then
+					kicker.Visible = not thumb
+				end
+				title.Visible = not thumb
+				desc.Visible = not thumb
 				local going = isGoing(ev)
 				statusPill.Visible = true
 				if going then

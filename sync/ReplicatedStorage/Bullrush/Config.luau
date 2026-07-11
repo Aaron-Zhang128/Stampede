@@ -84,8 +84,8 @@ Config.PRODUCTS = {
 -- purchase, not round earnings - no friend/mode/pass multipliers). label is what
 -- the card's Info.Amount shows; name is the card title. Order = the Cash section
 -- card order (cheapest first). MonetizationService registers + grants these.
--- Sized to the round/crate economy (a win ~270, Mega crate 1200): the cheapest
--- pack is ~4 Mega crates and the biggest ~60, so packs are a real jumpstart but
+-- Sized to the round/crate economy (a win ~270, Mega crate 2500): the cheapest
+-- pack is ~2 Mega crates and the biggest ~30, so packs are a real jumpstart but
 -- never dwarf the earn-and-spend loop the way 100K-1.75M did.
 Config.MONEY_PACKS = {
 	{ product = "MONEY_PACK_1", amount = 5000,  label = "$5,000",  name = "Tiny Pack" },
@@ -202,7 +202,7 @@ Config.BULLS = {
 	BOXES = {
 		BASIC = {
 			name = "Lucky Box", tag = "Basic", order = 1,
-			cost = 150,           -- ~1-2 rounds of earnings
+			cost = 300,           -- ~1 win of earnings
 			color = Color3.fromRGB(205, 127, 50), -- bronze
 			image = "rbxassetid://91683630954327", -- shop card art (fallback: BOX glyph)
 			weights = { COMMON = 64, UNCOMMON = 25, RARE = 9, EPIC = 1.8, LEGENDARY = 0.2 },
@@ -210,7 +210,7 @@ Config.BULLS = {
 		},
 		SUPER = {
 			name = "Super Lucky Box", tag = "Super", order = 2,
-			cost = 450,
+			cost = 1000,          -- ~3-4 wins of earnings
 			color = Color3.fromRGB(150, 190, 230), -- silver-blue
 			image = "rbxassetid://112914675470468", -- shop card art (fallback: SUPER glyph)
 			weights = { COMMON = 40, UNCOMMON = 31, RARE = 20, EPIC = 7, LEGENDARY = 2 },
@@ -218,7 +218,7 @@ Config.BULLS = {
 		},
 		MEGA = {
 			name = "Mega Lucky Box", tag = "Mega", order = 3,
-			cost = 1200,
+			cost = 2500,          -- ~9 wins of earnings; the grind-target crate
 			color = Color3.fromRGB(255, 190, 40), -- gold
 			image = "rbxassetid://91208663021116", -- shop card art (fallback: MEGA glyph)
 			weights = { COMMON = 16, UNCOMMON = 28, RARE = 31, EPIC = 18, LEGENDARY = 7 },
