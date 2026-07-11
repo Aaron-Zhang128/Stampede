@@ -14629,7 +14629,7 @@
     {
       "name": "SoundService",
       "className": "SoundService",
-      "guid": "8657",
+      "guid": "7783",
       "children": [
         {
           "name": "BackgroundMusic",
@@ -30937,228 +30937,6 @@
                           "guid": "16683",
                           "children": [
                             {
-                              "name": "Brainrot1",
-                              "className": "Frame",
-                              "guid": "13830",
-                              "children": [
-                                {
-                                  "name": "Admin",
-                                  "className": "UIGradient",
-                                  "guid": "18111"
-                                },
-                                {
-                                  "name": "AmountLeft",
-                                  "className": "TextLabel",
-                                  "guid": "17464",
-                                  "children": [
-                                    {
-                                      "name": "UIGradient",
-                                      "className": "UIGradient",
-                                      "guid": "18108"
-                                    },
-                                    {
-                                      "name": "UIStroke",
-                                      "className": "UIStroke",
-                                      "guid": "19370"
-                                    }
-                                  ]
-                                },
-                                {
-                                  "name": "BuyButtons",
-                                  "className": "Frame",
-                                  "guid": "13834",
-                                  "children": [
-                                    {
-                                      "name": "1",
-                                      "className": "ImageButton",
-                                      "guid": "14169",
-                                      "children": [
-                                        {
-                                          "name": "Decor",
-                                          "className": "Folder",
-                                          "guid": "13047",
-                                          "children": [
-                                            {
-                                              "name": "Highlight",
-                                              "className": "Frame",
-                                              "guid": "13835",
-                                              "children": [
-                                                {
-                                                  "name": "On",
-                                                  "className": "UIStroke",
-                                                  "guid": "19373"
-                                                }
-                                              ]
-                                            },
-                                            {
-                                              "name": "Shadow",
-                                              "className": "Frame",
-                                              "guid": "13836"
-                                            },
-                                            {
-                                              "name": "Stud",
-                                              "className": "ImageLabel",
-                                              "guid": "14447",
-                                              "children": [
-                                                {
-                                                  "name": "UIGradient",
-                                                  "className": "UIGradient",
-                                                  "guid": "18109"
-                                                }
-                                              ]
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "name": "Info",
-                                          "className": "Frame",
-                                          "guid": "13837",
-                                          "children": [
-                                            {
-                                              "name": "ImageLabel",
-                                              "className": "ImageLabel",
-                                              "guid": "14448"
-                                            },
-                                            {
-                                              "name": "Price",
-                                              "className": "TextLabel",
-                                              "guid": "17466",
-                                              "children": [
-                                                {
-                                                  "name": "UIStroke",
-                                                  "className": "UIStroke",
-                                                  "guid": "19374"
-                                                }
-                                              ]
-                                            },
-                                            {
-                                              "name": "UIListLayout",
-                                              "className": "UIListLayout",
-                                              "guid": "18407"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "name": "UIGradient",
-                                          "className": "UIGradient",
-                                          "guid": "18110"
-                                        },
-                                        {
-                                          "name": "UIStroke",
-                                          "className": "UIStroke",
-                                          "guid": "19372"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "name": "UIListLayout",
-                                      "className": "UIListLayout",
-                                      "guid": "18406"
-                                    }
-                                  ]
-                                },
-                                {
-                                  "name": "Decor",
-                                  "className": "Folder",
-                                  "guid": "13046",
-                                  "children": [
-                                    {
-                                      "name": "CanvasGroup",
-                                      "className": "CanvasGroup",
-                                      "guid": "12789",
-                                      "children": [
-                                        {
-                                          "name": "Icon2",
-                                          "className": "ImageLabel",
-                                          "guid": "14444"
-                                        },
-                                        {
-                                          "name": "Starbust",
-                                          "className": "ImageLabel",
-                                          "guid": "14445"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "name": "Highlight",
-                                      "className": "Frame",
-                                      "guid": "13832",
-                                      "children": [
-                                        {
-                                          "name": "UIStroke",
-                                          "className": "UIStroke",
-                                          "guid": "19367"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "name": "Shadow",
-                                      "className": "Frame",
-                                      "guid": "13831"
-                                    },
-                                    {
-                                      "name": "Stud",
-                                      "className": "ImageLabel",
-                                      "guid": "14443",
-                                      "children": [
-                                        {
-                                          "name": "Admin",
-                                          "className": "UIGradient",
-                                          "guid": "18107"
-                                        }
-                                      ]
-                                    }
-                                  ]
-                                },
-                                {
-                                  "name": "Icon",
-                                  "className": "ImageLabel",
-                                  "guid": "14446"
-                                },
-                                {
-                                  "name": "InfoFrame",
-                                  "className": "Frame",
-                                  "guid": "13833",
-                                  "children": [
-                                    {
-                                      "name": "Info",
-                                      "className": "TextLabel",
-                                      "guid": "17465",
-                                      "children": [
-                                        {
-                                          "name": "UIStroke",
-                                          "className": "UIStroke",
-                                          "guid": "19371"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "name": "UICorner",
-                                      "className": "UICorner",
-                                      "guid": "17657"
-                                    }
-                                  ]
-                                },
-                                {
-                                  "name": "Name",
-                                  "className": "TextLabel",
-                                  "guid": "17463",
-                                  "children": [
-                                    {
-                                      "name": "UIStroke",
-                                      "className": "UIStroke",
-                                      "guid": "19369"
-                                    }
-                                  ]
-                                },
-                                {
-                                  "name": "UIStroke",
-                                  "className": "UIStroke",
-                                  "guid": "19368"
-                                }
-                              ]
-                            },
-                            {
                               "name": "Cash",
                               "className": "Frame",
                               "guid": "13915",
@@ -35665,6 +35443,233 @@
                                   "name": "UIStroke",
                                   "className": "UIStroke",
                                   "guid": "19352"
+                                }
+                              ]
+                            },
+                            {
+                              "name": "CelestialBull",
+                              "className": "Frame",
+                              "guid": "13830",
+                              "children": [
+                                {
+                                  "name": "Admin",
+                                  "className": "UIGradient",
+                                  "guid": "18111"
+                                },
+                                {
+                                  "name": "AmountLeft",
+                                  "className": "TextLabel",
+                                  "guid": "17464",
+                                  "children": [
+                                    {
+                                      "name": "UIGradient",
+                                      "className": "UIGradient",
+                                      "guid": "18108"
+                                    },
+                                    {
+                                      "name": "UIStroke",
+                                      "className": "UIStroke",
+                                      "guid": "19370"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "name": "BuyButtons",
+                                  "className": "Frame",
+                                  "guid": "13834",
+                                  "children": [
+                                    {
+                                      "name": "1",
+                                      "className": "ImageButton",
+                                      "guid": "14169",
+                                      "children": [
+                                        {
+                                          "name": "Decor",
+                                          "className": "Folder",
+                                          "guid": "13047",
+                                          "children": [
+                                            {
+                                              "name": "Highlight",
+                                              "className": "Frame",
+                                              "guid": "13835",
+                                              "children": [
+                                                {
+                                                  "name": "On",
+                                                  "className": "UIStroke",
+                                                  "guid": "19373"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "name": "Shadow",
+                                              "className": "Frame",
+                                              "guid": "13836"
+                                            },
+                                            {
+                                              "name": "Stud",
+                                              "className": "ImageLabel",
+                                              "guid": "14447",
+                                              "children": [
+                                                {
+                                                  "name": "UIGradient",
+                                                  "className": "UIGradient",
+                                                  "guid": "18109"
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "name": "Info",
+                                          "className": "Frame",
+                                          "guid": "13837",
+                                          "children": [
+                                            {
+                                              "name": "ImageLabel",
+                                              "className": "ImageLabel",
+                                              "guid": "14448"
+                                            },
+                                            {
+                                              "name": "Price",
+                                              "className": "TextLabel",
+                                              "guid": "17466",
+                                              "children": [
+                                                {
+                                                  "name": "UIStroke",
+                                                  "className": "UIStroke",
+                                                  "guid": "19374"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "name": "UIListLayout",
+                                              "className": "UIListLayout",
+                                              "guid": "18407"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "name": "UIGradient",
+                                          "className": "UIGradient",
+                                          "guid": "18110"
+                                        },
+                                        {
+                                          "name": "UIStroke",
+                                          "className": "UIStroke",
+                                          "guid": "19372"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "name": "UIListLayout",
+                                      "className": "UIListLayout",
+                                      "guid": "18406"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "name": "Decor",
+                                  "className": "Folder",
+                                  "guid": "13046",
+                                  "children": [
+                                    {
+                                      "name": "CanvasGroup",
+                                      "className": "CanvasGroup",
+                                      "guid": "12789",
+                                      "children": [
+                                        {
+                                          "name": "Icon2",
+                                          "className": "ImageLabel",
+                                          "guid": "14444"
+                                        },
+                                        {
+                                          "name": "Starbust",
+                                          "className": "ImageLabel",
+                                          "guid": "14445"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "name": "Highlight",
+                                      "className": "Frame",
+                                      "guid": "13832",
+                                      "children": [
+                                        {
+                                          "name": "UIStroke",
+                                          "className": "UIStroke",
+                                          "guid": "19367"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "name": "Shadow",
+                                      "className": "Frame",
+                                      "guid": "13831"
+                                    },
+                                    {
+                                      "name": "Stud",
+                                      "className": "ImageLabel",
+                                      "guid": "14443",
+                                      "children": [
+                                        {
+                                          "name": "Admin",
+                                          "className": "UIGradient",
+                                          "guid": "18107"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "name": "Icon",
+                                  "className": "ImageLabel",
+                                  "guid": "14446"
+                                },
+                                {
+                                  "name": "InfoFrame",
+                                  "className": "Frame",
+                                  "guid": "13833",
+                                  "children": [
+                                    {
+                                      "name": "Info",
+                                      "className": "TextLabel",
+                                      "guid": "17465",
+                                      "children": [
+                                        {
+                                          "name": "UIStroke",
+                                          "className": "UIStroke",
+                                          "guid": "19371"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "name": "UICorner",
+                                      "className": "UICorner",
+                                      "guid": "17657"
+                                    },
+                                    {
+                                      "name": "UIListLayout",
+                                      "className": "UIListLayout",
+                                      "guid": "10720368"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "name": "Name",
+                                  "className": "TextLabel",
+                                  "guid": "17463",
+                                  "children": [
+                                    {
+                                      "name": "UIStroke",
+                                      "className": "UIStroke",
+                                      "guid": "19369"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "name": "UIStroke",
+                                  "className": "UIStroke",
+                                  "guid": "19368"
                                 }
                               ]
                             }
@@ -45297,7 +45302,7 @@
         {
           "name": "Camera",
           "className": "Camera",
-          "guid": "398125"
+          "guid": "4555334"
         },
         {
           "name": "ColorCorrection",
@@ -45858,1504 +45863,6 @@
                       "name": "CounterPart",
                       "className": "Part",
                       "guid": "15528"
-                    }
-                  ]
-                },
-                {
-                  "name": "Rig",
-                  "className": "Model",
-                  "guid": "14784",
-                  "children": [
-                    {
-                      "name": "Animate",
-                      "className": "LocalScript",
-                      "guid": "14599",
-                      "filePaths": [
-                        "sync/Workspace/Lobby/Shop/Rig/Animate.client.luau"
-                      ],
-                      "children": [
-                        {
-                          "name": "cheer",
-                          "className": "StringValue",
-                          "guid": "16722",
-                          "children": [
-                            {
-                              "name": "CheerAnim",
-                              "className": "Animation",
-                              "guid": "11374"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "climb",
-                          "className": "StringValue",
-                          "guid": "16729",
-                          "children": [
-                            {
-                              "name": "ClimbAnim",
-                              "className": "Animation",
-                              "guid": "11384"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "dance",
-                          "className": "StringValue",
-                          "guid": "16728",
-                          "children": [
-                            {
-                              "name": "Animation1",
-                              "className": "Animation",
-                              "guid": "11381",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15315"
-                                }
-                              ]
-                            },
-                            {
-                              "name": "Animation2",
-                              "className": "Animation",
-                              "guid": "11383",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15317"
-                                }
-                              ]
-                            },
-                            {
-                              "name": "Animation3",
-                              "className": "Animation",
-                              "guid": "11382",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15316"
-                                }
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "name": "dance2",
-                          "className": "StringValue",
-                          "guid": "16731",
-                          "children": [
-                            {
-                              "name": "Animation1",
-                              "className": "Animation",
-                              "guid": "11388",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15321"
-                                }
-                              ]
-                            },
-                            {
-                              "name": "Animation2",
-                              "className": "Animation",
-                              "guid": "11390",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15323"
-                                }
-                              ]
-                            },
-                            {
-                              "name": "Animation3",
-                              "className": "Animation",
-                              "guid": "11389",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15322"
-                                }
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "name": "dance3",
-                          "className": "StringValue",
-                          "guid": "16730",
-                          "children": [
-                            {
-                              "name": "Animation1",
-                              "className": "Animation",
-                              "guid": "11386",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15319"
-                                }
-                              ]
-                            },
-                            {
-                              "name": "Animation2",
-                              "className": "Animation",
-                              "guid": "11385",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15318"
-                                }
-                              ]
-                            },
-                            {
-                              "name": "Animation3",
-                              "className": "Animation",
-                              "guid": "11387",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15320"
-                                }
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "name": "fall",
-                          "className": "StringValue",
-                          "guid": "16725",
-                          "children": [
-                            {
-                              "name": "FallAnim",
-                              "className": "Animation",
-                              "guid": "11378"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "idle",
-                          "className": "StringValue",
-                          "guid": "16723",
-                          "children": [
-                            {
-                              "name": "Animation1",
-                              "className": "Animation",
-                              "guid": "11375",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15313"
-                                }
-                              ]
-                            },
-                            {
-                              "name": "Animation2",
-                              "className": "Animation",
-                              "guid": "11376",
-                              "children": [
-                                {
-                                  "name": "Weight",
-                                  "className": "NumberValue",
-                                  "guid": "15314"
-                                }
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "name": "jump",
-                          "className": "StringValue",
-                          "guid": "16724",
-                          "children": [
-                            {
-                              "name": "JumpAnim",
-                              "className": "Animation",
-                              "guid": "11377"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "laugh",
-                          "className": "StringValue",
-                          "guid": "16727",
-                          "children": [
-                            {
-                              "name": "LaughAnim",
-                              "className": "Animation",
-                              "guid": "11380"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "mood",
-                          "className": "StringValue",
-                          "guid": "16721",
-                          "children": [
-                            {
-                              "name": "Animation1",
-                              "className": "Animation",
-                              "guid": "11373"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "PlayEmote",
-                          "className": "BindableFunction",
-                          "guid": "12384"
-                        },
-                        {
-                          "name": "point",
-                          "className": "StringValue",
-                          "guid": "16726",
-                          "children": [
-                            {
-                              "name": "PointAnim",
-                              "className": "Animation",
-                              "guid": "11379"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "run",
-                          "className": "StringValue",
-                          "guid": "16734",
-                          "children": [
-                            {
-                              "name": "RunAnim",
-                              "className": "Animation",
-                              "guid": "11393"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "ScaleDampeningPercent",
-                          "className": "NumberValue",
-                          "guid": "15312"
-                        },
-                        {
-                          "name": "sit",
-                          "className": "StringValue",
-                          "guid": "16738",
-                          "children": [
-                            {
-                              "name": "SitAnim",
-                              "className": "Animation",
-                              "guid": "11397"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "swim",
-                          "className": "StringValue",
-                          "guid": "16732",
-                          "children": [
-                            {
-                              "name": "Swim",
-                              "className": "Animation",
-                              "guid": "11391"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "swimidle",
-                          "className": "StringValue",
-                          "guid": "16736",
-                          "children": [
-                            {
-                              "name": "SwimIdle",
-                              "className": "Animation",
-                              "guid": "11395"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "toollunge",
-                          "className": "StringValue",
-                          "guid": "16737",
-                          "children": [
-                            {
-                              "name": "ToolLungeAnim",
-                              "className": "Animation",
-                              "guid": "11396"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "toolnone",
-                          "className": "StringValue",
-                          "guid": "16740",
-                          "children": [
-                            {
-                              "name": "ToolNoneAnim",
-                              "className": "Animation",
-                              "guid": "11399"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "toolslash",
-                          "className": "StringValue",
-                          "guid": "16739",
-                          "children": [
-                            {
-                              "name": "ToolSlashAnim",
-                              "className": "Animation",
-                              "guid": "11398"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "walk",
-                          "className": "StringValue",
-                          "guid": "16735",
-                          "children": [
-                            {
-                              "name": "WalkAnim",
-                              "className": "Animation",
-                              "guid": "11394"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "wave",
-                          "className": "StringValue",
-                          "guid": "16733",
-                          "children": [
-                            {
-                              "name": "WaveAnim",
-                              "className": "Animation",
-                              "guid": "11392"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "name": "Body Colors",
-                      "className": "BodyColors",
-                      "guid": "12397"
-                    },
-                    {
-                      "name": "Head",
-                      "className": "MeshPart",
-                      "guid": "14625",
-                      "children": [
-                        {
-                          "name": "FaceCenterAttachment",
-                          "className": "Attachment",
-                          "guid": "11747",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19647"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "FaceControls",
-                          "className": "FaceControls",
-                          "guid": "12804"
-                        },
-                        {
-                          "name": "FaceFrontAttachment",
-                          "className": "Attachment",
-                          "guid": "11749",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19649"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "HairAttachment",
-                          "className": "Attachment",
-                          "guid": "11750",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19650"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "HatAttachment",
-                          "className": "Attachment",
-                          "guid": "11748",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19648"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "Head",
-                          "className": "WrapTarget",
-                          "guid": "20301"
-                        },
-                        {
-                          "name": "HumanoidRootPartNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15142"
-                        },
-                        {
-                          "name": "LeftUpperArmNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15144"
-                        },
-                        {
-                          "name": "Neck",
-                          "className": "Motor6D",
-                          "guid": "15007"
-                        },
-                        {
-                          "name": "NeckRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11746",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19646"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19645"
-                        },
-                        {
-                          "name": "RightUpperArmNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15143"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "Humanoid",
-                      "className": "Humanoid",
-                      "guid": "14046",
-                      "children": [
-                        {
-                          "name": "Animator",
-                          "className": "Animator",
-                          "guid": "11736"
-                        },
-                        {
-                          "name": "BodyDepthScale",
-                          "className": "NumberValue",
-                          "guid": "15326"
-                        },
-                        {
-                          "name": "BodyHeightScale",
-                          "className": "NumberValue",
-                          "guid": "15327"
-                        },
-                        {
-                          "name": "BodyProportionScale",
-                          "className": "NumberValue",
-                          "guid": "15328"
-                        },
-                        {
-                          "name": "BodyTypeScale",
-                          "className": "NumberValue",
-                          "guid": "15324"
-                        },
-                        {
-                          "name": "BodyWidthScale",
-                          "className": "NumberValue",
-                          "guid": "15329"
-                        },
-                        {
-                          "name": "HeadScale",
-                          "className": "NumberValue",
-                          "guid": "15325"
-                        },
-                        {
-                          "name": "HumanoidDescription",
-                          "className": "HumanoidDescription",
-                          "guid": "14058",
-                          "children": [
-                            {
-                              "name": "BodyPartDescription",
-                              "className": "BodyPartDescription",
-                              "guid": "12399"
-                            },
-                            {
-                              "name": "BodyPartDescription",
-                              "className": "BodyPartDescription",
-                              "guid": "12400"
-                            },
-                            {
-                              "name": "BodyPartDescription",
-                              "className": "BodyPartDescription",
-                              "guid": "12401"
-                            },
-                            {
-                              "name": "BodyPartDescription",
-                              "className": "BodyPartDescription",
-                              "guid": "12402"
-                            },
-                            {
-                              "name": "BodyPartDescription",
-                              "className": "BodyPartDescription",
-                              "guid": "12403"
-                            },
-                            {
-                              "name": "BodyPartDescription",
-                              "className": "BodyPartDescription",
-                              "guid": "12404"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "Status",
-                          "className": "Status",
-                          "guid": "20442"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "HumanoidRootPart",
-                      "className": "Part",
-                      "guid": "15515",
-                      "children": [
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19636"
-                        },
-                        {
-                          "name": "RootAttachment",
-                          "className": "Attachment",
-                          "guid": "11739",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19635"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RootRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11740",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19637"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "name": "LeftFoot",
-                      "className": "MeshPart",
-                      "guid": "14624",
-                      "children": [
-                        {
-                          "name": "LeftAnkle",
-                          "className": "Motor6D",
-                          "guid": "15006"
-                        },
-                        {
-                          "name": "LeftAnkleRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11744",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19643"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftFoot",
-                          "className": "WrapTarget",
-                          "guid": "20300"
-                        },
-                        {
-                          "name": "LeftFootAttachment",
-                          "className": "Attachment",
-                          "guid": "11745",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19644"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19642"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "LeftHand",
-                      "className": "MeshPart",
-                      "guid": "14629",
-                      "children": [
-                        {
-                          "name": "LeftGripAttachment",
-                          "className": "Attachment",
-                          "guid": "11764",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19668"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftHand",
-                          "className": "WrapTarget",
-                          "guid": "20305"
-                        },
-                        {
-                          "name": "LeftWrist",
-                          "className": "Motor6D",
-                          "guid": "15011"
-                        },
-                        {
-                          "name": "LeftWristRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11765",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19669"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19667"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "LeftLowerArm",
-                      "className": "MeshPart",
-                      "guid": "14635",
-                      "children": [
-                        {
-                          "name": "LeftElbow",
-                          "className": "Motor6D",
-                          "guid": "15017"
-                        },
-                        {
-                          "name": "LeftElbowRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11782",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19691"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftLowerArm",
-                          "className": "WrapTarget",
-                          "guid": "20311"
-                        },
-                        {
-                          "name": "LeftWristRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11781",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19690"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19692"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "LeftLowerLeg",
-                      "className": "MeshPart",
-                      "guid": "14626",
-                      "children": [
-                        {
-                          "name": "LeftAnkleRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11752",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19653"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftKnee",
-                          "className": "Motor6D",
-                          "guid": "15008"
-                        },
-                        {
-                          "name": "LeftKneeRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11751",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19652"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftLowerLeg",
-                          "className": "WrapTarget",
-                          "guid": "20302"
-                        },
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19651"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "LeftUpperArm",
-                      "className": "MeshPart",
-                      "guid": "14637",
-                      "children": [
-                        {
-                          "name": "LeftElbowRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11787",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19698"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftHandNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15159"
-                        },
-                        {
-                          "name": "LeftShoulder",
-                          "className": "Motor6D",
-                          "guid": "15019"
-                        },
-                        {
-                          "name": "LeftShoulderAttachment",
-                          "className": "Attachment",
-                          "guid": "11785",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19696"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftShoulderRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11786",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19697"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftUpperArm",
-                          "className": "WrapTarget",
-                          "guid": "20313"
-                        },
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19699"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "LeftUpperLeg",
-                      "className": "MeshPart",
-                      "guid": "14628",
-                      "children": [
-                        {
-                          "name": "LeftFootNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15152"
-                        },
-                        {
-                          "name": "LeftHip",
-                          "className": "Motor6D",
-                          "guid": "15010"
-                        },
-                        {
-                          "name": "LeftHipRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11762",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19664"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftKneeRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11763",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19665"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftUpperLeg",
-                          "className": "WrapTarget",
-                          "guid": "20304"
-                        },
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19666"
-                        },
-                        {
-                          "name": "RightUpperLegNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15153"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "LowerTorso",
-                      "className": "MeshPart",
-                      "guid": "14633",
-                      "children": [
-                        {
-                          "name": "LeftHipRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11776",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19683"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftLowerLegNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15157"
-                        },
-                        {
-                          "name": "LeftUpperArmNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15155"
-                        },
-                        {
-                          "name": "LowerTorso",
-                          "className": "WrapTarget",
-                          "guid": "20309"
-                        },
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19686"
-                        },
-                        {
-                          "name": "RightHipRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11778",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19685"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightLowerLegNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15156"
-                        },
-                        {
-                          "name": "RightUpperArmNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15154"
-                        },
-                        {
-                          "name": "Root",
-                          "className": "Motor6D",
-                          "guid": "15015"
-                        },
-                        {
-                          "name": "RootRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11772",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19679"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "WaistBackAttachment",
-                          "className": "Attachment",
-                          "guid": "11773",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19680"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "WaistCenterAttachment",
-                          "className": "Attachment",
-                          "guid": "11775",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19682"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "WaistFrontAttachment",
-                          "className": "Attachment",
-                          "guid": "11774",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19681"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "WaistRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11777",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19684"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "name": "RightFoot",
-                      "className": "MeshPart",
-                      "guid": "14632",
-                      "children": [
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19678"
-                        },
-                        {
-                          "name": "RightAnkle",
-                          "className": "Motor6D",
-                          "guid": "15014"
-                        },
-                        {
-                          "name": "RightAnkleRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11770",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19676"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightFoot",
-                          "className": "WrapTarget",
-                          "guid": "20308"
-                        },
-                        {
-                          "name": "RightFootAttachment",
-                          "className": "Attachment",
-                          "guid": "11771",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19677"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "name": "RightHand",
-                      "className": "MeshPart",
-                      "guid": "14631",
-                      "children": [
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19675"
-                        },
-                        {
-                          "name": "RightGripAttachment",
-                          "className": "Attachment",
-                          "guid": "11769",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19674"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightHand",
-                          "className": "WrapTarget",
-                          "guid": "20307"
-                        },
-                        {
-                          "name": "RightWrist",
-                          "className": "Motor6D",
-                          "guid": "15013"
-                        },
-                        {
-                          "name": "RightWristRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11768",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19673"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "name": "RightLowerArm",
-                      "className": "MeshPart",
-                      "guid": "14634",
-                      "children": [
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19689"
-                        },
-                        {
-                          "name": "RightElbow",
-                          "className": "Motor6D",
-                          "guid": "15016"
-                        },
-                        {
-                          "name": "RightElbowRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11779",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19687"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightLowerArm",
-                          "className": "WrapTarget",
-                          "guid": "20310"
-                        },
-                        {
-                          "name": "RightWristRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11780",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19688"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "name": "RightLowerLeg",
-                      "className": "MeshPart",
-                      "guid": "14630",
-                      "children": [
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19672"
-                        },
-                        {
-                          "name": "RightAnkleRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11766",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19670"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightKnee",
-                          "className": "Motor6D",
-                          "guid": "15012"
-                        },
-                        {
-                          "name": "RightKneeRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11767",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19671"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightLowerLeg",
-                          "className": "WrapTarget",
-                          "guid": "20306"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "RightUpperArm",
-                      "className": "MeshPart",
-                      "guid": "14623",
-                      "children": [
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19639"
-                        },
-                        {
-                          "name": "RightElbowRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11742",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19640"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightHandNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15141"
-                        },
-                        {
-                          "name": "RightShoulder",
-                          "className": "Motor6D",
-                          "guid": "15005"
-                        },
-                        {
-                          "name": "RightShoulderAttachment",
-                          "className": "Attachment",
-                          "guid": "11743",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19641"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightShoulderRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11741",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19638"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightUpperArm",
-                          "className": "WrapTarget",
-                          "guid": "20299"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "RightUpperLeg",
-                      "className": "MeshPart",
-                      "guid": "14636",
-                      "children": [
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19693"
-                        },
-                        {
-                          "name": "RightFootNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15158"
-                        },
-                        {
-                          "name": "RightHip",
-                          "className": "Motor6D",
-                          "guid": "15018"
-                        },
-                        {
-                          "name": "RightHipRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11783",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19694"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightKneeRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11784",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19695"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightUpperLeg",
-                          "className": "WrapTarget",
-                          "guid": "20312"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "UpperTorso",
-                      "className": "MeshPart",
-                      "guid": "14627",
-                      "children": [
-                        {
-                          "name": "BodyBackAttachment",
-                          "className": "Attachment",
-                          "guid": "11758",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19660"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "BodyFrontAttachment",
-                          "className": "Attachment",
-                          "guid": "11757",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19659"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "HumanoidRootPartNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15151"
-                        },
-                        {
-                          "name": "LeftCollarAttachment",
-                          "className": "Attachment",
-                          "guid": "11754",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19655"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftLowerArmNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15150"
-                        },
-                        {
-                          "name": "LeftLowerLegNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15148"
-                        },
-                        {
-                          "name": "LeftShoulderRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11761",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19663"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "LeftUpperLegNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15145"
-                        },
-                        {
-                          "name": "NeckAttachment",
-                          "className": "Attachment",
-                          "guid": "11755",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19656"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "NeckRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11760",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19662"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "OriginalSize",
-                          "className": "Vector3Value",
-                          "guid": "19658"
-                        },
-                        {
-                          "name": "RightCollarAttachment",
-                          "className": "Attachment",
-                          "guid": "11753",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19654"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightLowerArmNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15149"
-                        },
-                        {
-                          "name": "RightLowerLegNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15147"
-                        },
-                        {
-                          "name": "RightShoulderRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11756",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19657"
-                            }
-                          ]
-                        },
-                        {
-                          "name": "RightUpperLegNoCollision",
-                          "className": "NoCollisionConstraint",
-                          "guid": "15146"
-                        },
-                        {
-                          "name": "UpperTorso",
-                          "className": "WrapTarget",
-                          "guid": "20303"
-                        },
-                        {
-                          "name": "Waist",
-                          "className": "Motor6D",
-                          "guid": "15009"
-                        },
-                        {
-                          "name": "WaistRigAttachment",
-                          "className": "Attachment",
-                          "guid": "11759",
-                          "children": [
-                            {
-                              "name": "OriginalPosition",
-                              "className": "Vector3Value",
-                              "guid": "19661"
-                            }
-                          ]
-                        }
-                      ]
                     }
                   ]
                 },
@@ -51862,6 +50369,119 @@
                   ]
                 }
               ]
+            }
+          ]
+        },
+        {
+          "name": "Noob",
+          "className": "Folder",
+          "children": [
+            {
+              "name": "Left Arm",
+              "className": "Folder",
+              "children": [
+                {
+                  "name": "Weld",
+                  "className": "Weld",
+                  "guid": "6012485"
+                }
+              ]
+            },
+            {
+              "name": "Head",
+              "className": "Folder",
+              "children": [
+                {
+                  "name": "Snap",
+                  "className": "Snap",
+                  "guid": "6012484"
+                },
+                {
+                  "name": "face",
+                  "className": "Decal",
+                  "guid": "6012473"
+                },
+                {
+                  "name": "Mesh",
+                  "className": "SpecialMesh",
+                  "guid": "6012482"
+                }
+              ]
+            },
+            {
+              "name": "Left Leg",
+              "className": "Folder",
+              "children": [
+                {
+                  "name": "Snap",
+                  "className": "Snap",
+                  "guid": "6012486"
+                }
+              ]
+            },
+            {
+              "name": "Right Leg",
+              "className": "Folder",
+              "children": [
+                {
+                  "name": "Snap",
+                  "className": "Snap",
+                  "guid": "6012488"
+                }
+              ]
+            },
+            {
+              "name": "Right Leg",
+              "className": "Part",
+              "guid": "6012480"
+            }
+          ]
+        },
+        {
+          "name": "Noob",
+          "className": "Model",
+          "guid": "6012475",
+          "children": [
+            {
+              "name": "Head",
+              "className": "Part",
+              "guid": "6012476"
+            },
+            {
+              "name": "Left Arm",
+              "className": "Part",
+              "guid": "6012477"
+            },
+            {
+              "name": "Right Arm",
+              "className": "Folder",
+              "children": [
+                {
+                  "name": "Weld",
+                  "className": "Weld",
+                  "guid": "6012487"
+                }
+              ]
+            },
+            {
+              "name": "Left Leg",
+              "className": "Part",
+              "guid": "6012478"
+            },
+            {
+              "name": "Right Arm",
+              "className": "Part",
+              "guid": "6012479"
+            },
+            {
+              "name": "Humanoid",
+              "className": "Humanoid",
+              "guid": "6012474"
+            },
+            {
+              "name": "Torso",
+              "className": "Part",
+              "guid": "6012481"
             }
           ]
         }

@@ -294,7 +294,7 @@ for _, d in ipairs(SideUI:GetDescendants()) do
 					local inviteOptions
 					pcall(function()
 						inviteOptions = Instance.new("ExperienceInviteOptions")
-						inviteOptions.PromptMessage = "Rally your friends for the stampede!"
+						inviteOptions.PromptMessage = "Rally your friends!"
 					end)
 					local prompted = pcall(function()
 						SocialService:PromptGameInvite(player, inviteOptions)
@@ -304,7 +304,7 @@ for _, d in ipairs(SideUI:GetDescendants()) do
 					end
 				end
 				if pushNotif then
-					pushNotif("Friend invites aren't available right now", "red", 3)
+					pushNotif("Invites not available", "red", 3)
 				end
 			end)
 		else
@@ -1152,49 +1152,6 @@ task.spawn(function()
 		end
 	end
 
-	-- "[OP] LUCKY BLOCK" banner (the "Exclusive" card = Config.BULLS.OP_ROLL): show
-	-- the ACTUAL elite pool you can roll - every Epic/Legendary bull the block can
-	-- hit, each with its true per-bull odds - built from OP_ROLL.box.weights via
-	-- the same prizesForWeights the tier cards use, so it can't drift from what
-	-- BullRollService actually grants.
-	-- The kit's own "Outcomes" frame is a tiny right-PINNED strip (12% wide at
-	-- x=0.98) whose icons spread left via hand-tuned negative offsets, so filling
-	-- it overflows off the right edge - we hide it and build our own reel in the
-	-- real clear band instead: right of the icon (x>0.30), below the title
-	-- (y>0.17), above the buy buttons (which actually span y 0.66-0.90). Measured
-	-- from the live rendered rects, so it sits in the gap without overlapping.
-	local opRoll = cfg.BULLS and cfg.BULLS.OP_ROLL
-	local opWeights = opRoll and opRoll.box and opRoll.box.weights
-	if bannerFrame and opWeights then
-		local kitReel = bannerFrame:FindFirstChild("Outcomes")
-		if kitReel then
-			kitReel.Visible = false
-		end
-		local highlights = prizesForWeights(opWeights) -- every rollable Epic/Legendary bull
-
-		local existing = bannerFrame:FindFirstChild("PrizeReel")
-		if existing then
-			existing:Destroy()
-		end
-		if #highlights > 0 then
-			local reel = Instance.new("Frame")
-			reel.Name = "PrizeReel"
-			reel.BackgroundTransparency = 1
-			reel.Position = UDim2.fromScale(0.31, 0.19)
-			reel.Size = UDim2.fromScale(0.67, 0.45)
-			reel.ZIndex = 8
-			reel.Parent = bannerFrame
-			local reelLayout = Instance.new("UIListLayout")
-			reelLayout.FillDirection = Enum.FillDirection.Horizontal
-			reelLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-			reelLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-			reelLayout.Padding = UDim.new(0.012, 0)
-			reelLayout.Parent = reel
-			-- widthScale capped so a small pool doesn't blow up into giant tiles
-			local widthScale = math.min(0.22, 0.94 / #highlights)
-			fillStrip(reel, highlights, widthScale, true) -- show each elite bull's odds
-		end
-	end
 
 	-- banner Timer: a real weekly limited-offer countdown (pure client urgency).
 	-- Fixed 7-day cycle anchored to a Monday, driven off the server clock so
@@ -1262,7 +1219,7 @@ task.spawn(function()
 				Marketplace:PromptProductPurchase(player, productId)
 			end)
 			if not ok and pushNotif then
-				pushNotif("Purchases aren't available right now", "red", 3)
+				pushNotif("Store not available", "red", 3)
 			end
 		end)
 	end
@@ -1298,15 +1255,125 @@ task.spawn(function()
 			wireBuyButton(exBuys:FindFirstChild(tostring(i)), bundle.product)
 		end
 	end
+
+	-- Paint the Exclusive card's outcome slots with the ACTUAL elite bulls this
+	-- crate can roll instead of the kit's placeholder brainrot art. The pool =
+	-- rollable bulls whose rarity is weighted in OP_ROLL.box.weights (EPIC +
+	-- LEGENDARY only). Each slot becomes a real ViewportFrame render of the bull
+	-- model (same 3/4-front recipe as the Celestial card / index cards) plus its
+	-- TRUE odds: BullCatalog.roll picks a rarity by weight then a uniform bull
+	-- within it, so a bull's chance = rarityWeight/totalWeight / bullsInThatRarity.
+	local outcomes = exclusive and exclusive:FindFirstChild("Outcomes")
+	local weights = opRoll and opRoll.box and opRoll.box.weights
+	local okCat, BullCatalog = pcall(require, bullrush:WaitForChild("BullCatalog", 30))
+	if outcomes and okCat and typeof(BullCatalog) == "table" and typeof(weights) == "table" then
+		local bullsFolder = ReplicatedStorage:FindFirstChild("BullrushAssets")
+		bullsFolder = bullsFolder and bullsFolder:FindFirstChild("Bulls")
+
+		-- rollable bulls in the weighted rarities, + per-rarity counts / total weight
+		local elite, counts, totalW = {}, {}, 0
+		for id, bull in BullCatalog.Bulls do
+			if bull.rollable ~= false and (weights[bull.rarity] or 0) > 0 then
+				counts[bull.rarity] = (counts[bull.rarity] or 0) + 1
+				local rr = BullCatalog.Rarities[bull.rarity]
+				table.insert(elite, { id = id, bull = bull, order = rr and rr.order or 0 })
+			end
+		end
+		for rarity, c in counts do
+			if c > 0 then totalW += (weights[rarity] or 0) end
+		end
+
+		-- kit slots (named "1".."n") left->right; trim the elite list to fit and
+		-- show it rarest-LAST so the card builds up to the top prize on the right
+		local slots = {}
+		for _, ch in outcomes:GetChildren() do
+			if ch:IsA("Frame") then table.insert(slots, ch) end
+		end
+		table.sort(slots, function(a, b) return a.Name < b.Name end)
+		table.sort(elite, function(a, b) -- rarest first, so trimming drops commons
+			if a.order ~= b.order then return a.order > b.order end
+			return a.id < b.id
+		end)
+		while #elite > #slots do table.remove(elite) end
+		table.sort(elite, function(a, b) -- rarest last for the display order
+			if a.order ~= b.order then return a.order < b.order end
+			return a.id < b.id
+		end)
+
+		for i, slot in ipairs(slots) do
+			local entry = elite[i]
+			if not entry then
+				slot.Visible = false -- fewer elite bulls than kit slots: hide the extra
+			else
+				slot.Visible = true
+				local rarity = BullCatalog.Rarities[entry.bull.rarity]
+				local chance = 0
+				if totalW > 0 and counts[entry.bull.rarity] then
+					chance = (weights[entry.bull.rarity] or 0) / totalW / counts[entry.bull.rarity] * 100
+				end
+				local chanceLabel = slot:FindFirstChild("Chance")
+				if chanceLabel and chanceLabel:IsA("TextLabel") then
+					chanceLabel.Text = if chance >= 10
+						then string.format("%d%%", math.floor(chance + 0.5))
+						else string.format("%.1f%%", chance)
+				end
+				-- the kit's "$10/s" Rate label becomes the bull's name
+				local rateLabel = slot:FindFirstChild("Rate")
+				if rateLabel and rateLabel:IsA("TextLabel") then
+					rateLabel.Text = entry.bull.name
+				end
+				-- tint the slot outline by rarity so the tiers read at a glance
+				local stroke = slot:FindFirstChild("UIStroke")
+				if stroke and rarity then
+					stroke.Color = rarity.color
+				end
+				-- swap the brainrot Icon for a real bull render (falls back to the
+				-- generic legendary skin if a modelName is ever missing)
+				local icon = slot:FindFirstChild("Icon")
+				local source = entry.bull.modelName and bullsFolder
+					and bullsFolder:FindFirstChild(entry.bull.modelName)
+				if icon and icon:IsA("GuiObject") and source then
+					local viewport = Instance.new("ViewportFrame")
+					viewport.Name = "Icon"
+					viewport.BackgroundTransparency = 1
+					viewport.AnchorPoint = icon.AnchorPoint
+					viewport.Position = icon.Position
+					viewport.Size = icon.Size
+					viewport.ZIndex = icon.ZIndex
+					viewport.Ambient = Color3.fromRGB(165, 160, 155)
+					viewport.LightColor = Color3.fromRGB(255, 250, 240)
+					viewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
+					local uicorner = icon:FindFirstChildWhichIsA("UICorner")
+					if uicorner then
+						uicorner:Clone().Parent = viewport
+					end
+					local model = source:Clone()
+					model:PivotTo(CFrame.new())
+					local center, size = Vector3.zero, Vector3.new(10, 10, 10)
+					pcall(function()
+						local cf, bbox = model:GetBoundingBox()
+						center, size = cf.Position, bbox
+					end)
+					local camera = Instance.new("Camera")
+					camera.CFrame = CFrame.lookAt(center + Vector3.new(-0.55, 0.42, -1).Unit * size.Magnitude * 0.72, center)
+					camera.Parent = viewport
+					viewport.CurrentCamera = camera
+					model.Parent = viewport
+					viewport.Parent = slot
+					icon:Destroy()
+				end
+			end
+		end
+	end
 end)
 
 ---------------------------------------------------------------- 5c) passes + luck
 -- Store gamepass / server-luck cards -> MonetizationService. Each card's buy
 -- button prompts its pass (PromptGamePassPurchase) or the Server Luck product
 -- (PromptProductPurchase); the price label is painted live from GetProductInfo
--- and owned passes flip to a greyed "Owned". The kit only ships Super/Mega luck
--- slots, so 2x Luck + Strawberry Elephant cards are cloned in. All ids are 0
--- until published -> a buy shows a "coming soon" card (same idiom as elsewhere).
+-- and owned passes flip to a greyed "Owned". The kit ships the Super/Mega luck
+-- slots directly; all ids are 0 until published -> a buy shows a "coming soon"
+-- card (same idiom as elsewhere).
 task.spawn(function()
 	local Marketplace = game:GetService("MarketplaceService")
 	local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
@@ -1315,56 +1382,8 @@ task.spawn(function()
 		return
 	end
 	local gamepasses = storeContainer:FindFirstChild("Gamepasses")
-
-	-- clone a kit gamepass card as the template for a luck item the kit lacks
-	local function cloneCard(sourceName, newName, order)
-		local src = gamepasses and gamepasses:FindFirstChild(sourceName)
-		if not src then
-			return nil
-		end
-		local c = src:Clone()
-		c.Name = newName
-		c.LayoutOrder = order
-		c.Parent = gamepasses
-		return c
-	end
-	local twoxLuckCard = cloneCard("SuperLuck", "2xLuck", -1) -- lowest luck tier, sits first
-	local strawberryCard = cloneCard("MEGALuck", "StrawberryElephant", 5)
-
-	-- Celestial Bull card is cloned from a luck card, so its Icon still shows luck
-	-- art. Swap it for a real ViewportFrame render of the bull actually being sold.
-	if strawberryCard then
-		local icon = strawberryCard:FindFirstChild("Icon")
-		local bullsFolder = ReplicatedStorage:FindFirstChild("BullrushAssets")
-		bullsFolder = bullsFolder and bullsFolder:FindFirstChild("Bulls")
-		local source = bullsFolder and bullsFolder:FindFirstChild("Bull_LEGENDARY") -- STRAWBERRY.modelName
-		if icon and icon:IsA("GuiObject") and source then
-			local viewport = Instance.new("ViewportFrame")
-			viewport.Name = "Icon"
-			viewport.BackgroundTransparency = 1
-			viewport.AnchorPoint = icon.AnchorPoint
-			viewport.Position = icon.Position
-			viewport.Size = icon.Size
-			viewport.ZIndex = icon.ZIndex
-			viewport.Ambient = Color3.fromRGB(165, 160, 155)
-			viewport.LightColor = Color3.fromRGB(255, 250, 240)
-			viewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
-			local model = source:Clone()
-			model:PivotTo(CFrame.new())
-			local center, size = Vector3.zero, Vector3.new(10, 10, 10)
-			pcall(function()
-				local cf, bbox = model:GetBoundingBox()
-				center, size = cf.Position, bbox
-			end)
-			local camera = Instance.new("Camera")
-			camera.CFrame = CFrame.lookAt(center + Vector3.new(-0.55, 0.42, -1).Unit * size.Magnitude * 0.72, center)
-			camera.Parent = viewport
-			viewport.CurrentCamera = camera
-			model.Parent = viewport
-			viewport.Parent = strawberryCard
-			icon:Destroy()
-		end
-	end
+	-- (Celestial Bull has its own purpose-built Store card in the Container; it is
+	-- wired further down.)
 
 	local function priceBtn(card)
 		local bb = card and card:FindFirstChild("BuyButtons")
@@ -1448,18 +1467,50 @@ task.spawn(function()
 	local GP = Enum.InfoType.GamePass
 	wire(gamepasses and gamepasses:FindFirstChild("2xCash"), "2x Cash", P.DOUBLE_MONEY, GP, "HasDoubleMoney",
 		"")
-	wire(twoxLuckCard, "2x Luck", P.LUCK_2X, GP, "Luck2x",
-		"2X Luck")
 	wire(gamepasses and gamepasses:FindFirstChild("SuperLuck"), "Super Luck", P.LUCK_SUPER, GP, "LuckSuper",
 		"3X Luck")
 	wire(gamepasses and gamepasses:FindFirstChild("MEGALuck"), "Mega Luck", P.LUCK_MEGA, GP, "LuckMega",
 		"5X Luck")
-	wire(strawberryCard, "Celestial Bull", P.STRAWBERRY_ELEPHANT, GP, "HasStrawberryElephant",
-		"Unlock the Strawberry bull")
 	wire(storeContainer:FindFirstChild("VIP"), "VIP", P.VIP, GP, "IsVIP",
 		"+50% cash, 1.5x luck, 2x votes")
 	wire(storeContainer:FindFirstChild("ServerLuck"), "Server Luck", D.SERVER_LUCK, Enum.InfoType.Product, nil,
 		"2x odds server-wide, 30 min")
+
+	-- Celestial Bull: the user's purpose-built Store card (own art + Speed +
+	-- "X Remaining!" urgency), wired to the Celestial Bull pass. Speed is pulled from
+	-- the catalog so it can't drift; the "Remaining" count is deterministic client
+	-- urgency (same for everyone, off the server clock -- like the banner Timer), not
+	-- real stock.
+	local celestialCard = storeContainer:FindFirstChild("CelestialBull")
+	if celestialCard then
+		wire(celestialCard, "Celestial Bull", P.STRAWBERRY_ELEPHANT, GP, "HasStrawberryElephant", nil)
+
+		local infoFrame = celestialCard:FindFirstChild("InfoFrame")
+		local infoLabel = infoFrame and infoFrame:FindFirstChild("Info")
+		if infoLabel and infoLabel:IsA("TextLabel") then
+			local okCat, catalog = pcall(require, bullrush:FindFirstChild("BullCatalog"))
+			local bull = okCat and typeof(catalog) == "table" and catalog.Bulls and catalog.Bulls.STRAWBERRY
+			local speed = bull and bull.speed
+			-- the InfoFrame now carries a shoe icon (SpeedIcon) as the "speed"
+			-- glyph, so the label is just the number
+			infoLabel.Text = speed and ("%d"):format(speed) or ""
+		end
+
+		local amountLabel = celestialCard:FindFirstChild("AmountLeft")
+		if amountLabel and amountLabel:IsA("TextLabel") then
+			local PERIOD = 7 * 24 * 3600
+			local ANCHOR = 1704067200 -- 2024-01-01 00:00 UTC
+			local STOCK_MAX, STOCK_MIN = 500, 7
+			task.spawn(function()
+				while amountLabel.Parent do
+					local f = ((workspace:GetServerTimeNow() - ANCHOR) % PERIOD) / PERIOD
+					local left = math.floor(STOCK_MAX - f * (STOCK_MAX - STOCK_MIN) + 0.5)
+					amountLabel.Text = ("%d Remaining!"):format(left)
+					task.wait(20)
+				end
+			end)
+		end
+	end
 end)
 
 ---------------------------------------------------------------- 5d) money packs
@@ -1476,6 +1527,21 @@ task.spawn(function()
 	local cashSection = storeContainer:FindFirstChild("Cash")
 	if not cashSection then
 		return
+	end
+	-- Pack amounts read as $5K / $1.2M rather than $5,000 (truncated one decimal,
+	-- so a value never rounds up into the next unit). Falls back to the config label.
+	local function shortCash(n)
+		n = math.floor(tonumber(n) or 0)
+		if n < 1000 then
+			return "$" .. n
+		end
+		for _, u in ipairs({ { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" } }) do
+			if n >= u[1] then
+				local s = tostring(math.floor(n / u[1] * 10) / 10):gsub("%.0$", "")
+				return "$" .. s .. u[2]
+			end
+		end
+		return "$" .. n
 	end
 	-- card slots in fill order: column1(1,2), column2(1,2), column3(1,2)
 	local slots = {}
@@ -1504,19 +1570,7 @@ task.spawn(function()
 			local info = card:FindFirstChild("Info")
 			local amount = info and info:FindFirstChild("Amount")
 			if amount and amount:IsA("TextLabel") then
-				-- The kit ships this amount as AutomaticSize.X + TextScaled inside a
-				-- 5px-wide Info frame, so it GROWS to its own text width (like the HUD
-				-- cash counter). The demo "1.5M" fit, but a longer "$75,000" grows past
-				-- the card and gets clipped. Pin Info to a real width that clips, and
-				-- flip the amount from grow-to-text to shrink-to-fit-box so every price
-				-- scales down to sit inside the card. (Widening Info also gives the coin
-				-- icon its intended size - its 0.053 scale was designed for a wide Info.)
-				info.Size = UDim2.new(0.9, 0, info.Size.Y.Scale, info.Size.Y.Offset)
-				info.ClipsDescendants = true
-				amount.AutomaticSize = Enum.AutomaticSize.None
-				amount.Size = UDim2.new(0.9, 0, 1, 0)
-				amount.TextScaled = true
-				amount.Text = pack.label
+				amount.Text = pack.amount and shortCash(pack.amount) or pack.label
 			end
 			local bb = card:FindFirstChild("BuyButtons")
 			local btn = bb and (bb:FindFirstChild("1") or bb:FindFirstChildWhichIsA("GuiButton"))
@@ -2072,6 +2126,44 @@ if boostLabel then
 	refreshBoost()
 end
 
+-- Bottom-right perk badges (SideUI.Boosts). The kit ships a VIP crown slot and a
+-- Luck clover slot (its Amount label placeholders "+150%"); we drive them off the
+-- player's live attributes: IsVIP for the crown, RollLuck (the total Epic/Legendary
+-- roll multiplier MonetizationService replicates) for the clover. The container
+-- (and each unearned slot) hides until a perk is actually active.
+local boostsFrame = SideUI:FindFirstChild("Boosts")
+if boostsFrame then
+	local vipSlot = boostsFrame:FindFirstChild("VIP")
+	local luckSlot = boostsFrame:FindFirstChild("Luck")
+	local luckAmount = luckSlot and luckSlot:FindFirstChild("Icon")
+	luckAmount = luckAmount and luckAmount:FindFirstChild("Amount")
+
+	-- "×2", "×7.5" — one decimal, trailing ".0" trimmed.
+	local function fmtLuck(m)
+		return "×" .. (string.format("%.1f", m):gsub("%.0$", ""))
+	end
+
+	local function refreshBoosts()
+		local isVip = player:GetAttribute("IsVIP") == true
+		local luck = tonumber(player:GetAttribute("RollLuck")) or 1
+		local hasLuck = luck > 1.0001
+		if vipSlot then
+			vipSlot.Visible = isVip
+		end
+		if luckSlot then
+			luckSlot.Visible = hasLuck
+		end
+		if luckAmount and hasLuck then
+			luckAmount.Text = fmtLuck(luck)
+		end
+		boostsFrame.Visible = isVip or hasLuck
+	end
+
+	player:GetAttributeChangedSignal("IsVIP"):Connect(refreshBoosts)
+	player:GetAttributeChangedSignal("RollLuck"):Connect(refreshBoosts)
+	refreshBoosts()
+end
+
 local speedLabel = counters and counters:FindFirstChild("Speed")
 speedLabel = speedLabel and speedLabel:FindFirstChild("Amount")
 if speedLabel then
@@ -2105,8 +2197,9 @@ end
 -- lobby (the WAITING/INTERMISSION state right after the teleport), then the
 -- tab auto-opens with the winner's portrait + name — or, when the herd got
 -- everyone, the wave bull itself (real BullTemplate model in a ViewportFrame)
--- standing in as the winner — your portrait + placement in the corner
--- TinyBox, plus the Money you earned, and an itemized
+-- standing in as the winner — the winner's equipped bull (real catalog model
+-- in a ViewportFrame) in the corner TinyBox — falling back to your portrait +
+-- placement on herd/bot wins — plus the Money you earned, and an itemized
 -- breakdown line; it auto-closes when the next round goes ACTIVE. The kit's XP row stays hidden until an XP system exists. The
 -- "2x Rewards?" button prompts the Config.PRODUCTS.DOUBLE_ROUND dev product;
 -- the server answers a granted receipt with an { update = true } resend.
@@ -2305,8 +2398,7 @@ if summaryMain then
 	-- player/team wins. The model resolves in the startup task.spawn below,
 	-- before any payload can arrive.
 	local bullFallbackModel
-	local equipBullsFolder -- BullrushAssets.Bulls (equipped-bull models)
-	local equipCatalog -- BullCatalog (equipped-bull lookup)
+	local bullModelsFolder -- BullrushAssets.Bulls; per-bull skins for the TinyBox render
 	local herdViewport
 	if winnerIcon then
 		herdViewport = Instance.new("ViewportFrame")
@@ -2325,31 +2417,6 @@ if summaryMain then
 		end
 		herdViewport.Visible = false
 		herdViewport.Parent = seeker
-	end
-
-	-- The corner TinyBox normally shows YOUR avatar bust; instead it renders the
-	-- bull you have EQUIPPED (real model, same ViewportFrame idiom as the
-	-- winner/herd previews). Sits in the exact ImageLabel slot; the avatar stays
-	-- behind as a fallback if the model can't be resolved. No equip -> STARTER,
-	-- which uses the default BullTemplate rig.
-	local tinyViewport
-	if tinyIcon then
-		tinyViewport = Instance.new("ViewportFrame")
-		tinyViewport.Name = "EquippedBull"
-		tinyViewport.BackgroundTransparency = 1
-		tinyViewport.AnchorPoint = tinyIcon.AnchorPoint
-		tinyViewport.Position = tinyIcon.Position
-		tinyViewport.Size = tinyIcon.Size
-		tinyViewport.ZIndex = tinyIcon.ZIndex
-		tinyViewport.Ambient = Color3.fromRGB(165, 160, 155)
-		tinyViewport.LightColor = Color3.fromRGB(255, 250, 240)
-		tinyViewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
-		local tinyRatio = tinyIcon:FindFirstChildOfClass("UIAspectRatioConstraint")
-		if tinyRatio then
-			tinyRatio:Clone().Parent = tinyViewport
-		end
-		tinyViewport.Visible = false
-		tinyViewport.Parent = tinyBox
 	end
 
 	-- (re)render the wave bull into the winner viewport; returns false when
@@ -2381,23 +2448,52 @@ if summaryMain then
 		return true
 	end
 
-	-- (re)render the LOCAL player's equipped bull into the TinyBox viewport.
-	-- Returns false (caller keeps the avatar fallback) when neither the equipped
-	-- model nor the default rig can be resolved.
-	local function renderEquippedBull()
-		if not tinyViewport then
+	-- The corner TinyBox shows the ROUND WINNER's equipped bull — the real
+	-- catalog model in a ViewportFrame (same 3/4 framing as the Index cards),
+	-- so the recap ends on "here's what the champion was riding". A ViewportFrame
+	-- sits exactly over the kit's TinyBox ImageLabel; the ImageLabel stays behind
+	-- as the fallback (herd rounds / bot winners with no model -> your portrait +
+	-- placement, the kit's original behaviour).
+	local tinyBullViewport
+	if tinyBox then
+		tinyBullViewport = Instance.new("ViewportFrame")
+		tinyBullViewport.Name = "WinnerBull"
+		tinyBullViewport.BackgroundTransparency = 1
+		if tinyIcon then
+			tinyBullViewport.AnchorPoint = tinyIcon.AnchorPoint
+			tinyBullViewport.Position = tinyIcon.Position
+			tinyBullViewport.Size = tinyIcon.Size
+			tinyBullViewport.ZIndex = tinyIcon.ZIndex
+			local ratio = tinyIcon:FindFirstChildOfClass("UIAspectRatioConstraint")
+			if ratio then
+				ratio:Clone().Parent = tinyBullViewport
+			end
+		else
+			tinyBullViewport.Size = UDim2.fromScale(1, 1)
+		end
+		tinyBullViewport.Ambient = Color3.fromRGB(165, 160, 155)
+		tinyBullViewport.LightColor = Color3.fromRGB(255, 250, 240)
+		tinyBullViewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
+		tinyBullViewport.Visible = false
+		tinyBullViewport.Parent = tinyBox
+	end
+
+	-- (re)render the winner's equipped bull into the TinyBox; returns false when
+	-- there's no bull to show (no winnerBull payload / no model) so populate()
+	-- falls back to the player's portrait + placement.
+	local function renderTinyBull(modelName)
+		if not tinyBullViewport then
 			return false
 		end
-		local bull = equipCatalog and equipCatalog.get(player:GetAttribute("EquippedBull") or "STARTER")
-		local source = (bull and bull.modelName and equipBullsFolder and equipBullsFolder:FindFirstChild(bull.modelName))
-			or bullFallbackModel
-		if not source then
-			return false
-		end
-		for _, old in ipairs(tinyViewport:GetChildren()) do
+		for _, old in ipairs(tinyBullViewport:GetChildren()) do
 			if old:IsA("Model") or old:IsA("Camera") then
 				old:Destroy()
 			end
+		end
+		local source = (modelName and bullModelsFolder and bullModelsFolder:FindFirstChild(modelName))
+			or bullFallbackModel
+		if not source then
+			return false
 		end
 		local model = source:Clone()
 		model:PivotTo(CFrame.new())
@@ -2408,9 +2504,9 @@ if summaryMain then
 		end)
 		local camera = Instance.new("Camera")
 		camera.CFrame = CFrame.lookAt(center + Vector3.new(-0.55, 0.42, -1).Unit * size.Magnitude * 0.72, center)
-		camera.Parent = tinyViewport
-		tinyViewport.CurrentCamera = camera
-		model.Parent = tinyViewport
+		camera.Parent = tinyBullViewport
+		tinyBullViewport.CurrentCamera = camera
+		model.Parent = tinyBullViewport
 		return true
 	end
 
@@ -2446,22 +2542,25 @@ if summaryMain then
 				winnerLabel.TextColor3 = defaultNameColor
 			end
 		end
-		-- When THE HERD wins nobody placed, so the whole corner box is hidden.
-		if tinyBox then
-			tinyBox.Visible = not herdWon
-		end
-		local showEquipped = not herdWon and renderEquippedBull()
-		if tinyViewport then
-			tinyViewport.Visible = showEquipped
+		-- TinyBox: the winner's equipped bull (real model) when we have one,
+		-- otherwise the kit's original your-portrait + placement.
+		local winnerBull = if typeof(data.winnerBull) == "table" then data.winnerBull else nil
+		local showTinyBull = winnerBull ~= nil and renderTinyBull(winnerBull.modelName)
+		if tinyBullViewport then
+			tinyBullViewport.Visible = showTinyBull
 		end
 		if tinyIcon then
-			-- Equipped-bull preview stands in for your avatar; only fall back to
-			-- the portrait if the model couldn't be resolved.
-			tinyIcon.Visible = not showEquipped
-			tinyIcon.Image = portrait(player.UserId)
+			tinyIcon.Visible = not showTinyBull
+			if not showTinyBull then
+				tinyIcon.Image = portrait(player.UserId)
+			end
 		end
 		if tinyText then
-			tinyText.Text = ordinal(tonumber(data.placement) or 1)
+			if showTinyBull then
+				tinyText.Text = winnerBull.name or "Bull"
+			else
+				tinyText.Text = ordinal(tonumber(data.placement) or 1)
+			end
 		end
 		if coinsAmount then
 			coinsAmount.Text = "+" .. comma(tonumber(data.total) or 0)
@@ -2488,7 +2587,7 @@ if summaryMain then
 				MarketplaceService:PromptProductPurchase(player, productId)
 			end)
 			if not ok then
-				pushNotif("Purchases aren't available right now", "red", 3)
+				pushNotif("Store not available", "red", 3)
 			end
 		end)
 	end
@@ -2508,11 +2607,7 @@ if summaryMain then
 		end
 		local bullAssets = ReplicatedStorage:FindFirstChild("BullrushAssets")
 		bullFallbackModel = bullAssets and bullAssets:FindFirstChild("BullTemplate")
-		equipBullsFolder = bullAssets and bullAssets:FindFirstChild("Bulls")
-		local okCat, cat = pcall(require, bullrush:WaitForChild("BullCatalog", 15))
-		if okCat and typeof(cat) == "table" then
-			equipCatalog = cat
-		end
+		bullModelsFolder = bullAssets and bullAssets:FindFirstChild("Bulls")
 
 		-- The payload lands while the winner banner is still up and the player
 		-- is standing in the arena; hold it until the post-round state change
@@ -2895,18 +2990,18 @@ do
 			local reward = typeof(data.reward) == "table" and data.reward or {}
 			if reward.kind == "bull" then
 				if data.isNew then
-					pushNotif(("You won %s — a new bull!"):format(tostring(reward.label)), "green", 5)
+					pushNotif(("New bull: %s!"):format(tostring(reward.label)), "green", 5)
 				else
-					pushNotif(("Duplicate %s — +%s Money"):format(
+					pushNotif(("%s again — +%s Money"):format(
 						tostring(reward.label), comma(tonumber(data.consolation) or 0)), "green", 5)
 				end
 			elseif reward.kind == "box" then
 				-- the lucky block: the slice label is the box, data.bullName is what dropped
 				local won = tostring(data.bullName or data.bullId)
 				if data.isNew then
-					pushNotif(("%s opened — %s, a new bull!"):format(tostring(reward.label), won), "green", 5)
+					pushNotif(("%s — new bull %s!"):format(tostring(reward.label), won), "green", 5)
 				else
-					pushNotif(("%s opened — %s (duplicate), +%s Money"):format(
+					pushNotif(("%s — %s dupe, +%s Money"):format(
 						tostring(reward.label), won, comma(tonumber(data.refund) or 0)), "green", 5)
 				end
 			elseif reward.kind == "spin" then
@@ -2998,7 +3093,7 @@ do
 				return
 			end
 			if (tonumber(player:GetAttribute("Spins")) or 0) < 1 then
-				pushNotif("No spins left — buy more or wait for your free one", "red", 3)
+				pushNotif("Out of spins!", "red", 3)
 				return
 			end
 			spinning = true -- optimistic; cleared by the ack (or the deny)
@@ -3020,7 +3115,7 @@ do
 					MarketplaceService:PromptProductPurchase(player, productId)
 				end)
 				if not ok then
-					pushNotif("Purchases aren't available right now", "red", 3)
+					pushNotif("Store not available", "red", 3)
 				end
 			end)
 		end
@@ -3086,7 +3181,7 @@ do
 					if data.reason == "NO_SPINS" then
 						pushNotif("No spins left", "red", 3)
 					elseif data.reason == "DATA_NOT_LOADED" then
-						pushNotif("Your data hasn't loaded — try again soon", "red", 3)
+						pushNotif("Still loading — try again", "red", 3)
 					end
 				end
 			end)
@@ -3303,6 +3398,7 @@ do
 	local ackRemote = nil
 	local rollRemote = nil        -- nil until acks wired = buttons stay inert
 	local BOXES = nil             -- Config.BULLS.BOXES once Config resolves
+	local rarityGradient = nil    -- Config.rarityGradient(col) -> shared rarity text ramp
 	local lastBoxId = nil         -- box behind the current reveal (ROLL AGAIN re-buys it)
 	local productIds = { BULL_ROLL = 0, BULL_ROLL_10 = 0 }
 	local modelsFolder = nil      -- ReplicatedStorage.BullrushAssets.Bulls (tier skins)
@@ -3874,9 +3970,9 @@ do
 		if #results <= 1 then
 			local r = results[1] or headline
 			if r.isNew then
-				pushNotif(("You rolled %s — a new bull!%s"):format(hname, mutSuffix(r)), "green", 5)
+				pushNotif(("New bull: %s!%s"):format(hname, mutSuffix(r)), "green", 5)
 			else
-				pushNotif(("Duplicate %s — +%s Money%s"):format(hname, comma(r.refund or 0), mutSuffix(r)), "green", 4)
+				pushNotif(("%s again — +%s Money%s"):format(hname, comma(r.refund or 0), mutSuffix(r)), "green", 4)
 			end
 		else
 			local newCount = 0
@@ -3885,7 +3981,7 @@ do
 					newCount += 1
 				end
 			end
-			pushNotif(("10x roll: %d new — headline %s!%s"):format(newCount, hname, mutSuffix(headline)), "green", 5)
+			pushNotif(("10x roll: %d new! Best: %s%s"):format(newCount, hname, mutSuffix(headline)), "green", 5)
 		end
 	end
 
@@ -4023,7 +4119,7 @@ do
 			MarketplaceService:PromptProductPurchase(player, pid)
 		end)
 		if not ok then
-			pushNotif("Purchases aren't available right now", "red", 3)
+			pushNotif("Store not available", "red", 3)
 		end
 	end)
 
@@ -4056,34 +4152,95 @@ do
 		})
 	end
 
-	-- "64%  25%  9%  1.8%  0.2%" with each figure tinted its rarity color,
-	-- plus the box's mutation odds as a trailing "MUT 8%" when it has any
-	local function oddsLine(weights, mutationChance)
+	-- Odds row: one label per rarity figure ("64%", "25%", ...), each carrying
+	-- the shared rarity gradient (Config.rarityGradient) so the numbers read like the
+	-- rarity labels everywhere else. Per-figure gradients need per-figure labels -- a
+	-- single RichText label can only take one gradient across the whole string. (The
+	-- mutation odds that used to trail the row as "MUT 8%" have been dropped.)
+	local TextService = game:GetService("TextService")
+	local function buildOdds(container, weights)
+		-- Odds row in the kit Power.Power slot (original spot, where the kit's
+		-- "67,420" power figure sat). Each figure is its OWN text box sized to its
+		-- true glyph width via a UIAspectRatioConstraint (DominantAxis=Height), so
+		-- TextScaled is always HEIGHT-bound: every figure renders at the same full
+		-- row-height size, packed left on the row baseline with even gaps -- never
+		-- the tiny width-bound numbers the old evenly-spread slots produced.
+		container.Visible = true
+		container.RichText = false
+		container.Text = ""
+		container.AutomaticSize = Enum.AutomaticSize.None
+		container.ClipsDescendants = false
+		container.AnchorPoint = Vector2.new(0, 1)
+		container.Position = UDim2.new(0.01, 0, 1, 0)
+		container.Size = UDim2.new(0.4, 0, 0.7, 0) -- 0.7 of the Power row height
+		local strip = container.Parent and container.Parent:FindFirstChild("OddsStrip")
+		if strip then
+			strip:Destroy()
+		end
+		for _, c in ipairs(container:GetChildren()) do
+			if c.Name == "OddsFig" or c:IsA("UIListLayout") then
+				c:Destroy()
+			end
+		end
+		local order = {}
 		local total = 0
-		for _, r in ipairs(RARITY_ORDER) do
-			total += math.max(tonumber(weights[r]) or 0, 0)
-		end
-		if total <= 0 then
-			return ""
-		end
-		local parts = {}
-		local function pctFigure(pct)
-			-- one decimal, trailing ".0" stripped (float dust otherwise turns
-			-- a clean 7 into "7.0%")
-			return (("%.1f%%"):format(pct):gsub("%.0%%", "%%"))
-		end
 		for _, r in ipairs(RARITY_ORDER) do
 			local w = math.max(tonumber(weights[r]) or 0, 0)
 			if w > 0 then
-				table.insert(parts, ('<font color="%s">%s</font>'):format(
-					colorHex(rarityColor(r)), pctFigure(w / total * 100)))
+				total += w
+				table.insert(order, { r = r, w = w })
 			end
 		end
-		local mutPct = (tonumber(mutationChance) or 0) * 100
-		if mutPct > 0 then
-			table.insert(parts, ('<font color="#C89CFF">MUT %s</font>'):format(pctFigure(mutPct)))
+		if total <= 0 or #order == 0 then
+			return
 		end
-		return table.concat(parts, "  ")
+		local function pctFigure(pct)
+			-- one decimal, trailing ".0" stripped (float dust otherwise turns a clean 7 into "7.0%")
+			return (("%.1f%%"):format(pct):gsub("%.0%%", "%%"))
+		end
+		local layout = Instance.new("UIListLayout")
+		layout.FillDirection = Enum.FillDirection.Horizontal
+		layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+		layout.VerticalAlignment = Enum.VerticalAlignment.Center
+		layout.SortOrder = Enum.SortOrder.LayoutOrder
+		layout.Padding = UDim.new(0.018, 0)
+		layout.Parent = container
+		for i, entry in ipairs(order) do
+			local fig = Instance.new("TextLabel")
+			fig.Name = "OddsFig"
+			fig.LayoutOrder = i
+			fig.BackgroundTransparency = 1
+			fig.Size = UDim2.new(0, 0, 1, 0) -- width comes from the aspect constraint
+			fig.Font = container.Font
+			fig.TextScaled = true
+			fig.TextColor3 = PAPER
+			fig.Text = pctFigure(entry.w / total * 100)
+			fig.ZIndex = container.ZIndex
+			-- measure the real text aspect so the box hugs the glyphs (hair of slack
+			-- so TextScaled never flips to width-bound)
+			local aspect = #fig.Text * 0.62
+			pcall(function()
+				local bounds = TextService:GetTextSize(fig.Text, 100, fig.Font, Vector2.new(4000, 200))
+				aspect = bounds.X / 100
+			end)
+			local arc = Instance.new("UIAspectRatioConstraint")
+			arc.AspectRatio = math.max(aspect, 0.5) * 1.04
+			-- ScaleWithParentSize + Height: width = ratio x row height (the default
+			-- FitWithinMaxSize treats the label's zero width as a max -> collapses to 0x0)
+			arc.AspectType = Enum.AspectType.ScaleWithParentSize
+			arc.DominantAxis = Enum.DominantAxis.Height
+			arc.Parent = fig
+			local grad = Instance.new("UIGradient")
+			grad.Rotation = 90
+			grad.Color = (rarityGradient and rarityGradient(rarityColor(entry.r)))
+				or ColorSequence.new(rarityColor(entry.r))
+			grad.Parent = fig
+			local stroke = Instance.new("UIStroke")
+			stroke.Thickness = 2
+			stroke.Color = INK
+			stroke.Parent = fig
+			fig.Parent = container
+		end
 	end
 
 	local function buildBoxShop()
@@ -4219,8 +4376,7 @@ do
 				if pIcon and pIcon:IsA("GuiObject") then
 					pIcon.Visible = false
 				end
-				powerLabel.RichText = true
-				powerLabel.Text = oddsLine(box.weights or {}, box.mutationChance)
+				buildOdds(powerLabel, box.weights or {})
 			end
 
 			-- buy button: the kit's money button retexted to the box cost; the
@@ -4293,6 +4449,7 @@ do
 		if okConfig and typeof(config) == "table" then
 			if typeof(config.BULLS) == "table" and typeof(config.BULLS.BOXES) == "table" then
 				BOXES = config.BULLS.BOXES
+				rarityGradient = config.rarityGradient -- shared gradient for the odds figures
 				-- ROLL AGAIN targets the cheapest box until a purchase overrides it
 				local bestCost
 				for id, box in BOXES do
@@ -4327,10 +4484,10 @@ do
 				setRolling(false)
 				if data.reason == "NO_MONEY" then
 					local cost = tonumber(data.cost)
-					pushNotif(cost and ("Not enough Money — that box costs $%s"):format(comma(cost))
+					pushNotif(cost and ("Need $%s for this box"):format(comma(cost))
 						or "Not enough Money for that box", "red", 3)
 				elseif data.reason == "DATA_NOT_LOADED" then
-					pushNotif("Your data hasn't loaded — try again soon", "red", 3)
+					pushNotif("Still loading — try again", "red", 3)
 				elseif data.reason == "BAD_BOX" then
 					pushNotif("That box isn't available", "red", 3)
 				elseif data.reason == "NOT_OWNED" or data.reason == "BAD_ID" then
@@ -5052,6 +5209,23 @@ do
 				end
 			end
 
+			-- "Skip All" header button: pays Robux (DAILY_CLAIM_ALL dev product)
+			-- to bank the whole 7-day loop at once, skipping every cooldown. The
+			-- server's receipt handler runs grantClaimAll and echoes CLAIMED_ALL
+			-- back through DailyAck (handled below).
+			do
+				local buttons = header and header:FindFirstChild("Buttons")
+				local skipAll = buttons and buttons:FindFirstChild("SkipAll")
+				local claimAllId = typeof(Config.PRODUCTS) == "table" and Config.PRODUCTS.DAILY_CLAIM_ALL
+				if skipAll and skipAll:IsA("GuiButton") and claimAllId then
+					skipAll.Activated:Connect(function()
+						MarketplaceService:PromptProductPurchase(player, claimAllId)
+					end)
+				elseif skipAll then
+					warn("[Main] Daily SkipAll button present but DAILY_CLAIM_ALL product id missing")
+				end
+			end
+
 			-- reward feedback (the attribute changes re-render the track)
 			ackRemote.OnClientEvent:Connect(function(kind, data)
 				if kind == "CLAIMED" and typeof(data) == "table" then
@@ -5079,11 +5253,19 @@ do
 					end
 					renderAll()
 					refreshTimer()
+				elseif kind == "CLAIMED_ALL" and typeof(data) == "table" then
+					-- the Robux "Skip All" purchase banked the whole loop at once
+					if pushNotif then
+						local n = typeof(data.rewards) == "table" and #data.rewards or 0
+						pushNotif(("Claimed all %d daily rewards!"):format(n), "green", 5)
+					end
+					renderAll()
+					refreshTimer()
 				elseif kind == "DENIED" and typeof(data) == "table" and pushNotif then
 					if data.reason == "COOLDOWN" then
-						pushNotif("Your daily reward isn't ready yet!", "red", 4)
+						pushNotif("Reward not ready yet!", "red", 4)
 					elseif data.reason == "DATA_NOT_LOADED" then
-						pushNotif("Your data is still loading — try again in a moment.", "red", 4)
+						pushNotif("Still loading — try again", "red", 4)
 					end
 				end
 			end)
@@ -6122,7 +6304,7 @@ do
 				local opts
 				pcall(function()
 					opts = Instance.new("ExperienceInviteOptions")
-					opts.PromptMessage = "Rally your friends for the stampede!"
+					opts.PromptMessage = "Rally your friends!"
 				end)
 				if pcall(function()
 					SocialService:PromptGameInvite(player, opts)
@@ -6131,7 +6313,7 @@ do
 				end
 			end
 			if pushNotif then
-				pushNotif("Sign-ups aren't available right now", "red", 3)
+				pushNotif("Sign-ups not available", "red", 3)
 			end
 		end
 
@@ -6150,7 +6332,7 @@ do
 						current.UserRsvpStatus = newStatus
 						render(current)
 						if newStatus == Enum.RsvpStatus.Going and pushNotif then
-							pushNotif("You're signed up! We'll notify you before it starts.", "green", 4)
+							pushNotif("You're signed up! 🎉", "green", 4)
 						end
 					else
 						doInvite() -- prompt unavailable (Studio/unpublished) -> invite

@@ -500,7 +500,7 @@ local function startBoundsWatcher(): () -> ()
 					else
 						if not outSince[player] then
 							outSince[player] = os.clock()
-							NotifyService.send(player, "OUT OF BOUNDS — GET BACK ON THE GRID!", "red", Config.SHRINK.GRACE + 1)
+							NotifyService.send(player, "GET BACK ON THE GRID!", "red", Config.SHRINK.GRACE + 1)
 						end
 						if os.clock() - outSince[player] > Config.SHRINK.GRACE then
 							outSince[player] = nil
@@ -772,6 +772,9 @@ while true do
 					winnerName = featured.Name,
 					winnerUserId = if typeof(featured) == "Instance" then featured.UserId else nil,
 					teamColor = winTeam,
+					-- champion's mount for the Summary TinyBox (getEquippedBull
+					-- falls back to STARTER for bots/stub survivors)
+					winnerBull = BullRollService.getEquippedBull(featured),
 				}
 				setRoundState("WINNER", {
 					winnerName = featured.Name,
@@ -802,6 +805,8 @@ while true do
 				-- bot winners are plain tables with no UserId; the client
 				-- falls back to the placeholder portrait
 				winnerUserId = if typeof(winner) == "Instance" then winner.UserId else nil,
+				-- champion's mount for the Summary TinyBox
+				winnerBull = BullRollService.getEquippedBull(winner),
 			}
 			setRoundState("WINNER", { winnerName = winner.Name, modeName = mode.name })
 			NotifyService.broadcast((winner.Name .. " WINS THE STAMPEDE"):upper(), "green", 5)

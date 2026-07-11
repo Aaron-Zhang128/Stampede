@@ -48,8 +48,8 @@ local function activatePair(a: Player, b: Player, key: string)
 	setCount(a, (friendCount[a] or 0) + 1)
 	setCount(b, (friendCount[b] or 0) + 1)
 	local bump = math.floor(PER_FRIEND * 100 + 0.5)
-	NotifyService.send(a, ("Friend boost! +%d%% money while %s is here"):format(bump, b.DisplayName), "green")
-	NotifyService.send(b, ("Friend boost! +%d%% money while %s is here"):format(bump, a.DisplayName), "green")
+	NotifyService.send(a, ("Friend boost! +%d%% money with %s"):format(bump, b.DisplayName), "green")
+	NotifyService.send(b, ("Friend boost! +%d%% money with %s"):format(bump, a.DisplayName), "green")
 end
 
 local function onJoin(player: Player)

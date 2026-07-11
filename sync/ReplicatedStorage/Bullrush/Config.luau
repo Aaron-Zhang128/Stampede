@@ -301,7 +301,7 @@ Config.PUSH = {
 -- eligibility and team splits, but never touch saved player data. Rounds
 -- still need at least one real player to start. TURN OFF BEFORE PUBLISHING.
 Config.AI_PLAYERS = {
-	ENABLED = true,
+	ENABLED = false,
 	COUNT = 5,
 	DODGE_CHANCE = 0.8,            -- odds a bot reacts to a telegraph at all
 	REACTION_TIME = { 0.25, 0.9 }, -- delay before a reacting bot starts moving
@@ -420,5 +420,20 @@ Config.EVENTS_BOARD = {
 	CTA = "INVITE FRIENDS",               -- fallback button label
 	REFRESH_SECONDS = 120,                -- how often to re-fetch the event list
 }
+
+-- Shared rarity/tier text gradient: a lit top edge -> saturated middle -> shaded
+-- baseline, built from any rarity's base colour so every rarity label matches.
+-- Assign the result to a UIGradient's .Color (use Rotation 90 for top -> bottom).
+do
+	local PAPER = Color3.fromRGB(255, 255, 255)
+	local INK = Color3.fromRGB(15, 15, 15)
+	function Config.rarityGradient(col)
+		return ColorSequence.new({
+			ColorSequenceKeypoint.new(0, col:Lerp(PAPER, 0.55)),
+			ColorSequenceKeypoint.new(0.45, col),
+			ColorSequenceKeypoint.new(1, col:Lerp(INK, 0.5)),
+		})
+	end
+end
 
 return Config

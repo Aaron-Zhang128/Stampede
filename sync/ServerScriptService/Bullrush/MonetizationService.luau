@@ -220,7 +220,7 @@ local PASS_BENEFITS: { [string]: { moneyBonus: number?, luck: number?, luckMult:
 				if ok and bulls then
 					player:SetAttribute("Bulls", HttpService:JSONEncode(bulls)) -- client inventory refresh
 				end
-				NotifyService.send(player, "You own the Celestial Bull! Equip it in your bull index.", "green", 6)
+				NotifyService.send(player, "Celestial Bull unlocked! Equip it in your Index.", "green", 6)
 			end)
 		end,
 	},
@@ -253,6 +253,8 @@ local function applyBenefits(player: Player)
 			end
 		end
 	end
+	-- Replicate the total roll-luck multiplier for the HUD boost badge (SideUI.Boosts).
+	player:SetAttribute("RollLuck", MonetizationService.getLuckMultiplier(player))
 end
 
 -- One web query per configured pass on join; unpublished passes (id 0) resolve
@@ -325,8 +327,17 @@ local function serverLuckMultiplier(): number
 	return serverLuckActive() and Config.LUCK.SERVER.multiplier or 1
 end
 
+-- Re-publish every player's RollLuck (their HUD boost badge reads this). Called
+-- whenever the server-wide luck changes, since that factor multiplies everyone.
+local function refreshAllLuck()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		plr:SetAttribute("RollLuck", MonetizationService.getLuckMultiplier(plr))
+	end
+end
+
 local function replicateServerLuck()
 	BullrushFolder:SetAttribute("ServerLuckUntil", serverLuckUntil)
+	refreshAllLuck()
 end
 
 -- Total Epic/Legendary luck for this player: the HIGHEST owned luck TIER (tiers
@@ -396,7 +407,7 @@ local function onPassPurchased(player: Player, purchasedId: number, wasPurchased
 			end
 			bag[passKey] = true
 			applyBenefits(player)
-			NotifyService.send(player, "Purchase complete - thanks for the support!", "green", 5)
+			NotifyService.send(player, "Thanks for your purchase!", "green", 5)
 			return
 		end
 	end
@@ -425,6 +436,9 @@ function MonetizationService.init()
 		local now = os.time()
 		serverLuckUntil = math.max(serverLuckUntil, now) + Config.LUCK.SERVER.duration
 		replicateServerLuck()
+		-- Drop everyone's RollLuck back down once the boost lapses (harmless if a
+		-- later re-buy already extended it — refreshAllLuck just recomputes).
+		task.delay(serverLuckUntil - now, refreshAllLuck)
 		local mins = math.floor(Config.LUCK.SERVER.duration / 60)
 		local who = if player then player.DisplayName else "Someone"
 		NotifyService.broadcast(

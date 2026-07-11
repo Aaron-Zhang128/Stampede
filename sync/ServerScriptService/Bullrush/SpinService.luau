@@ -117,7 +117,7 @@ local function accrueFreeSpin(player)
 		DataHandler.SetStat(player, "LastFreeSpin", os.time())
 		refreshAttributes(player)
 		if typeof(player) == "Instance" then
-			NotifyService.send(player, "Your free wheel spin is ready!", "green", 4)
+			NotifyService.send(player, "Free spin ready!", "green", 4)
 		end
 	end
 end
@@ -138,7 +138,7 @@ local function accrueVipSpin(player)
 		DataHandler.SetStat(player, "Spins", (DataHandler.GetStat(player, "Spins") or 0) + 1)
 		DataHandler.SetStat(player, "LastVipSpin", os.time())
 		refreshAttributes(player)
-		NotifyService.send(player, "Your VIP daily wheel spin is ready!", "green", 4)
+		NotifyService.send(player, "VIP spin ready!", "green", 4)
 	end
 end
 

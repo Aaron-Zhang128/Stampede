@@ -167,7 +167,8 @@ function EconomyService.noteRevenge(player: Player, paid: number)
 end
 
 -- Pays every ledger and mails each participant their Summary-tab payload.
--- winnerInfo: { winnerName: string?, winnerUserId: number?, teamColor: ("RED"|"BLUE")? }
+-- winnerInfo: { winnerName: string?, winnerUserId: number?, teamColor: ("RED"|"BLUE")?,
+--   winnerBull: BullRollService.EquippedBull? -- champion's mount for the Summary TinyBox }
 function EconomyService.settle(winnerInfo: { [string]: any })
 	if not active then
 		return
@@ -218,6 +219,7 @@ function EconomyService.settle(winnerInfo: { [string]: any })
 				winnerName = winnerInfo.winnerName,
 				winnerUserId = winnerInfo.winnerUserId,
 				teamColor = winnerInfo.teamColor,
+				winnerBull = winnerInfo.winnerBull, -- champion's equipped bull for the TinyBox
 				placement = entry.placement,
 				survivalSeconds = math.floor(entry.survivalSeconds + 0.5),
 				lines = lines,

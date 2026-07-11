@@ -142,7 +142,7 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 	local laneMax = if axis == "row" then bounds.rowMax else bounds.colMax
 	if index < laneMin or index > laneMax then
 		-- a shrink can trim the lane between the client's selection and the send
-		NotifyService.send(thrower, "That lane is gone — the arena shrank!", "red")
+		NotifyService.send(thrower, "That lane is gone!", "red")
 		ack(thrower, "DENIED", { reason = "BOUNDS" })
 		return
 	end
