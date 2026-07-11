@@ -2,8 +2,8 @@
 	GridUtil - pure math for the Bullrush shrinking grid. No Workspace
 	access; safe to require from both server and client.
 
-	The PHYSICAL grid is 9x9 (Config.GRID_SIZE). Each round plays inside a
-	centered square WINDOW of it (the mode's startSize: 9, 7, or 5), which
+	The PHYSICAL grid is 11x11 (Config.GRID_SIZE). Each round plays inside a
+	centered square WINDOW of it (the mode's startSize: 11, 9, or 7), which
 	then shrinks stage by stage. See boundsForStage.
 
 	A "lane" is a plain table: { axis = "row" | "col", index = 1..GRID_SIZE, direction = 1 | -1 }
@@ -24,7 +24,7 @@
 	- RoundState:FireAllClients(state: string, info: table)
 	  states: "WAITING" | "INTERMISSION" | "ACTIVE" | "WINNER" | "ROUNDOVER"
 	  info may contain: timeLeft, aliveCount, wave, winnerName,
-	  gridSize (active window side length, 3..9),
+	  gridSize (active window side length, 3..11),
 	  bounds (current active window, ACTIVE updates only),
 	  modeName / modeId (current round's mode, see Config.MODES),
 	  teamCounts ({ RED = n, BLUE = n }, Team Rush ACTIVE updates only),
@@ -75,7 +75,7 @@ local GridUtil = {}
 local ORIGIN = Config.ARENA_ORIGIN
 local TILE_SIZE = Config.TILE_SIZE
 local GRID_SIZE = Config.GRID_SIZE
-local CENTER_INDEX = (GRID_SIZE + 1) / 2 -- 5 for a 9x9 grid
+local CENTER_INDEX = (GRID_SIZE + 1) / 2 -- 6 for an 11x11 grid
 
 export type Lane = { axis: string, index: number, direction: number }
 export type Bounds = { rowMin: number, rowMax: number, colMin: number, colMax: number }
@@ -105,9 +105,9 @@ end
 -- side length of the stage-0 window, centered in the physical grid (both
 -- must be odd so the offset is an integer). Each subsequent stage peels one
 -- full OUTER RING: all four bounds move in by 1, so the window stays
--- centered and its side length drops by 2, e.g. startSize 7 in the 9x9 grid:
---   stage 0 = { 2, 8, 2, 8 } (7x7), stage 1 = { 3, 7, 3, 7 } (5x5),
---   stage 2 = { 4, 6, 4, 6 } (3x3)
+-- centered and its side length drops by 2, e.g. startSize 9 in the 11x11 grid:
+--   stage 0 = { 2, 10, 2, 10 } (9x9), stage 1 = { 3, 9, 3, 9 } (7x7),
+--   stage 2 = { 4, 8, 4, 8 } (5x5)
 function GridUtil.boundsForStage(stage: number, startSize: number?): Bounds
 	local size = startSize or GRID_SIZE
 	local offset = math.floor((GRID_SIZE - size) / 2)

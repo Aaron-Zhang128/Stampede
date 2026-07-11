@@ -196,6 +196,8 @@ if counters then
 	end)
 end
 
+-- Deal-pack buttons (Starter/PRO) are retired from the HUD; the push button
+-- takes their right-edge spot. Wiring stays in case they come back.
 local right = SideUI:FindFirstChild("Right")
 local rightButtons = right and right:FindFirstChild("Buttons")
 if rightButtons then
@@ -205,6 +207,9 @@ if rightButtons then
 	wire(rightButtons:FindFirstChild("Deal2"), function()
 		openStoreAt("PROPack")
 	end)
+end
+if right then
+	right.Visible = false
 end
 
 local quickButtons = Store:FindFirstChild("QuickButtons")
@@ -354,9 +359,9 @@ end
 
 ---------------------------------------------------------------- 2c) HUD push button
 -- Combat shove button. Cloned from the Index side button (so it inherits the
--- HUD kit look) and dropped on the right edge, below the deal-pack buttons and
--- clear of every other element. Its icon is swapped to a boxing glove and the
--- decorative ring recolored green.
+-- HUD kit look) and dropped on the right edge, in the spot the (now hidden)
+-- deal-pack buttons used to hold. Its icon is swapped to a boxing glove and
+-- the decorative ring recolored green.
 --
 -- All the gameplay — targeting the NEAREST player, the red target aura, F /
 -- gamepad input, cooldown timing — lives in StarterPlayerScripts.PushClient;
@@ -369,10 +374,7 @@ end
 --        CooldownDuration -> the drain sweep's length
 --        ReadyAt          -> os.clock() the cooldown lapses; drives the sweep
 do
-	-- PLACEHOLDER art: paste your boxing-glove image id here. For now this is
-	-- the Index button's own book icon (a guaranteed-loadable in-game image) so
-	-- the center isn't blank while you find the real glove.
-	local GLOVE_IMAGE = "rbxassetid://138787751104353"
+	local GLOVE_IMAGE = "rbxassetid://125148837464247"
 	local RING_GREEN = Color3.fromRGB(85, 255, 127) -- same green as the self-aura
 
 	-- The HUD ships in a few layout variants (Lef1 / Left2 / Left3); grab the
@@ -391,7 +393,7 @@ do
 		holder.Name = "PushButton"
 		holder.BackgroundTransparency = 1
 		holder.AnchorPoint = Vector2.new(1, 0.5)
-		holder.Position = UDim2.fromScale(0.985, 0.72)
+		holder.Position = UDim2.fromScale(0.985, 0.5)
 		-- Both axes scaled: a zero-width Size collapses to 0x0 under the aspect
 		-- constraint. The constraint then squares it off the height.
 		holder.Size = UDim2.fromScale(0.11, 0.11)
@@ -429,12 +431,13 @@ do
 			nameLabel.Text = "PUSH"
 		end
 
-		-- Compact keybind badge that pops out past the button's top-left edge,
-		-- keyed to the player's current input device (F on keyboard, TAP on
-		-- touch, Y on gamepad) and updated live so switching device relabels it.
-		-- Rides along with the button (child of btn), so it shows/hides with it.
-		-- Overhangs the TOP edge biased left (the button hugs the right screen
-		-- edge, so popping it up-and-in keeps the whole badge on-screen).
+		-- Compact keybind badge straddling the button's TOP-RIGHT CORNER (half
+		-- in, half out, like a notification pip), keyed to the player's current
+		-- input device (F on keyboard, TAP on touch, Y on gamepad) and updated
+		-- live so switching device relabels it. Rides along with the button
+		-- (child of btn), so it shows/hides with it. Its center is biased just
+		-- inside the corner so the outward overhang stays within the button's
+		-- 1.5%-of-screen right margin.
 		local UserInputService = game:GetService("UserInputService")
 
 		local function activationHint(): string
@@ -451,31 +454,43 @@ do
 
 		local hintLabel = Instance.new("TextLabel")
 		hintLabel.Name = "PushHint"
-		hintLabel.AnchorPoint = Vector2.new(1, 0)
-		hintLabel.Position = UDim2.fromScale(0.80, -0.22) -- popped out above the top edge, biased top-left
-		hintLabel.Size = UDim2.fromScale(0.46, 0.30)
-		hintLabel.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
-		hintLabel.BackgroundTransparency = 0.2
-		hintLabel.Font = Enum.Font.GothamBold
+		hintLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+		hintLabel.Position = UDim2.fromScale(1, 0) -- centered right on the tip of the top-right corner
+		hintLabel.Size = UDim2.fromScale(0.56, 0.42)
+		hintLabel.BackgroundTransparency = 1 -- no pill: just the glyph, kept crisp by its outline
+		hintLabel.Font = Enum.Font.GothamBlack
 		hintLabel.TextScaled = true
 		hintLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 		hintLabel.TextXAlignment = Enum.TextXAlignment.Center
 		hintLabel.Text = activationHint()
 		hintLabel.ZIndex = 21 -- above the cooldown curtain
 		hintLabel.Parent = btn
+		-- Minimal padding now that there's no fill — just enough that the glyph's
+		-- outline doesn't clip the frame edge.
 		local hintPad = Instance.new("UIPadding")
-		hintPad.PaddingTop = UDim.new(0.06, 0)
-		hintPad.PaddingBottom = UDim.new(0.06, 0)
-		hintPad.PaddingLeft = UDim.new(0.12, 0)
-		hintPad.PaddingRight = UDim.new(0.12, 0)
+		hintPad.PaddingTop = UDim.new(0.04, 0)
+		hintPad.PaddingBottom = UDim.new(0.04, 0)
+		hintPad.PaddingLeft = UDim.new(0.04, 0)
+		hintPad.PaddingRight = UDim.new(0.04, 0)
 		hintPad.Parent = hintLabel
 		local hintCorner = Instance.new("UICorner")
-		hintCorner.CornerRadius = UDim.new(0.3, 0)
+		hintCorner.CornerRadius = UDim.new(0.35, 0)
 		hintCorner.Parent = hintLabel
-		local hintStroke = Instance.new("UIStroke")
-		hintStroke.Color = Color3.fromRGB(0, 0, 0)
-		hintStroke.Thickness = 2
-		hintStroke.Parent = hintLabel
+		-- A Contextual black outline hugs the glyph so the letter stays crisp
+		-- now that there's no fill behind it.
+		local hintTextStroke = Instance.new("UIStroke")
+		hintTextStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+		hintTextStroke.Color = Color3.fromRGB(0, 0, 0)
+		hintTextStroke.Thickness = 2
+		hintTextStroke.Parent = hintLabel
+		-- Soft top-lit sheen on the glyph so it doesn't read as flat.
+		local hintGradient = Instance.new("UIGradient")
+		hintGradient.Rotation = 90
+		hintGradient.Color = ColorSequence.new(
+			Color3.fromRGB(255, 255, 255),
+			Color3.fromRGB(170, 170, 170)
+		)
+		hintGradient.Parent = hintLabel
 		UserInputService.LastInputTypeChanged:Connect(function()
 			hintLabel.Text = activationHint()
 		end)
@@ -623,6 +638,94 @@ do
 	if container then
 		wireVolumeSlider(container:FindFirstChild("Slider1"), SoundService:FindFirstChild("BackgroundMusic"))
 		wireVolumeSlider(container:FindFirstChild("Slider2"), SoundService:FindFirstChild("GameSFX"))
+	end
+
+	-- AFK toggle: opt out of the NEXT round. Row is a clone of a volume-slider row
+	-- (keeps the kit card chrome + left "AFK Mode" label); the Slider is swapped for
+	-- a clone of the bull-cam Button1 (SideUI.Left3), which already ships On/Off
+	-- UIGradient states — ON = green, and we RETINT its grey "Off" gradients to red
+	-- so the button flips green<->red. Toggling fires Remotes.SetAFK; the server
+	-- keeps the truth in the replicated "AFK" attribute, which drives the button.
+	local templateRow = container and container:FindFirstChild("Slider1")
+	local btnTemplate = SideUI:FindFirstChild("Left3")
+	btnTemplate = btnTemplate and btnTemplate:FindFirstChild("Buttons")
+	btnTemplate = btnTemplate and btnTemplate:FindFirstChild("Other")
+	btnTemplate = btnTemplate and btnTemplate:FindFirstChild("Button1")
+	if templateRow and btnTemplate then
+		local row = templateRow:Clone()
+		row.Name = "AFKToggle"
+		row.LayoutOrder = 3
+		local label = row:FindFirstChild("Name")
+		if label then
+			label.Text = "AFK Mode"
+		end
+
+		-- swap the volume Slider for the toggle button, in the same right-hand slot
+		local oldSlider = row:FindFirstChild("Slider")
+		local slotPos = oldSlider and oldSlider.Position or UDim2.new(0.958, 0, 0.5, 0)
+		if oldSlider then
+			oldSlider:Destroy()
+		end
+
+		local btn = btnTemplate:Clone()
+		btn.Name = "Toggle"
+		btn.Visible = true -- the live Button1 starts hidden; the clone must show
+		btn.AnchorPoint = Vector2.new(1, 0.5) -- pin to the row's right edge
+		btn.Position = slotPos
+		btn.Size = UDim2.new(0.27, 0, 0.66, 0)
+
+		-- the shipped "Off" gradients are grey; retint them to a red ramp that
+		-- mirrors the green "On" ramp (light top -> deep bottom) so OFF reads red
+		local RED_OFF = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 120, 104)),
+			ColorSequenceKeypoint.new(0.1, Color3.fromRGB(255, 120, 104)),
+			ColorSequenceKeypoint.new(0.9, Color3.fromRGB(216, 12, 12)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(204, 8, 8)),
+		})
+		for _, d in ipairs(btn:GetDescendants()) do
+			if d:IsA("UIGradient") and d.Name == "Off" then
+				d.Color = RED_OFF
+			end
+		end
+		btn.Parent = row
+		row.Parent = container
+
+		-- ON = green (enable every "On" gradient/stroke, disable "Off"); reverse for
+		-- OFF = red. Same by-name mechanism wireBullCamButton uses.
+		local function paint(on)
+			local btnLabel = btn:FindFirstChild("Name")
+			if btnLabel and btnLabel:IsA("TextLabel") then
+				btnLabel.Text = on and "AFK: ON" or "AFK: OFF"
+			end
+			for _, d in ipairs(btn:GetDescendants()) do
+				if d:IsA("UIGradient") or d:IsA("UIStroke") then
+					if d.Name == "On" then
+						d.Enabled = on
+					elseif d.Name == "Off" then
+						d.Enabled = not on
+					end
+				end
+			end
+		end
+		paint(player:GetAttribute("AFK") == true)
+
+		task.spawn(function()
+			local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+			local remotes = bullrush and bullrush:FindFirstChild("Remotes")
+			local setAfk = remotes and remotes:WaitForChild("SetAFK", 30)
+			btn.Activated:Connect(function()
+				local want = not (player:GetAttribute("AFK") == true)
+				player:SetAttribute("AFK", want) -- optimistic; server confirms + replicates
+				paint(want)
+				if setAfk then
+					setAfk:FireServer(want)
+				end
+			end)
+			-- keep the button honest if the server ever changes the value itself
+			player:GetAttributeChangedSignal("AFK"):Connect(function()
+				paint(player:GetAttribute("AFK") == true)
+			end)
+		end)
 	end
 end
 
@@ -782,46 +885,678 @@ if boosts then
 end
 
 ---------------------------------------------------------------- 5) marquees
--- lucky block cards: duplicate the item row once, then scroll it on a seamless loop
-local luckyBlocks = storeContainer:FindFirstChild("LuckyBlocks")
-if luckyBlocks then
-	local cardIndex = 0
-	for _, card in ipairs(luckyBlocks:GetChildren()) do
-		local outcomes = card:IsA("Frame") and card:FindFirstChild("Outcomes")
-		local strip = outcomes and outcomes:FindFirstChild("Frame - This will be tweened")
-		local layout = strip and strip:FindFirstChildOfClass("UIListLayout")
-		if layout then
-			layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-			outcomes.ClipsDescendants = true
-			local items = {}
-			for _, c in ipairs(strip:GetChildren()) do
-				if c:IsA("GuiObject") then
-					table.insert(items, c)
-				end
+-- The Store lucky-block marquees show the ACTUAL prizes you can roll for
+-- (Config.LUCKY_BLOCKS): each Secret/Alien/GOD card scrolls its own tier's
+-- reward tiles, and the "[OP] LUCKY BLOCK" banner shows a static highlight reel
+-- of the standout prizes. Each prize is a self-contained chip in the game's
+-- roll/index card style (dark plate + rarity-coloured border + GothamBlack
+-- white/INK-stroke labels): bull = real model preview + name, money = the amount,
+-- cards also show the odds. All labels sit INSIDE the clipped plate (the kit's
+-- own outcome item floats its label above the box, which clips off in a tight
+-- tile - so we don't reuse it). Runs async (waits for assets), then registers
+-- the card strips into `marquees` for the seamless scroll (the banner stays
+-- static). Also wires the banner's Timer as a real weekly countdown.
+task.spawn(function()
+	local luckyBlocksFolder = storeContainer:FindFirstChild("LuckyBlocks")
+	local bannerFrame = storeContainer:FindFirstChild("Exclusive")
+	if not (luckyBlocksFolder or bannerFrame) then
+		return
+	end
+
+	local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+	local okConfig, cfg = pcall(require, bullrush and bullrush:WaitForChild("Config", 30))
+	if not (okConfig and typeof(cfg) == "table" and typeof(cfg.LUCKY_BLOCKS) == "table") then
+		return
+	end
+	local okCatalog, BullCatalog = pcall(require, bullrush:WaitForChild("BullCatalog", 30))
+	if not okCatalog then
+		BullCatalog = nil
+	end
+	local assets = ReplicatedStorage:WaitForChild("BullrushAssets", 15)
+	local modelsFolder = assets and assets:FindFirstChild("Bulls")
+	local fallbackModel = assets and assets:FindFirstChild("BullTemplate")
+
+	local KIT_FONT = Enum.Font.GothamBlack
+	local INK = Color3.fromRGB(15, 15, 15)
+	local PAPER = Color3.fromRGB(255, 255, 255)
+	local function rarityColor(r)
+		local rr = BullCatalog and BullCatalog.Rarities and BullCatalog.Rarities[r]
+		return (rr and rr.color) or Color3.fromRGB(200, 200, 200)
+	end
+
+	-- real bull model preview into a prize tile (nil model -> caller's label carries it)
+	local function buildBullPreviewInto(parent, bull)
+		local source = bull
+			and ((bull.modelName and modelsFolder and modelsFolder:FindFirstChild(bull.modelName)) or fallbackModel)
+		if not source then
+			return
+		end
+		local viewport = Instance.new("ViewportFrame")
+		viewport.BackgroundTransparency = 1
+		viewport.ZIndex = 3 -- above the box fill, below the kit Rate/Chance labels
+		viewport.AnchorPoint = Vector2.new(0.5, 0.5)
+		viewport.Position = UDim2.fromScale(0.5, 0.46)
+		viewport.Size = UDim2.fromScale(0.96, 0.9)
+		viewport.Ambient = Color3.fromRGB(165, 160, 155)
+		viewport.LightColor = Color3.fromRGB(255, 250, 240)
+		viewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
+		local model = source:Clone()
+		model:PivotTo(CFrame.new())
+		local center, size = Vector3.zero, Vector3.new(10, 10, 10)
+		pcall(function()
+			local cf, bbox = model:GetBoundingBox()
+			center, size = cf.Position, bbox
+		end)
+		local camera = Instance.new("Camera")
+		camera.CFrame = CFrame.lookAt(center + Vector3.new(-0.55, 0.42, -1).Unit * size.Magnitude * 0.72, center)
+		camera.Parent = viewport
+		viewport.CurrentCamera = camera
+		model.Parent = viewport
+		viewport.Parent = parent
+	end
+
+	-- Self-contained prize chip in the game's roll/index card style (dark plate,
+	-- rarity-coloured border, GothamBlack white+INK-stroke labels INSIDE the box).
+	-- Bull -> real model preview + name at the bottom; money -> the amount centred;
+	-- cards also show the roll odds top-left (showChance). Everything sits inside
+	-- the clipped plate - no kit-item floating labels that overflow/clip.
+	local MONEY_GREEN = Color3.fromRGB(70, 200, 90)
+
+	-- Money text wears the SAME look as the HUD Cash counter (bottom-left):
+	-- copy its green UIGradient + text colour + stroke colour onto the label so
+	-- every "$" reads as money, exactly like the cash readout.
+	local cashStyleSource
+	do
+		local counters = SideUI and SideUI:FindFirstChild("Counters")
+		local cash = counters and counters:FindFirstChild("Cash")
+		cashStyleSource = cash and cash:FindFirstChild("Amount")
+	end
+	local function paintMoneyStyle(lbl)
+		if not (cashStyleSource and lbl) then
+			return
+		end
+		lbl.TextColor3 = cashStyleSource.TextColor3
+		local src = cashStyleSource:FindFirstChildOfClass("UIGradient")
+		if src then
+			local g = lbl:FindFirstChildOfClass("UIGradient") or Instance.new("UIGradient")
+			g.Color = src.Color
+			g.Transparency = src.Transparency
+			g.Rotation = src.Rotation
+			g.Parent = lbl
+		end
+		local srcStroke = cashStyleSource:FindFirstChildOfClass("UIStroke")
+		local stroke = lbl:FindFirstChildOfClass("UIStroke")
+		if srcStroke and stroke then
+			stroke.Color = srcStroke.Color -- keep the label's own thickness
+		end
+	end
+
+	local function buildPrizeTile(reward, order, widthScale, showChance)
+		local isBull = reward.kind == "bull"
+		local bull = isBull and BullCatalog and BullCatalog.get(reward.bullId) or nil
+		local accent = isBull and rarityColor(bull and bull.rarity or "COMMON") or MONEY_GREEN
+
+		local tile = Instance.new("Frame")
+		tile.Name = tostring(order)
+		tile.LayoutOrder = order
+		tile.BackgroundTransparency = 1
+		tile.Size = UDim2.new(widthScale, 0, 1, 0)
+
+		local plate = Instance.new("Frame")
+		plate.Name = "Plate"
+		plate.AnchorPoint = Vector2.new(0.5, 0.5)
+		plate.Position = UDim2.fromScale(0.5, 0.5)
+		plate.Size = UDim2.fromScale(0.9, 0.88)
+		plate.BackgroundColor3 = INK
+		plate.BackgroundTransparency = 0.25
+		plate.ClipsDescendants = true
+		plate.Parent = tile
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.12, 0)
+		corner.Parent = plate
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2
+		stroke.Color = accent
+		stroke.Parent = plate
+
+		-- white GothamBlack + INK stroke, the kit's label idiom, always INSIDE
+		local function label(text, posY, anchorY, sizeY, color)
+			local l = Instance.new("TextLabel")
+			l.BackgroundTransparency = 1
+			l.Font = KIT_FONT
+			l.Text = text
+			l.TextColor3 = color or PAPER
+			l.TextScaled = true
+			l.ZIndex = 5
+			l.AnchorPoint = Vector2.new(0.5, anchorY)
+			l.Position = UDim2.fromScale(0.5, posY)
+			l.Size = UDim2.fromScale(0.9, sizeY)
+			local st = Instance.new("UIStroke")
+			st.Thickness = 1.5
+			st.Color = INK
+			st.Parent = l
+			l.Parent = plate
+			return l
+		end
+
+		if isBull then
+			buildBullPreviewInto(plate, bull)
+			label(tostring(reward.label), 0.98, 1, 0.24) -- name along the bottom
+		else
+			-- amount centred (the hero), painted like the HUD Cash counter
+			paintMoneyStyle(label(tostring(reward.label), 0.5, 0.5, 0.5))
+		end
+
+		if showChance and reward.weight then
+			label(reward.weight .. "%", 0.02, 0, 0.2, accent) -- roll odds, top
+		end
+		return tile
+	end
+
+	-- clear the kit's placeholder items (keep the layout) and rebuild from prizes
+	local function fillStrip(strip, rewards, widthScale, showChance)
+		for _, c in ipairs(strip:GetChildren()) do
+			if c:IsA("GuiObject") then
+				c:Destroy()
 			end
-			table.sort(items, function(a, b)
-				return (tonumber(a.Name) or 0) < (tonumber(b.Name) or 0)
-			end)
-			local itemW = 0
-			for i, item in ipairs(items) do
-				item.LayoutOrder = i
-				itemW = item.Size.X.Scale
-				local clone = item:Clone()
-				clone.Name = "m" .. i
-				clone.LayoutOrder = i + #items
-				clone.Parent = strip
+		end
+		for i, reward in ipairs(rewards) do
+			buildPrizeTile(reward, i, widthScale, showChance).Parent = strip
+		end
+	end
+
+	-- A lucky block rolls a rarity by its `weights`, then a UNIFORM bull within
+	-- that rarity (BullCatalog.roll). So the honest "what you can get" preview is
+	-- every rollable bull whose rarity the block can hit, each labelled with its
+	-- true per-bull odds:  P(bull) = (rarityWeight / total) / (#bulls of rarity).
+	-- Derived straight from `weights` + BullCatalog so the reel can never drift
+	-- from what actually rolls. (The blocks were reworked from a hand-authored
+	-- REWARDS list to rarity `weights`; this rebuilds the tiles from the new shape.)
+	local rOrder = BullCatalog and BullCatalog.Rarities
+	local function prizesForWeights(weights)
+		local prizes = {}
+		if typeof(weights) ~= "table" or not BullCatalog then
+			return prizes
+		end
+		local total = 0
+		for _, w in pairs(weights) do
+			total += math.max(tonumber(w) or 0, 0)
+		end
+		if total <= 0 then
+			return prizes
+		end
+		-- bucket rollable bulls by rarity the block can actually hit
+		local byRarity = {}
+		for id, bull in BullCatalog.Bulls do
+			if bull.rollable ~= false and (tonumber(weights[bull.rarity]) or 0) > 0 then
+				byRarity[bull.rarity] = byRarity[bull.rarity] or {}
+				table.insert(byRarity[bull.rarity], { id = id, bull = bull })
 			end
-			if #items > 0 then
-				cardIndex += 1
-				table.insert(marquees, {
-					frame = strip,
-					period = #items * (itemW + layout.Padding.Scale),
-					-- alternate direction per card so the shop feels alive, not mechanical
-					speed = (cardIndex % 2 == 0) and -0.095 or 0.11,
-					gate = gateOf(Store),
+		end
+		for rarity, list in byRarity do
+			local perBull = (math.max(tonumber(weights[rarity]) or 0, 0) / total) / #list * 100
+			local figure = (("%.1f"):format(perBull):gsub("%.0$", "")) -- strip float dust
+			for _, entry in ipairs(list) do
+				table.insert(prizes, {
+					kind = "bull", bullId = entry.id, label = entry.bull.name,
+					weight = figure, rarity = entry.bull.rarity,
 				})
 			end
 		end
+		-- low -> high rarity ramp, stable by name within a rarity
+		table.sort(prizes, function(a, b)
+			local ra = (rOrder and rOrder[a.rarity] and rOrder[a.rarity].order) or 0
+			local rb = (rOrder and rOrder[b.rarity] and rOrder[b.rarity].order) or 0
+			if ra ~= rb then
+				return ra < rb
+			end
+			return a.label < b.label
+		end)
+		return prizes
+	end
+
+	-- scrolling per-card marquees: each card shows its own tier's prizes
+	local CARD_OF = { SECRET = "Secret", ALIEN = "Alien", GOD = "GOD" }
+	local ITEM_W = 0.233
+	local cardIndex = 0
+	for _, tierId in ipairs({ "SECRET", "ALIEN", "GOD" }) do
+		local tier = cfg.LUCKY_BLOCKS[tierId]
+		local card = luckyBlocksFolder and luckyBlocksFolder:FindFirstChild(CARD_OF[tierId])
+		local outcomes = card and card:FindFirstChild("Outcomes")
+		local strip = outcomes and outcomes:FindFirstChild("Frame - This will be tweened")
+		local layout = strip and strip:FindFirstChildOfClass("UIListLayout")
+		local prizes = tier and prizesForWeights(tier.weights) or {}
+		if tier and layout and #prizes > 0 then
+			outcomes.ClipsDescendants = true
+			layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+			fillStrip(strip, prizes, ITEM_W, true) -- cards show each prize's odds
+			local n = #prizes
+			-- clone the row once so the scroll loops seamlessly
+			for i = 1, n do
+				local orig = strip:FindFirstChild(tostring(i))
+				if orig then
+					local clone = orig:Clone()
+					clone.Name = "m" .. i
+					clone.LayoutOrder = i + n
+					clone.Parent = strip
+				end
+			end
+			cardIndex += 1
+			table.insert(marquees, {
+				frame = strip,
+				period = n * (ITEM_W + layout.Padding.Scale),
+				-- alternate direction per card so the shop feels alive, not mechanical
+				speed = (cardIndex % 2 == 0) and -0.095 or 0.11,
+				gate = gateOf(Store),
+			})
+		end
+	end
+
+	-- "[OP] LUCKY BLOCK" banner (the "Exclusive" card = Config.BULLS.OP_ROLL): show
+	-- the ACTUAL elite pool you can roll - every Epic/Legendary bull the block can
+	-- hit, each with its true per-bull odds - built from OP_ROLL.box.weights via
+	-- the same prizesForWeights the tier cards use, so it can't drift from what
+	-- BullRollService actually grants.
+	-- The kit's own "Outcomes" frame is a tiny right-PINNED strip (12% wide at
+	-- x=0.98) whose icons spread left via hand-tuned negative offsets, so filling
+	-- it overflows off the right edge - we hide it and build our own reel in the
+	-- real clear band instead: right of the icon (x>0.30), below the title
+	-- (y>0.17), above the buy buttons (which actually span y 0.66-0.90). Measured
+	-- from the live rendered rects, so it sits in the gap without overlapping.
+	local opRoll = cfg.BULLS and cfg.BULLS.OP_ROLL
+	local opWeights = opRoll and opRoll.box and opRoll.box.weights
+	if bannerFrame and opWeights then
+		local kitReel = bannerFrame:FindFirstChild("Outcomes")
+		if kitReel then
+			kitReel.Visible = false
+		end
+		local highlights = prizesForWeights(opWeights) -- every rollable Epic/Legendary bull
+
+		local existing = bannerFrame:FindFirstChild("PrizeReel")
+		if existing then
+			existing:Destroy()
+		end
+		if #highlights > 0 then
+			local reel = Instance.new("Frame")
+			reel.Name = "PrizeReel"
+			reel.BackgroundTransparency = 1
+			reel.Position = UDim2.fromScale(0.31, 0.19)
+			reel.Size = UDim2.fromScale(0.67, 0.45)
+			reel.ZIndex = 8
+			reel.Parent = bannerFrame
+			local reelLayout = Instance.new("UIListLayout")
+			reelLayout.FillDirection = Enum.FillDirection.Horizontal
+			reelLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+			reelLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+			reelLayout.Padding = UDim.new(0.012, 0)
+			reelLayout.Parent = reel
+			-- widthScale capped so a small pool doesn't blow up into giant tiles
+			local widthScale = math.min(0.22, 0.94 / #highlights)
+			fillStrip(reel, highlights, widthScale, true) -- show each elite bull's odds
+		end
+	end
+
+	-- banner Timer: a real weekly limited-offer countdown (pure client urgency).
+	-- Fixed 7-day cycle anchored to a Monday, driven off the server clock so
+	-- every player sees the same time remaining.
+	local timerLabel = bannerFrame and bannerFrame:FindFirstChild("Timer")
+	if timerLabel and timerLabel:IsA("TextLabel") then
+		local PERIOD = 7 * 24 * 3600
+		local ANCHOR = 1704067200 -- 2024-01-01 00:00 UTC (a Monday)
+		local function fmt(s)
+			local d = s // 86400
+			local h = (s % 86400) // 3600
+			local m = (s % 3600) // 60
+			if d > 0 then
+				return ("%dd %dh left"):format(d, h)
+			elseif h > 0 then
+				return ("%dh %dm left"):format(h, m)
+			else
+				return ("%dm %ds left"):format(m, s % 60)
+			end
+		end
+		task.spawn(function()
+			while timerLabel.Parent do
+				local remaining = PERIOD - ((workspace:GetServerTimeNow() - ANCHOR) % PERIOD)
+				timerLabel.Text = fmt(math.floor(remaining))
+				task.wait(1)
+			end
+		end)
+	end
+end)
+
+---------------------------------------------------------------- 5b) lucky blocks
+-- Store "LuckyBlocks" cards (Secret / Alien / GOD): premium Robux wheel spins.
+-- Each card's BuyButtons.1 prompts its Config.PRODUCTS lucky-block product; the
+-- receipt rolls the tier's richer table server-side (SpinService.spinLuckyBlock)
+-- and pushes a private wheel spin that section 10 auto-reveals. Card name +
+-- price are painted from Config.LUCKY_BLOCKS so the shop can't drift from config
+-- (id 0 / not-yet-published -> red "coming soon" card, same idiom as the wheel).
+task.spawn(function()
+	local luckyBlocksFrame = storeContainer:FindFirstChild("LuckyBlocks")
+	if not luckyBlocksFrame then
+		return
+	end
+	local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+	local okConfig, cfg = pcall(require, bullrush and bullrush:WaitForChild("Config", 30))
+	if not (okConfig and typeof(cfg) == "table" and typeof(cfg.LUCKY_BLOCKS) == "table") then
+		return
+	end
+	local Marketplace = game:GetService("MarketplaceService")
+	local CARD_OF = { SECRET = "Secret", ALIEN = "Alien", GOD = "GOD" } -- tierId -> kit card name
+
+	-- wire one buy button -> its Robux product prompt (0/unpublished => coming soon)
+	local function wireBuyButton(buyButton, productKey)
+		if not (buyButton and buyButton:IsA("GuiButton")) then
+			return
+		end
+		buyButton.Activated:Connect(function()
+			local productId = tonumber(cfg.PRODUCTS[productKey]) or 0
+			if productId <= 0 then
+				if pushNotif then
+					pushNotif("Lucky Blocks are coming soon!", "red", 3)
+				end
+				return
+			end
+			local ok = pcall(function()
+				Marketplace:PromptProductPurchase(player, productId)
+			end)
+			if not ok and pushNotif then
+				pushNotif("Purchases aren't available right now", "red", 3)
+			end
+		end)
+	end
+
+	-- Secret/Alien/GOD: one card each in the LuckyBlocks row (single buy button)
+	for tierId, tier in cfg.LUCKY_BLOCKS do
+		local card = CARD_OF[tierId] and luckyBlocksFrame:FindFirstChild(CARD_OF[tierId])
+		if card then
+			local nameLabel = card:FindFirstChild("Name")
+			if nameLabel and nameLabel:IsA("TextLabel") then
+				nameLabel.Text = tier.name
+			end
+			local bb = card:FindFirstChild("BuyButtons")
+			local btn = bb and bb:FindFirstChild("1")
+			local info = btn and btn:FindFirstChild("Info")
+			local priceLabel = info and info:FindFirstChild("Price")
+			if priceLabel and priceLabel:IsA("TextLabel") then
+				priceLabel.Text = tostring(tier.price)
+			end
+			wireBuyButton(btn, tier.product)
+		end
+	end
+
+	-- OP Lucky Block lives on the featured "Exclusive" card at the top: its 3 buy
+	-- buttons are the x1 / x3 / x10 elite BULL rolls (Config.BULLS.OP_ROLL). Buying
+	-- prompts the Robux product; the receipt rolls elite bulls (BullRollService)
+	-- and the bull carousel auto-opens. Prices/labels are already set in the kit.
+	local opRoll = cfg.BULLS and cfg.BULLS.OP_ROLL
+	local exclusive = storeContainer:FindFirstChild("Exclusive")
+	local exBuys = exclusive and exclusive:FindFirstChild("BuyButtons")
+	if opRoll and exBuys then
+		for i, bundle in ipairs(opRoll.bundles or {}) do
+			wireBuyButton(exBuys:FindFirstChild(tostring(i)), bundle.product)
+		end
+	end
+end)
+
+---------------------------------------------------------------- 5c) passes + luck
+-- Store gamepass / server-luck cards -> MonetizationService. Each card's buy
+-- button prompts its pass (PromptGamePassPurchase) or the Server Luck product
+-- (PromptProductPurchase); the price label is painted live from GetProductInfo
+-- and owned passes flip to a greyed "Owned". The kit only ships Super/Mega luck
+-- slots, so 2x Luck + Strawberry Elephant cards are cloned in. All ids are 0
+-- until published -> a buy shows a "coming soon" card (same idiom as elsewhere).
+task.spawn(function()
+	local Marketplace = game:GetService("MarketplaceService")
+	local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+	local okCfg, cfg = pcall(require, bullrush and bullrush:WaitForChild("Config", 30))
+	if not (okCfg and typeof(cfg) == "table") then
+		return
+	end
+	local gamepasses = storeContainer:FindFirstChild("Gamepasses")
+
+	-- clone a kit gamepass card as the template for a luck item the kit lacks
+	local function cloneCard(sourceName, newName, order)
+		local src = gamepasses and gamepasses:FindFirstChild(sourceName)
+		if not src then
+			return nil
+		end
+		local c = src:Clone()
+		c.Name = newName
+		c.LayoutOrder = order
+		c.Parent = gamepasses
+		return c
+	end
+	local twoxLuckCard = cloneCard("SuperLuck", "2xLuck", -1) -- lowest luck tier, sits first
+	local strawberryCard = cloneCard("MEGALuck", "StrawberryElephant", 5)
+
+	-- Celestial Bull card is cloned from a luck card, so its Icon still shows luck
+	-- art. Swap it for a real ViewportFrame render of the bull actually being sold.
+	if strawberryCard then
+		local icon = strawberryCard:FindFirstChild("Icon")
+		local bullsFolder = ReplicatedStorage:FindFirstChild("BullrushAssets")
+		bullsFolder = bullsFolder and bullsFolder:FindFirstChild("Bulls")
+		local source = bullsFolder and bullsFolder:FindFirstChild("Bull_LEGENDARY") -- STRAWBERRY.modelName
+		if icon and icon:IsA("GuiObject") and source then
+			local viewport = Instance.new("ViewportFrame")
+			viewport.Name = "Icon"
+			viewport.BackgroundTransparency = 1
+			viewport.AnchorPoint = icon.AnchorPoint
+			viewport.Position = icon.Position
+			viewport.Size = icon.Size
+			viewport.ZIndex = icon.ZIndex
+			viewport.Ambient = Color3.fromRGB(165, 160, 155)
+			viewport.LightColor = Color3.fromRGB(255, 250, 240)
+			viewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
+			local model = source:Clone()
+			model:PivotTo(CFrame.new())
+			local center, size = Vector3.zero, Vector3.new(10, 10, 10)
+			pcall(function()
+				local cf, bbox = model:GetBoundingBox()
+				center, size = cf.Position, bbox
+			end)
+			local camera = Instance.new("Camera")
+			camera.CFrame = CFrame.lookAt(center + Vector3.new(-0.55, 0.42, -1).Unit * size.Magnitude * 0.72, center)
+			camera.Parent = viewport
+			viewport.CurrentCamera = camera
+			model.Parent = viewport
+			viewport.Parent = strawberryCard
+			icon:Destroy()
+		end
+	end
+
+	local function priceBtn(card)
+		local bb = card and card:FindFirstChild("BuyButtons")
+		local btn = bb and (bb:FindFirstChild("1") or bb:FindFirstChildWhichIsA("GuiButton"))
+		local info = btn and btn:FindFirstChild("Info")
+		return btn, info and info:FindFirstChild("Price")
+	end
+
+	-- wire one card: name, description, live price, buy prompt, owned state (passes only)
+	local function wire(card, name, id, infoType, ownedAttr, desc)
+		if not card then
+			return
+		end
+		id = tonumber(id) or 0
+		local nameLabel = card:FindFirstChild("Name")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			nameLabel.Text = name
+		end
+		-- blurb advertising the perk (gamepass cards call it "Des", VIP/ServerLuck "TextLabel")
+		local descLabel = card:FindFirstChild("Des") or card:FindFirstChild("TextLabel")
+		if desc and descLabel and descLabel:IsA("TextLabel") then
+			descLabel.Text = desc
+		end
+		local btn, priceLabel = priceBtn(card)
+
+		local function isOwned()
+			return ownedAttr ~= nil and player:GetAttribute(ownedAttr) == true
+		end
+		local function refresh()
+			local owned = isOwned()
+			if btn then
+				btn.Active = not owned
+				btn.AutoButtonColor = not owned
+			end
+			if priceLabel and owned then
+				priceLabel.Text = "Owned"
+			end
+		end
+		-- live Robux price from the asset (async; only while not owned / configured)
+		if priceLabel and id ~= 0 and not isOwned() then
+			task.spawn(function()
+				local ok, info = pcall(function()
+					return Marketplace:GetProductInfo(id, infoType)
+				end)
+				if ok and info and info.PriceInRobux and not isOwned() then
+					priceLabel.Text = tostring(info.PriceInRobux)
+				end
+			end)
+		end
+		if btn and btn:IsA("GuiButton") then
+			btn.Activated:Connect(function()
+				if id <= 0 then
+					if pushNotif then
+						pushNotif(name .. " is coming soon!", "red", 3)
+					end
+					return
+				end
+				if isOwned() then
+					return
+				end
+				local ok, err = pcall(function()
+					if infoType == Enum.InfoType.GamePass then
+						Marketplace:PromptGamePassPurchase(player, id)
+					else
+						Marketplace:PromptProductPurchase(player, id)
+					end
+				end)
+				if not ok then
+					warn(("Store: purchase prompt failed for %s (id %d): %s"):format(name, id, tostring(err)))
+				end
+			end)
+		end
+		if ownedAttr then
+			player:GetAttributeChangedSignal(ownedAttr):Connect(refresh)
+		end
+		refresh()
+	end
+
+	local P = cfg.PASSES or {}
+	local D = cfg.PRODUCTS or {}
+	local GP = Enum.InfoType.GamePass
+	wire(gamepasses and gamepasses:FindFirstChild("2xCash"), "2x Cash", P.DOUBLE_MONEY, GP, "HasDoubleMoney",
+		"")
+	wire(twoxLuckCard, "2x Luck", P.LUCK_2X, GP, "Luck2x",
+		"2X Luck")
+	wire(gamepasses and gamepasses:FindFirstChild("SuperLuck"), "Super Luck", P.LUCK_SUPER, GP, "LuckSuper",
+		"3X Luck")
+	wire(gamepasses and gamepasses:FindFirstChild("MEGALuck"), "Mega Luck", P.LUCK_MEGA, GP, "LuckMega",
+		"5X Luck")
+	wire(strawberryCard, "Celestial Bull", P.STRAWBERRY_ELEPHANT, GP, "HasStrawberryElephant",
+		"Unlock the Strawberry bull")
+	wire(storeContainer:FindFirstChild("VIP"), "VIP", P.VIP, GP, "IsVIP",
+		"+50% cash, 1.5x luck, 2x votes")
+	wire(storeContainer:FindFirstChild("ServerLuck"), "Server Luck", D.SERVER_LUCK, Enum.InfoType.Product, nil,
+		"2x odds server-wide, 30 min")
+end)
+
+---------------------------------------------------------------- 5d) money packs
+-- Store "Cash" section: buy Robux -> Money. The kit ships 6 card slots (3 columns
+-- x 2); we paint the first #MONEY_PACKS from Config (name + Money amount + live
+-- Robux price) and wire each buy to the product, then hide any spare slots.
+task.spawn(function()
+	local Marketplace = game:GetService("MarketplaceService")
+	local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+	local okCfg, cfg = pcall(require, bullrush and bullrush:WaitForChild("Config", 30))
+	if not (okCfg and typeof(cfg) == "table" and typeof(cfg.MONEY_PACKS) == "table") then
+		return
+	end
+	local cashSection = storeContainer:FindFirstChild("Cash")
+	if not cashSection then
+		return
+	end
+	-- card slots in fill order: column1(1,2), column2(1,2), column3(1,2)
+	local slots = {}
+	for _, colName in ipairs({ "column1", "column2", "column3" }) do
+		local col = cashSection:FindFirstChild(colName)
+		if col then
+			for _, n in ipairs({ "1", "2" }) do
+				local card = col:FindFirstChild(n)
+				if card and card:IsA("GuiObject") then
+					table.insert(slots, card)
+				end
+			end
+		end
+	end
+
+	for i, card in ipairs(slots) do
+		local pack = cfg.MONEY_PACKS[i]
+		if not pack then
+			card.Visible = false -- no pack for this spare slot
+		else
+			local id = tonumber(cfg.PRODUCTS[pack.product]) or 0
+			local nameLabel = card:FindFirstChild("Name")
+			if nameLabel and nameLabel:IsA("TextLabel") then
+				nameLabel.Text = pack.name
+			end
+			local info = card:FindFirstChild("Info")
+			local amount = info and info:FindFirstChild("Amount")
+			if amount and amount:IsA("TextLabel") then
+				-- The kit ships this amount as AutomaticSize.X + TextScaled inside a
+				-- 5px-wide Info frame, so it GROWS to its own text width (like the HUD
+				-- cash counter). The demo "1.5M" fit, but a longer "$75,000" grows past
+				-- the card and gets clipped. Pin Info to a real width that clips, and
+				-- flip the amount from grow-to-text to shrink-to-fit-box so every price
+				-- scales down to sit inside the card. (Widening Info also gives the coin
+				-- icon its intended size - its 0.053 scale was designed for a wide Info.)
+				info.Size = UDim2.new(0.9, 0, info.Size.Y.Scale, info.Size.Y.Offset)
+				info.ClipsDescendants = true
+				amount.AutomaticSize = Enum.AutomaticSize.None
+				amount.Size = UDim2.new(0.9, 0, 1, 0)
+				amount.TextScaled = true
+				amount.Text = pack.label
+			end
+			local bb = card:FindFirstChild("BuyButtons")
+			local btn = bb and (bb:FindFirstChild("1") or bb:FindFirstChildWhichIsA("GuiButton"))
+			local info2 = btn and btn:FindFirstChild("Info")
+			local priceLabel = info2 and info2:FindFirstChild("Price")
+			if priceLabel and id ~= 0 then
+				task.spawn(function()
+					local ok, prod = pcall(function()
+						return Marketplace:GetProductInfo(id, Enum.InfoType.Product)
+					end)
+					if ok and prod and prod.PriceInRobux then
+						priceLabel.Text = tostring(prod.PriceInRobux)
+					end
+				end)
+			end
+			if btn and btn:IsA("GuiButton") then
+				btn.Activated:Connect(function()
+					if id <= 0 then
+						if pushNotif then
+							pushNotif(pack.name .. " is coming soon!", "red", 3)
+						end
+						return
+					end
+					pcall(function()
+						Marketplace:PromptProductPurchase(player, id)
+					end)
+				end)
+			end
+		end
+	end
+end)
+
+---------------------------------------------------------------- 5e) hide booster packs
+-- Booster Packs (Starter/PRO packs + their "Booster Packs" header) are hidden
+-- FOR NOW; the "Money" section below collapses up into their spot on its own
+-- (a UIListLayout skips Visible=false children). Flip these back on to restore.
+for _, name in ipairs({ "StarterPack", "PROPack", "TextFrame3" }) do
+	local section = storeContainer:FindFirstChild(name)
+	if section then
+		section.Visible = false
 	end
 end
 
@@ -1057,6 +1792,7 @@ task.spawn(function()
 		["Small Grid"] = { "Small", "Grid", Color3.fromRGB(90, 220, 110) },
 		["Stampede"] = { "Stampede", "Mode", Color3.fromRGB(255, 80, 70) },
 		["Team Rush"] = { "Teams", "Mode", Color3.fromRGB(200, 120, 255) },
+		["High Speed"] = { "High", "Speed", Color3.fromRGB(255, 221, 51) },
 	}
 	local function paintGameType(modeName)
 		if not (currentArea and areaWordA and areaWordA:IsA("TextLabel")) then
@@ -1182,20 +1918,6 @@ local function elimIdentity(name)
 	return name, nil
 end
 
-local function makeElimHead(userId, order)
-	local head = Instance.new("ImageLabel")
-	head.Name = "Head"
-	head.LayoutOrder = order
-	head.Size = UDim2.new(0, 34, 0, 34)
-	head.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-	head.BackgroundTransparency = 0.25
-	head.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=48&h=48"):format(userId)
-	local headCorner = Instance.new("UICorner")
-	headCorner.CornerRadius = UDim.new(1, 0)
-	headCorner.Parent = head
-	return head
-end
-
 local function pushElim(victimName, cause, byName)
 	elimCounter += 1
 	local row = Instance.new("Frame")
@@ -1216,13 +1938,10 @@ local function pushElim(victimName, cause, byName)
 	rowLayout.Padding = UDim.new(0, 6)
 	rowLayout.Parent = row
 
-	local victimDisplay, victimId = elimIdentity(victimName)
+	local victimDisplay = elimIdentity(victimName)
 	local text
 	if cause == "PUSH" and typeof(byName) == "string" and byName ~= "" then
-		local pusherDisplay, pusherId = elimIdentity(byName)
-		if pusherId then
-			makeElimHead(pusherId, 1).Parent = row
-		end
+		local pusherDisplay = elimIdentity(byName)
 		text = ('%s <font color="%s">ELIMINATED</font> %s'):format(
 			richEscape(pusherDisplay), ELIM_VERB_RED, richEscape(victimDisplay))
 	elseif cause == "FELL" then
@@ -1249,10 +1968,6 @@ local function pushElim(victimName, cause, byName)
 	stroke.Thickness = 2
 	stroke.Parent = label
 	label.Parent = row
-
-	if victimId then
-		makeElimHead(victimId, 3).Parent = row
-	end
 
 	row.Parent = elimStack
 
@@ -1388,10 +2103,10 @@ end
 -- RoundSummary payload at round end (EconomyService.settle - see the contract
 -- in GridUtil's header). The payload is HELD until the player is back in the
 -- lobby (the WAITING/INTERMISSION state right after the teleport), then the
--- tab auto-opens with the winner's portrait + name, your EQUIPPED BULL (real
--- model in a ViewportFrame, name underneath) in the corner TinyBox — falling
--- back to the old portrait + placement if the catalog never loads — plus the
--- Money you earned, and an itemized
+-- tab auto-opens with the winner's portrait + name — or, when the herd got
+-- everyone, the wave bull itself (real BullTemplate model in a ViewportFrame)
+-- standing in as the winner — your portrait + placement in the corner
+-- TinyBox, plus the Money you earned, and an itemized
 -- breakdown line; it auto-closes when the next round goes ACTIVE. The kit's XP row stays hidden until an XP system exists. The
 -- "2x Rewards?" button prompts the Config.PRODUCTS.DOUBLE_ROUND dev product;
 -- the server answers a granted receipt with an { update = true } resend.
@@ -1569,6 +2284,7 @@ if summaryMain then
 	end
 	if winnerIcon then
 		winnerIcon.ScaleType = Enum.ScaleType.Fit -- portraits are square; don't stretch
+		winnerIcon.BackgroundTransparency = 1 -- bust PNGs are transparent; kit ships a white plate
 	end
 
 	local PLACEHOLDER_PORTRAIT = winnerIcon and winnerIcon.Image or ""
@@ -1582,16 +2298,44 @@ if summaryMain then
 		return ("rbxthumb://type=AvatarBust&id=%d&w=420&h=420"):format(userId)
 	end
 
-	-- The corner TinyBox shows the bull you have EQUIPPED — its real model in
-	-- a ViewportFrame that sits exactly where the kit's portrait ImageLabel
-	-- was (same slot/aspect); the ImageLabel stays behind as the fallback.
-	-- Catalog + model folders resolve in the startup task.spawn below, before
-	-- any payload can arrive.
-	local bullCatalog, bullModelsFolder, bullFallbackModel
+	-- When THE HERD gets everyone there's no player to portrait, so a
+	-- ViewportFrame sitting exactly where the kit's winner ImageLabel is
+	-- (same slot/aspect) shows the wave bull itself — the real BullTemplate
+	-- model that ran everyone down. The ImageLabel stays behind for
+	-- player/team wins. The model resolves in the startup task.spawn below,
+	-- before any payload can arrive.
+	local bullFallbackModel
+	local equipBullsFolder -- BullrushAssets.Bulls (equipped-bull models)
+	local equipCatalog -- BullCatalog (equipped-bull lookup)
+	local herdViewport
+	if winnerIcon then
+		herdViewport = Instance.new("ViewportFrame")
+		herdViewport.Name = "HerdWinner"
+		herdViewport.BackgroundTransparency = 1
+		herdViewport.AnchorPoint = winnerIcon.AnchorPoint
+		herdViewport.Position = winnerIcon.Position
+		herdViewport.Size = winnerIcon.Size
+		herdViewport.ZIndex = winnerIcon.ZIndex
+		herdViewport.Ambient = Color3.fromRGB(165, 160, 155)
+		herdViewport.LightColor = Color3.fromRGB(255, 250, 240)
+		herdViewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
+		local iconRatio = winnerIcon:FindFirstChildOfClass("UIAspectRatioConstraint")
+		if iconRatio then
+			iconRatio:Clone().Parent = herdViewport
+		end
+		herdViewport.Visible = false
+		herdViewport.Parent = seeker
+	end
+
+	-- The corner TinyBox normally shows YOUR avatar bust; instead it renders the
+	-- bull you have EQUIPPED (real model, same ViewportFrame idiom as the
+	-- winner/herd previews). Sits in the exact ImageLabel slot; the avatar stays
+	-- behind as a fallback if the model can't be resolved. No equip -> STARTER,
+	-- which uses the default BullTemplate rig.
 	local tinyViewport
 	if tinyIcon then
 		tinyViewport = Instance.new("ViewportFrame")
-		tinyViewport.Name = "BullPreview"
+		tinyViewport.Name = "EquippedBull"
 		tinyViewport.BackgroundTransparency = 1
 		tinyViewport.AnchorPoint = tinyIcon.AnchorPoint
 		tinyViewport.Position = tinyIcon.Position
@@ -1600,32 +2344,56 @@ if summaryMain then
 		tinyViewport.Ambient = Color3.fromRGB(165, 160, 155)
 		tinyViewport.LightColor = Color3.fromRGB(255, 250, 240)
 		tinyViewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
-		local iconRatio = tinyIcon:FindFirstChildOfClass("UIAspectRatioConstraint")
-		if iconRatio then
-			iconRatio:Clone().Parent = tinyViewport
+		local tinyRatio = tinyIcon:FindFirstChildOfClass("UIAspectRatioConstraint")
+		if tinyRatio then
+			tinyRatio:Clone().Parent = tinyViewport
 		end
 		tinyViewport.Visible = false
 		tinyViewport.Parent = tinyBox
 	end
 
-	-- (re)render the equipped bull into the TinyBox viewport; returns the
-	-- catalog entry on success, nil when the catalog/model isn't available so
-	-- populate() can fall back to the old portrait + placement look
-	local function renderEquippedBull()
-		if not (tinyViewport and bullCatalog and typeof(bullCatalog.Bulls) == "table") then
-			return nil
-		end
-		local id = player:GetAttribute("EquippedBull") or "STARTER"
-		local bull = bullCatalog.Bulls[id]
-		if not bull then
-			return nil
-		end
-		local source = (bull.modelName and bullModelsFolder and bullModelsFolder:FindFirstChild(bull.modelName))
-			or bullFallbackModel
-		if not source then
-			return nil
+	-- (re)render the wave bull into the winner viewport; returns false when
+	-- the model isn't available so populate() can fall back to the kit's
+	-- placeholder portrait
+	local function renderHerdBull()
+		if not (herdViewport and bullFallbackModel) then
+			return false
 		end
 		-- keep the aspect constraint; only the previous render gets swept
+		for _, old in ipairs(herdViewport:GetChildren()) do
+			if old:IsA("Model") or old:IsA("Camera") then
+				old:Destroy()
+			end
+		end
+		local model = bullFallbackModel:Clone()
+		model:PivotTo(CFrame.new())
+		local center, size = Vector3.zero, Vector3.new(10, 10, 10)
+		pcall(function()
+			local cf, bbox = model:GetBoundingBox()
+			center, size = cf.Position, bbox
+		end)
+		local camera = Instance.new("Camera")
+		-- same 3/4-front framing as the Index cards (bulls face -Z)
+		camera.CFrame = CFrame.lookAt(center + Vector3.new(-0.55, 0.42, -1).Unit * size.Magnitude * 0.72, center)
+		camera.Parent = herdViewport
+		herdViewport.CurrentCamera = camera
+		model.Parent = herdViewport
+		return true
+	end
+
+	-- (re)render the LOCAL player's equipped bull into the TinyBox viewport.
+	-- Returns false (caller keeps the avatar fallback) when neither the equipped
+	-- model nor the default rig can be resolved.
+	local function renderEquippedBull()
+		if not tinyViewport then
+			return false
+		end
+		local bull = equipCatalog and equipCatalog.get(player:GetAttribute("EquippedBull") or "STARTER")
+		local source = (bull and bull.modelName and equipBullsFolder and equipBullsFolder:FindFirstChild(bull.modelName))
+			or bullFallbackModel
+		if not source then
+			return false
+		end
 		for _, old in ipairs(tinyViewport:GetChildren()) do
 			if old:IsA("Model") or old:IsA("Camera") then
 				old:Destroy()
@@ -1639,12 +2407,11 @@ if summaryMain then
 			center, size = cf.Position, bbox
 		end)
 		local camera = Instance.new("Camera")
-		-- same 3/4-front framing as the Index cards (bulls face -Z)
 		camera.CFrame = CFrame.lookAt(center + Vector3.new(-0.55, 0.42, -1).Unit * size.Magnitude * 0.72, center)
 		camera.Parent = tinyViewport
 		tinyViewport.CurrentCamera = camera
 		model.Parent = tinyViewport
-		return bull
+		return true
 	end
 
 	local function ordinal(n)
@@ -1661,7 +2428,13 @@ if summaryMain then
 	local productId = 0 -- filled from Config once the Bullrush folder resolves
 
 	local function populate(data)
+		local herdWon = data.winnerName == nil
+		local showBull = herdWon and renderHerdBull()
+		if herdViewport then
+			herdViewport.Visible = showBull
+		end
 		if winnerIcon then
+			winnerIcon.Visible = not showBull
 			winnerIcon.Image = if data.winnerUserId then portrait(data.winnerUserId) else PLACEHOLDER_PORTRAIT
 		end
 		if winnerLabel then
@@ -1669,30 +2442,26 @@ if summaryMain then
 				winnerLabel.Text = data.winnerName .. " WINS!"
 				winnerLabel.TextColor3 = TEAM_NAME_COLORS[data.teamColor] or defaultNameColor
 			else
-				winnerLabel.Text = "THE HERD WON…"
+				winnerLabel.Text = "THE HERD WINS!"
 				winnerLabel.TextColor3 = defaultNameColor
 			end
 		end
-		local equippedBull = renderEquippedBull()
-		if equippedBull then
-			if tinyIcon then
-				tinyIcon.Visible = false
-			end
-			tinyViewport.Visible = true
-			if tinyText then
-				tinyText.Text = equippedBull.name
-			end
-		else
-			if tinyViewport then
-				tinyViewport.Visible = false
-			end
-			if tinyIcon then
-				tinyIcon.Visible = true
-				tinyIcon.Image = portrait(player.UserId)
-			end
-			if tinyText then
-				tinyText.Text = ordinal(tonumber(data.placement) or 1)
-			end
+		-- When THE HERD wins nobody placed, so the whole corner box is hidden.
+		if tinyBox then
+			tinyBox.Visible = not herdWon
+		end
+		local showEquipped = not herdWon and renderEquippedBull()
+		if tinyViewport then
+			tinyViewport.Visible = showEquipped
+		end
+		if tinyIcon then
+			-- Equipped-bull preview stands in for your avatar; only fall back to
+			-- the portrait if the model couldn't be resolved.
+			tinyIcon.Visible = not showEquipped
+			tinyIcon.Image = portrait(player.UserId)
+		end
+		if tinyText then
+			tinyText.Text = ordinal(tonumber(data.placement) or 1)
 		end
 		if coinsAmount then
 			coinsAmount.Text = "+" .. comma(tonumber(data.total) or 0)
@@ -1737,13 +2506,13 @@ if summaryMain then
 		if okConfig and typeof(bullrushConfig) == "table" and typeof(bullrushConfig.PRODUCTS) == "table" then
 			productId = tonumber(bullrushConfig.PRODUCTS.DOUBLE_ROUND) or 0
 		end
-		local okCatalog, catalog = pcall(require, bullrush:WaitForChild("BullCatalog"))
-		if okCatalog and typeof(catalog) == "table" then
-			bullCatalog = catalog
-		end
 		local bullAssets = ReplicatedStorage:FindFirstChild("BullrushAssets")
-		bullModelsFolder = bullAssets and bullAssets:FindFirstChild("Bulls")
 		bullFallbackModel = bullAssets and bullAssets:FindFirstChild("BullTemplate")
+		equipBullsFolder = bullAssets and bullAssets:FindFirstChild("Bulls")
+		local okCat, cat = pcall(require, bullrush:WaitForChild("BullCatalog", 15))
+		if okCat and typeof(cat) == "table" then
+			equipCatalog = cat
+		end
 
 		-- The payload lands while the winner banner is still up and the player
 		-- is standing in the arena; hold it until the post-round state change
@@ -2159,7 +2928,7 @@ do
 		-- ticking every slice edge (30 deg off the slice centers) that
 		-- crosses the arrow. Slice i is authored at (i-1)*60 inside the
 		-- dial, so it rests under the top arrow at Rotation = -(i-1)*60.
-		local function animateSpin(data)
+		local function animateSpin(data, onFinished)
 			local startRotation = spinDial.Rotation
 			local targetMod = -((tonumber(data.index) or 1) - 1) * SLICE_ANGLE + (tonumber(data.jitter) or 0)
 			local delta = (targetMod - startRotation) % 360 + (tonumber(data.revolutions) or 4) * 360
@@ -2195,9 +2964,32 @@ do
 					end
 					spinning = false
 					announce(data)
+					if onFinished then
+						onFinished()
+					end
 				else
 					spinDial.Rotation = rotation % 360
 				end
+			end)
+		end
+
+		-- Store Lucky Block spin: the server pushes a SPUN carrying the tier's
+		-- OWN 6-slice table (data.rewards) + luckyTier. Repaint the wheel to that
+		-- table for this one reveal, make sure the Spinner window is up, spin, then
+		-- restore the free-wheel slice labels so a later free spin reads true.
+		local function openLuckyReveal(data)
+			if currentFrame ~= spinnerFrame then
+				openFrame(spinnerFrame)
+			end
+			if typeof(data.rewards) == "table" then
+				local freeRewards = spinnerRewards
+				spinnerRewards = data.rewards
+				paintDial(spinDial)
+				spinnerRewards = freeRewards -- keep the module ref on the free table
+			end
+			spinning = true
+			animateSpin(data, function()
+				paintDial(spinDial) -- restore the free-wheel labels
 			end)
 		end
 
@@ -2251,6 +3043,26 @@ do
 					productIds.SPIN_1 = bullrushConfig.PRODUCTS.SPIN_1 or 0
 					productIds.SPIN_10 = bullrushConfig.PRODUCTS.SPIN_10 or 0
 				end
+				-- live Robux prices on the x1/x10 buy buttons (same idiom as the
+				-- Store cards) so the labels can't drift from the real products
+				local function paintPrice(btn, productKey)
+					local id = tonumber(productIds[productKey]) or 0
+					local info = btn and btn:FindFirstChild("Info")
+					local priceLabel = info and info:FindFirstChild("Price")
+					if id <= 0 or not (priceLabel and priceLabel:IsA("TextLabel")) then
+						return
+					end
+					task.spawn(function()
+						local ok, prod = pcall(function()
+							return MarketplaceService:GetProductInfo(id, Enum.InfoType.Product)
+						end)
+						if ok and prod and prod.PriceInRobux then
+							priceLabel.Text = tostring(prod.PriceInRobux)
+						end
+					end)
+				end
+				paintPrice(buyOne, "SPIN_1")
+				paintPrice(buyTen, "SPIN_10")
 				-- slice labels + odds come from the shared reward table
 				if typeof(bullrushConfig.SPINNER) == "table" then
 					spinnerRewards = bullrushConfig.SPINNER.REWARDS
@@ -2262,7 +3074,11 @@ do
 			ackRemote.OnClientEvent:Connect(function(kind, data)
 				data = typeof(data) == "table" and data or {}
 				if kind == "SPUN" then
-					animateSpin(data)
+					if data.luckyTier and typeof(data.rewards) == "table" then
+						openLuckyReveal(data) -- Store Lucky Block: auto-open + tier odds
+					else
+						animateSpin(data)
+					end
 				elseif kind == "GRANTED" then
 					pushNotif(("+%d spins!"):format(tonumber(data.granted) or 0), "green", 4)
 				elseif kind == "DENIED" then
@@ -2315,15 +3131,47 @@ do
 				end)
 			end
 
+			-- the disc's printed face (the only decal-bearing part) is what the
+			-- face mirror below paints; it SPINS with the disc, so it's the
+			-- wrong anchor for a steady label.
+			local facePart
+			for _, part in ipairs(wheelModel:GetDescendants()) do
+				if part:IsA("BasePart") and part:FindFirstChildOfClass("Decal") then
+					facePart = part
+					break
+				end
+			end
+
+			-- FortuneWheelClient spins the whole Disc model about its pivot (the
+			-- hub). Anything ON the disc orbits that axis, so a billboard adorned
+			-- there whirls around with the wheel. Pin an invisible, still marker
+			-- at the hub - the disc pivot's WORLD POSITION, which rotation about
+			-- itself never moves - and adorn the label to that. It's the wheel's
+			-- true centre and dead steady. (The wheel MODEL's own pivot sits off
+			-- on the stand, which is why the model made the label float wide.)
+			local disc = wheelModel:FindFirstChild("Disc")
+			local hub = Instance.new("Part")
+			hub.Name = "SpinTimerHub"
+			hub.Anchored = true
+			hub.CanCollide = false
+			hub.CanQuery = false
+			hub.CanTouch = false
+			hub.Transparency = 1
+			hub.Size = Vector3.new(0.2, 0.2, 0.2)
+			hub.CFrame = CFrame.new(((disc or wheelModel):GetPivot()).Position)
+			hub.Parent = wheelModel
+
 			-- free-spin timer floating over the wheel, dressed in the kit's
 			-- own look: the label is a CLONE of the window's Timer (font,
 			-- stroke and color travel with it), and the READY green is the
-			-- HUD Cash counter's gradient. Lives in PlayerGui with the wheel
-			-- as adornee, so each player reads their own clock.
+			-- HUD Cash counter's gradient. Lives in PlayerGui with the still
+			-- hub marker as adornee (centred over the wheel), so each player
+			-- reads their own clock.
 			if timerLabel and timerLabel:IsA("TextLabel") then
 				local billboard = Instance.new("BillboardGui")
 				billboard.Name = "SpinTimerBillboard"
-				billboard.Adornee = wheelModel
+				billboard.ResetOnSpawn = false -- survive respawns (default true destroys it)
+				billboard.Adornee = hub
 				billboard.Size = UDim2.new(16, 0, 3.4, 0) -- studs
 				billboard.StudsOffsetWorldSpace = Vector3.new(0, 9.5, 0)
 				billboard.MaxDistance = 120
@@ -2361,17 +3209,12 @@ do
 			-- slice 1 is drawn pointing up, the disc's rest pose. The
 			-- placeholder decal is hidden locally; the model's red pointer
 			-- stands in for the UI arrow, so the replica's arrow goes.
-			local facePart
-			for _, part in ipairs(wheelModel:GetDescendants()) do
-				if part:IsA("BasePart") and part:FindFirstChildOfClass("Decal") then
-					facePart = part
-					break
-				end
-			end
+			-- (facePart resolved above, shared with the free-spin billboard.)
 			if facePart and wheel then
 				local decal = facePart:FindFirstChildOfClass("Decal")
 				local surface = Instance.new("SurfaceGui")
 				surface.Name = "WheelFaceMirror"
+				surface.ResetOnSpawn = false -- survive respawns (default true destroys it)
 				surface.Adornee = facePart
 				surface.Face = decal and decal.Face or Enum.NormalId.Back
 				surface.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
@@ -2733,7 +3576,7 @@ do
 	-- card. The clone's native layout floats the label above the plate and shows
 	-- a Store price row — recenter the label and hide that row so it's a clean
 	-- single-label gold button mirroring the green one.
-	local robuxButton, robuxLabel = cloneButton(SRC_GOLD10, "ROBUX ROLL")
+	local robuxButton, robuxLabel = cloneButton(SRC_GOLD10, "9 \u{E002}") -- Bull Roll X1 = 9 R$
 	robuxButton.Name = "RobuxRoll"
 	robuxButton.AnchorPoint = Vector2.new(0.5, 1)
 	robuxButton.Position = UDim2.new(0.69, 0, 1, 0)
@@ -2827,13 +3670,14 @@ do
 	-- with a thin INK outline + a cyan Highlight rim; a nested "IconFrame" whose border
 	-- is a rarity-colored GRADIENT stroke, holding the icon; and white GothamBlack Name
 	-- + a rarity label whose text carries the tier gradient. opts = { badge, badgeColor,
-	-- zIndex }.
+	-- zIndex, mutation = BullCatalog.Mutations id -> a colored "NAME" pill over the
+	-- icon box (viewports can't render particles, so the aura shows as its tag) }.
 	local CYAN = Color3.fromRGB(118, 214, 255) -- the shop cards' fixed Highlight-rim accent
 
 	-- The icon = a ViewportFrame rendering the bull's REAL model (tier skins from
 	-- BullrushAssets.Bulls, BullTemplate for commons) with section 12's 3/4-front
 	-- camera — bulls face -Z, so the eye sits off the -Z side, high and to the
-	-- left. Falls back to the old 🐂 glyph until the assets resolve or if a
+	-- left. Falls back to a BULL text glyph until the assets resolve or if a
 	-- modelName ever goes missing.
 	local function buildBullPreview(parent, bull, z)
 		local source = bull
@@ -2842,7 +3686,7 @@ do
 			local icon = Instance.new("TextLabel")
 			icon.BackgroundTransparency = 1
 			icon.Size = UDim2.fromScale(1, 1)
-			icon.Text = "🐂"
+			icon.Text = "BULL"
 			icon.TextScaled = true
 			icon.Font = KIT_FONT
 			icon.TextColor3 = PAPER
@@ -2968,12 +3812,34 @@ do
 			kitStroke(badge, INK, 2)
 			badge.Parent = card
 		end
+
+		-- mutation pill: floats over the top of the icon box in the mutation's
+		-- own color. Only real results pass one — filler strip cards stay plain,
+		-- so a pill scrolling past always means the aura actually dropped.
+		local mut = opts.mutation and BullCatalog and BullCatalog.Mutations
+			and BullCatalog.Mutations[opts.mutation]
+		if mut then
+			local pill = Instance.new("TextLabel")
+			pill.Name = "MutationTag"
+			pill.AnchorPoint = Vector2.new(0.5, 0.5)
+			pill.Position = UDim2.new(0.5, 0, 0.09, 0)
+			pill.Size = UDim2.new(0.82, 0, 0.12, 0)
+			pill.BackgroundColor3 = mut.color
+			pill.Text = mut.name:upper()
+			pill.Font = KIT_FONT
+			pill.TextScaled = true
+			pill.TextColor3 = PAPER
+			pill.ZIndex = z + 1
+			local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(1, 0); pc.Parent = pill
+			kitStroke(pill, INK, 2)
+			pill.Parent = card
+		end
 		return card
 	end
 
 	-------------------------------------------------- strip + animation
 	local winnerCard = nil -- the WINNER_INDEX card, popped when the wheel lands
-	local function buildStrip(headlineBullId)
+	local function buildStrip(headline) -- headline = the winning result {bullId, mutation?}
 		winnerCard = nil
 		for _, c in ipairs(strip:GetChildren()) do
 			if c:IsA("Frame") then
@@ -2981,11 +3847,13 @@ do
 			end
 		end
 		for i = 1, STRIP_LEN do
-			local id = (i == WINNER_INDEX) and headlineBullId or randomFiller()
-			local card = makeCard(id, UDim2.fromOffset(CARD_W, CARD_H))
+			local isWinner = i == WINNER_INDEX
+			local id = isWinner and headline.bullId or randomFiller()
+			local card = makeCard(id, UDim2.fromOffset(CARD_W, CARD_H),
+				if isWinner then { mutation = headline.mutation } else nil)
 			card.LayoutOrder = i
 			card.Parent = strip
-			if i == WINNER_INDEX then
+			if isWinner then
 				winnerCard = card
 			end
 		end
@@ -2997,12 +3865,18 @@ do
 	local function announce(results, headline)
 		local h = BullCatalog and BullCatalog.get(headline.bullId) or nil
 		local hname = (h and h.name) or headline.bullId
+		-- a mutation drop outranks the bull news in the card copy
+		local function mutSuffix(r)
+			local mut = r.mutation and BullCatalog and BullCatalog.Mutations
+				and BullCatalog.Mutations[r.mutation]
+			return if mut then (" — %s MUTATION!"):format(mut.name:upper()) else ""
+		end
 		if #results <= 1 then
 			local r = results[1] or headline
 			if r.isNew then
-				pushNotif(("You rolled %s — a new bull!"):format(hname), "green", 5)
+				pushNotif(("You rolled %s — a new bull!%s"):format(hname, mutSuffix(r)), "green", 5)
 			else
-				pushNotif(("Duplicate %s — +%s Money"):format(hname, comma(r.refund or 0)), "green", 4)
+				pushNotif(("Duplicate %s — +%s Money%s"):format(hname, comma(r.refund or 0), mutSuffix(r)), "green", 4)
 			end
 		else
 			local newCount = 0
@@ -3011,7 +3885,7 @@ do
 					newCount += 1
 				end
 			end
-			pushNotif(("10x roll: %d new — headline %s!"):format(newCount, hname), "green", 5)
+			pushNotif(("10x roll: %d new — headline %s!%s"):format(newCount, hname, mutSuffix(headline)), "green", 5)
 		end
 	end
 
@@ -3024,7 +3898,8 @@ do
 		for i, r in ipairs(results) do
 			local badge = r.isNew and "NEW" or ("+" .. comma(r.refund or 0))
 			local badgeColor = r.isNew and Color3.fromRGB(70, 180, 80) or Color3.fromRGB(190, 150, 55)
-			local mini = makeCard(r.bullId, UDim2.fromScale(1, 1), { badge = badge, badgeColor = badgeColor, zIndex = 21 })
+			local mini = makeCard(r.bullId, UDim2.fromScale(1, 1),
+				{ badge = badge, badgeColor = badgeColor, zIndex = 21, mutation = r.mutation })
 			mini.LayoutOrder = i
 			mini.Parent = gridHolder
 		end
@@ -3062,7 +3937,7 @@ do
 		marker.BackgroundColor3 = Color3.fromRGB(255, 220, 120)
 		pointer.TextColor3 = Color3.fromRGB(255, 220, 120)
 		pointerBottom.TextColor3 = Color3.fromRGB(255, 220, 120)
-		buildStrip(headline.bullId)
+		buildStrip(headline)
 		RunService.Heartbeat:Wait() -- let the list layout resolve before measuring
 
 		local vpCenter = carousel.AbsoluteSize.X / 2
@@ -3164,7 +4039,7 @@ do
 	-- The "ROLLED" ack below auto-opens the reveal wheel, and openFrame's
 	-- one-window rule closes this shop as it does.
 	local RARITY_ORDER = { "COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY" }
-	local BOX_EMOJI = { BASIC = "📦", SUPER = "🎁", MEGA = "💎" } -- placeholder icons
+	local BOX_EMOJI = { BASIC = "BASIC", SUPER = "SUPER", MEGA = "MEGA" } -- placeholder icons
 
 	local function colorHex(c)
 		return string.format("#%02X%02X%02X",
@@ -3181,8 +4056,9 @@ do
 		})
 	end
 
-	-- "64%  25%  9%  1.8%  0.2%" with each figure tinted its rarity color
-	local function oddsLine(weights)
+	-- "64%  25%  9%  1.8%  0.2%" with each figure tinted its rarity color,
+	-- plus the box's mutation odds as a trailing "MUT 8%" when it has any
+	local function oddsLine(weights, mutationChance)
 		local total = 0
 		for _, r in ipairs(RARITY_ORDER) do
 			total += math.max(tonumber(weights[r]) or 0, 0)
@@ -3191,15 +4067,21 @@ do
 			return ""
 		end
 		local parts = {}
+		local function pctFigure(pct)
+			-- one decimal, trailing ".0" stripped (float dust otherwise turns
+			-- a clean 7 into "7.0%")
+			return (("%.1f%%"):format(pct):gsub("%.0%%", "%%"))
+		end
 		for _, r in ipairs(RARITY_ORDER) do
 			local w = math.max(tonumber(weights[r]) or 0, 0)
 			if w > 0 then
-				local pct = w / total * 100
-				-- one decimal, trailing ".0" stripped (float dust otherwise turns
-				-- a clean 7 into "7.0%")
-				local figure = (("%.1f%%"):format(pct):gsub("%.0%%", "%%"))
-				table.insert(parts, ('<font color="%s">%s</font>'):format(colorHex(rarityColor(r)), figure))
+				table.insert(parts, ('<font color="%s">%s</font>'):format(
+					colorHex(rarityColor(r)), pctFigure(w / total * 100)))
 			end
+		end
+		local mutPct = (tonumber(mutationChance) or 0) * 100
+		if mutPct > 0 then
+			table.insert(parts, ('<font color="#C89CFF">MUT %s</font>'):format(pctFigure(mutPct)))
 		end
 		return table.concat(parts, "  ")
 	end
@@ -3215,19 +4097,35 @@ do
 		if headerName and headerName:IsA("TextLabel") then
 			headerName.Text = "Lucky Boxes"
 		end
-		-- the kit header ships a pickaxe glyph; swap it for a box emoji in the
-		-- same slot
+		-- the kit header ships a pickaxe glyph; swap it for a real lucky-box image
+		-- (the Mega box art) in the same slot, falling back to a BOX text glyph if no
+		-- box carries an image
 		local headerIcon = header and header:FindFirstChild("Icon")
 		if headerIcon and headerIcon:IsA("ImageLabel") then
-			headerIcon.Image = ""
-			local glyph = Instance.new("TextLabel")
-			glyph.Name = "BoxGlyph"
-			glyph.BackgroundTransparency = 1
-			glyph.Size = UDim2.fromScale(1, 1)
-			glyph.Text = "📦"
-			glyph.TextScaled = true
-			glyph.Font = KIT_FONT
-			glyph.Parent = headerIcon
+			local headerImage = (BOXES.MEGA and BOXES.MEGA.image)
+				or (BOXES.BASIC and BOXES.BASIC.image)
+			if not headerImage then
+				for _, b in BOXES do
+					if b.image then headerImage = b.image break end
+				end
+			end
+			local oldGlyph = headerIcon:FindFirstChild("BoxGlyph")
+			if oldGlyph then oldGlyph:Destroy() end
+			if headerImage then
+				headerIcon.Image = headerImage
+				headerIcon.ImageColor3 = Color3.new(1, 1, 1)
+				headerIcon.ImageTransparency = 0
+			else
+				headerIcon.Image = ""
+				local glyph = Instance.new("TextLabel")
+				glyph.Name = "BoxGlyph"
+				glyph.BackgroundTransparency = 1
+				glyph.Size = UDim2.fromScale(1, 1)
+				glyph.Text = "BOX"
+				glyph.TextScaled = true
+				glyph.Font = KIT_FONT
+				glyph.Parent = headerIcon
+			end
 		end
 
 		-- keep one kit card as the template, clear the demo pickaxes (cards =
@@ -3278,30 +4176,39 @@ do
 				end
 			end
 
-			-- icon box: hide the pickaxe image, drop in a box emoji; the kit's
-			-- rarity-gradient border stroke retints to the box color
+			-- icon box: show the box's own art on the kit Icon (or fall back to a
+			-- box emoji if a box has no image); the kit's rarity-gradient border
+			-- stroke retints to the box color
 			local iconFrame = card:FindFirstChild("IconFrame")
 			if iconFrame then
 				local img = iconFrame:FindFirstChild("Icon")
-				if img and img:IsA("GuiObject") then
-					img.Visible = false
-				end
 				local stroke = iconFrame:FindFirstChildWhichIsA("UIStroke")
 				local strokeGrad = stroke and stroke:FindFirstChildWhichIsA("UIGradient")
 				if strokeGrad and box.color then
 					strokeGrad.Color = boxRamp(box.color)
 				end
-				local emoji = Instance.new("TextLabel")
-				emoji.Name = "BoxIcon"
-				emoji.BackgroundTransparency = 1
-				emoji.AnchorPoint = Vector2.new(0.5, 0.5)
-				emoji.Position = UDim2.fromScale(0.5, 0.5)
-				emoji.Size = UDim2.fromScale(0.8, 0.8)
-				emoji.Text = BOX_EMOJI[boxId] or "📦"
-				emoji.TextScaled = true
-				emoji.Font = KIT_FONT
-				emoji.TextColor3 = PAPER
-				emoji.Parent = iconFrame
+				if box.image and img and img:IsA("ImageLabel") then
+					-- real box art: keep the kit Icon, just repoint + show it
+					img.Image = box.image
+					img.ImageColor3 = Color3.new(1, 1, 1)
+					img.ImageTransparency = 0
+					img.Visible = true
+				else
+					if img and img:IsA("GuiObject") then
+						img.Visible = false
+					end
+					local emoji = Instance.new("TextLabel")
+					emoji.Name = "BoxIcon"
+					emoji.BackgroundTransparency = 1
+					emoji.AnchorPoint = Vector2.new(0.5, 0.5)
+					emoji.Position = UDim2.fromScale(0.5, 0.5)
+					emoji.Size = UDim2.fromScale(0.8, 0.8)
+					emoji.Text = BOX_EMOJI[boxId] or "BOX"
+					emoji.TextScaled = true
+					emoji.Font = KIT_FONT
+					emoji.TextColor3 = PAPER
+					emoji.Parent = iconFrame
+				end
 			end
 
 			-- the kit "Power" row becomes the odds line
@@ -3313,7 +4220,7 @@ do
 					pIcon.Visible = false
 				end
 				powerLabel.RichText = true
-				powerLabel.Text = oddsLine(box.weights or {})
+				powerLabel.Text = oddsLine(box.weights or {}, box.mutationChance)
 			end
 
 			-- buy button: the kit's money button retexted to the box cost; the
@@ -3377,7 +4284,7 @@ do
 		end
 
 		-- model sources for the card previews (same folders section 12 uses);
-		-- missing assets just mean cards keep the 🐂 glyph fallback
+		-- missing assets just mean cards keep the BULL glyph fallback
 		local assets = ReplicatedStorage:WaitForChild("BullrushAssets", 10)
 		modelsFolder = assets and assets:FindFirstChild("Bulls")
 		fallbackModel = assets and assets:FindFirstChild("BullTemplate")
@@ -3448,8 +4355,9 @@ end
 -- repaints, section 11's shared BullAck handler explains any DENIED — only the
 -- "EQUIPPED" ack is handled here, so no card is ever shown twice). The bottom
 -- Quests strip becomes the collection meter. Inventory rides the Bulls (JSON)
--- + EquippedBull player attributes (Data.server on join, BullRollService after
--- rolls), so the window stays current even while closed — no fetch remote.
+-- + BullMutations (JSON) + EquippedBull player attributes (Data.server on
+-- join, BullRollService after rolls), so the window stays current even while
+-- closed — no fetch remote.
 do
 	local HttpService = game:GetService("HttpService")
 
@@ -3528,6 +4436,14 @@ do
 				return (ok and type(decoded) == "table") and decoded or {}
 			end
 
+			-- { bullId = { mutId = true } }, mirrored by BullRollService after rolls
+			local function mutationsByBull()
+				local ok, decoded = pcall(function()
+					return HttpService:JSONDecode(player:GetAttribute("BullMutations") or "{}")
+				end)
+				return (ok and type(decoded) == "table") and decoded or {}
+			end
+
 			local currentRarity = "COMMON"
 
 			-- 3/4-front render of the bull's real model; silhouetted when
@@ -3570,6 +4486,7 @@ do
 
 			local function rebuild()
 				local owned = ownedSet()
+				local mutations = mutationsByBull()
 				local equippedId = player:GetAttribute("EquippedBull") or "STARTER"
 
 				for _, child in ipairs(container:GetChildren()) do
@@ -3621,6 +4538,54 @@ do
 							rg.Parent = rarityLabel
 						end
 						buildPreview(inner, bull, has)
+
+						-- owned mutations ride a RichText strip over the top of the
+						-- preview, each name in its own color; ★ marks the one the
+						-- bull WEARS on throws (rarest — BullCatalog.bestMutation,
+						-- the same pick the server makes)
+						local ownedMuts = has and mutations[id] or nil
+						if ownedMuts and next(ownedMuts) ~= nil then
+							local worn = BullCatalog.bestMutation and BullCatalog.bestMutation(ownedMuts) or nil
+							local mutIds = {}
+							for mutId in ownedMuts do
+								if BullCatalog.Mutations[mutId] then
+									table.insert(mutIds, mutId)
+								end
+							end
+							table.sort(mutIds, function(a, b)
+								if a == worn then return true end
+								if b == worn then return false end
+								return (BullCatalog.Mutations[a].order or 99) < (BullCatalog.Mutations[b].order or 99)
+							end)
+							local pieces = {}
+							for _, mutId in ipairs(mutIds) do
+								local m = BullCatalog.Mutations[mutId]
+								local hex = string.format("#%02X%02X%02X",
+									math.floor(m.color.R * 255 + 0.5),
+									math.floor(m.color.G * 255 + 0.5),
+									math.floor(m.color.B * 255 + 0.5))
+								table.insert(pieces, ('<font color="%s">%s%s</font>'):format(
+									hex, if mutId == worn then "★" else "", m.name))
+							end
+							local nameSource = inner:FindFirstChild("Name")
+							if #pieces > 0 and nameSource and nameSource:IsA("TextLabel") then
+								local tag = nameSource:Clone()
+								tag.Name = "MutationTag"
+								tag.RichText = true
+								tag.Text = table.concat(pieces, " ")
+								tag.TextColor3 = Color3.fromRGB(255, 255, 255)
+								tag.Position = UDim2.fromScale(0.03, 0.03)
+								tag.Size = UDim2.fromScale(0.93, 0.11)
+								tag.ZIndex = 2
+								for _, g in ipairs(tag:GetChildren()) do
+									if g:IsA("UIGradient") then
+										g:Destroy()
+									end
+								end
+								tag.Parent = inner
+							end
+						end
+
 						if id == equippedId then
 							local stroke = inner:FindFirstChildWhichIsA("UIStroke")
 							if stroke then
@@ -3702,7 +4667,10 @@ do
 					local label = btn:FindFirstChild("Name")
 					if label and label:IsA("TextLabel") then
 						label.Text = DISPLAY[rarity]
-						-- the kit's gold/diamond/rainbow letter ramps fight the tier colors
+						-- the kit's gold/diamond/rainbow letter ramps fight the tier colors,
+						-- so swap them for the SAME tier ramp the card rarity labels wear
+						-- (lit top -> saturated middle -> shaded baseline) so the tabs read
+						-- with the same gradient look as everything else.
 						for _, g in ipairs(label:GetChildren()) do
 							if g:IsA("UIGradient") then
 								g:Destroy()
@@ -3710,7 +4678,20 @@ do
 						end
 						local tier = BullCatalog.Rarities[rarity]
 						if tier and tier.color then
-							label.TextColor3 = tier.color
+							local col = tier.color
+							-- white text: a UIGradient MULTIPLIES TextColor3, so the label
+							-- must stay white for the ramp to show at full value (exactly how
+							-- the card rarity labels do it). Tinting it first would double up
+							-- the tier colour and read too dark.
+							label.TextColor3 = Color3.fromRGB(255, 255, 255)
+							local grad = Instance.new("UIGradient")
+							grad.Rotation = 90 -- top -> baseline, highlight up top
+							grad.Color = ColorSequence.new({
+								ColorSequenceKeypoint.new(0, col:Lerp(Color3.fromRGB(255, 255, 255), 0.55)),
+								ColorSequenceKeypoint.new(0.45, col),
+								ColorSequenceKeypoint.new(1, col:Lerp(Color3.fromRGB(15, 15, 15), 0.5)),
+							})
+							grad.Parent = label
 						end
 					end
 					btn.Activated:Connect(function()
@@ -3723,24 +4704,14 @@ do
 				end
 			end
 
-			-- Quests strip -> collection meter + a one-line equip hint
+			-- Quests strip -> collection meter (the one-line equip hint below it is
+			-- hidden per user request 2026-07-10)
 			local progress = quests and quests:FindFirstChild("Progress")
 			local progressBar = progress and progress:FindFirstChild("Bar")
 			local progressAmount = progress and progress:FindFirstChild("Amount")
 			local questDes = quests and quests:FindFirstChild("QuestDes")
 			if questDes then
-				local amount = questDes:FindFirstChild("Amount")   -- leading words
-				local kind = questDes:FindFirstChild("Type")       -- the gradient-highlighted word
-				local rest = questDes:FindFirstChild("TextLabel")  -- trailing words
-				if amount and amount:IsA("TextLabel") then
-					amount.Text = "Equip your"
-				end
-				if kind and kind:IsA("TextLabel") then
-					kind.Text = "fastest"
-				end
-				if rest and rest:IsA("TextLabel") then
-					rest.Text = "bull — it charges when you take revenge!"
-				end
+				questDes.Visible = false
 			end
 			local function refreshMeter()
 				local owned = ownedSet()
@@ -3765,6 +4736,7 @@ do
 				rebuild()
 			end)
 			player:GetAttributeChangedSignal("EquippedBull"):Connect(rebuild)
+			player:GetAttributeChangedSignal("BullMutations"):Connect(rebuild)
 
 			-- ONLY the EQUIPPED ack: section 11's handler owns every DENIED
 			-- reason, so a second connection here would double the red cards.
@@ -3824,7 +4796,7 @@ do
 			[1] = "rbxassetid://107981444977206", -- fortune wheel slice #6 icon
 		}
 		-- emoji fallback for any reward kind without a wheel icon
-		local GLYPH = { money = "💰", spin = "🎡", box = "📦" }
+		local GLYPH = { money = "$", spin = "SPIN", box = "BOX" }
 
 		task.spawn(function()
 			local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
@@ -3840,16 +4812,15 @@ do
 			local REWARDS = Config.DAILY.REWARDS
 			local COOLDOWN = Config.DAILY.CLAIM_COOLDOWN
 
-			-- Locked cards (future days + the current day while on cooldown) show a
-			-- red tint + a live unlock countdown instead of a flat "Locked" (user
-			-- request 2026-07-09). Each card owns its own Claimed/Locked gradient, so
-			-- we recolour per-card: red while locked, its original grey restored once
-			-- the day is "Claimed". originalDim caches that grey per card.
-			local LOCKED_RED = ColorSequence.new(Color3.fromRGB(255, 96, 84), Color3.fromRGB(196, 40, 40))
-			-- the claimable day is painted green (user request 2026-07-09) — claimed
-			-- cards stay grey, future/locked cards red, the one ready-to-claim green
+			-- Card colours read as a left-to-right traffic-light progression (user
+			-- request 2026-07-10): GREEN = yours (claimed days a dim green, the
+			-- claimable day the bright green), AMBER = the single next-up day (the
+			-- one with the live unlock countdown), RED = every later locked day.
+			-- Each card owns its own gradients, so we recolour per-card.
 			local CLAIM_GREEN = ColorSequence.new(Color3.fromRGB(126, 217, 87), Color3.fromRGB(46, 160, 67))
-			local originalDim: { [number]: ColorSequence } = {}
+			local CLAIMED_GREEN = ColorSequence.new(Color3.fromRGB(88, 158, 73), Color3.fromRGB(48, 106, 52))
+			local NEXT_AMBER = ColorSequence.new(Color3.fromRGB(255, 189, 74), Color3.fromRGB(211, 132, 27))
+			local LOCKED_RED = ColorSequence.new(Color3.fromRGB(255, 96, 84), Color3.fromRGB(196, 40, 40))
 
 			-- "5h 12m" / "8m 3s" / "12s" — shared by the card countdowns + NextReward
 			local function formatDuration(seconds: number): string
@@ -3941,15 +4912,8 @@ do
 							glyph.TextScaled = true
 							glyph.Parent = icon
 						end
-						glyph.Text = GLYPH[reward.kind] or "🎁"
+						glyph.Text = GLYPH[reward.kind] or "?"
 					end
-				end
-				-- remember the card's stock grey so "Claimed" can restore it after
-				-- a locked card was tinted red
-				local button = card:FindFirstChild("Claim/Claimed/Locked")
-				local dimGrad = button and button:FindFirstChild("Claimed/Locked")
-				if dimGrad and dimGrad:IsA("UIGradient") then
-					originalDim[day] = dimGrad.Color
 				end
 			end
 
@@ -3981,6 +4945,10 @@ do
 				local ready = player:GetAttribute("DailyReady") == true
 				local state = stateOf(day)
 				local isClaim = state == "CLAIM"
+				-- the single next-up locked day: today while it's still on cooldown,
+				-- or tomorrow once a reward is ready — the only amber card and the
+				-- only one previewing a countdown
+				local nextLockedDay = if ready then currentDay + 1 else currentDay
 
 				if claimGrad and claimGrad:IsA("UIGradient") then
 					claimGrad.Enabled = isClaim
@@ -3990,11 +4958,12 @@ do
 				end
 				if dimGrad and dimGrad:IsA("UIGradient") then
 					dimGrad.Enabled = not isClaim
-					-- red while locked, the stock grey once it's been claimed
-					if state == "LOCKED" then
+					if state == "CLAIMED" then
+						dimGrad.Color = CLAIMED_GREEN
+					elseif day == nextLockedDay then
+						dimGrad.Color = NEXT_AMBER
+					else
 						dimGrad.Color = LOCKED_RED
-					elseif originalDim[day] then
-						dimGrad.Color = originalDim[day]
 					end
 				end
 				if btnLabel and btnLabel:IsA("TextLabel") then
@@ -4003,11 +4972,8 @@ do
 					elseif isClaim then
 						btnLabel.Text = "Claim"
 					else
-						-- LOCKED: only the SOONEST-to-unlock day previews a countdown;
-						-- every later day just reads "Locked" (user request 2026-07-09,
-						-- no more 40h/60h chain). The soonest locked day is today while
-						-- it's still on cooldown, or tomorrow once a reward is ready.
-						local nextLockedDay = if ready then currentDay + 1 else currentDay
+						-- LOCKED: only the next-up day previews a countdown; every
+						-- later day just reads "Locked" (no more 40h/60h chain)
 						if day == nextLockedDay then
 							local now = workspace:GetServerTimeNow()
 							local base = if ready then now else (tonumber(player:GetAttribute("NextDailyClaim")) or now)
@@ -4150,15 +5116,23 @@ end
 -- game type among the server's random ballot (Remotes.RoundState.voteOptions),
 -- with a live counter per option (info.voteCounts). Clicking casts/changes the
 -- vote via Remotes.VoteMode; the server echoes new counts on the next resend.
--- The buttons are CLONES of the real HUD buttons (retinted per mode) so they
--- match the rest of the game, same trick as the Bull Roll section's cloneButton.
+-- Cards are built FROM SCRATCH in the house UI DNA (dark glass, mode-tinted
+-- accents, gold-ramp headline, INK strokes) — NOT cloned from kit frames. A
+-- previous version cloned the Daily day-card, which dragged its Starburst/
+-- Highlight decor + gold Claim gradient along and flashed a full-screen
+-- yellow box on click.
+-- Each card's picture is an ACTUAL render of the game field (user requirement
+-- 2026-07-10: real field images, NOT stylised diagram art): a ViewportFrame
+-- of the real arena parts at that mode's round-start state. The flat
+-- drawMiniMap diagram survives only as the fallback until the arena resolves.
 -- Self-contained on its own overlay so it shows over whatever frame is open.
 -- The panel holds off until the player has respawned back in the lobby, then
 -- waits a short beat, so it never pops up over the arena / winner banner.
 do
 	local INK = Color3.fromRGB(15, 15, 15)
 	local PAPER = Color3.fromRGB(255, 255, 255)
-	local SELECT_GOLD = Color3.fromRGB(255, 214, 64)
+	local SELECT_GREEN = Color3.fromRGB(126, 217, 87) -- house claim-green (matches the Daily ready state)
+	local GLASS = Color3.fromRGB(26, 22, 32)
 	local REVEAL_PAUSE = 2 -- seconds after the lobby respawn before the panel slides in
 	-- mode.name -> accent colour (matches the CurrentArea banner's GAME_TYPE map)
 	local MODE_COLOR = {
@@ -4168,42 +5142,73 @@ do
 		["Stampede"] = Color3.fromRGB(255, 80, 70),
 		["Team Rush"] = Color3.fromRGB(200, 120, 255),
 		["Low Gravity"] = Color3.fromRGB(120, 220, 255),
+		["High Speed"] = Color3.fromRGB(255, 221, 51),
 	}
-	-- Per-mode "snapshot" recipe for the mini-map that sits in each vote card's
-	-- icon slot. Every mode plays on the SAME physical 9x9 arena, so a photo of
-	-- the map would read identically for all of them — instead we draw a stylised
-	-- top-down diagram: a dark 9x9 board footprint with the mode's starting play
-	-- window (Config.MODES[*].startSize) lit up in the mode colour, plus a small
-	-- indicator glyph for the trait that actually distinguishes same-size modes.
-	-- `window` mirrors Config startSize; `kind` picks the overlay. Hardcoded to
-	-- mirror Config the same way MODE_COLOR mirrors the banner's GAME_TYPE map.
+	-- Per-mode recipe for the field picture. `kind` picks the overlay/dressing
+	-- (bulls on the field, team tint, corner glyph chip); `window` is only the
+	-- FALLBACK start size for the diagram — the real render reads startSize
+	-- live from Config.MODES by mode id, so it can't go stale.
 	local MODE_SNAPSHOT = {
-		["Classic"] = { window = 7, kind = "plain" },
-		["Mega Grid"] = { window = 9, kind = "mega" }, -- fills the board + shrink rings
-		["Small Grid"] = { window = 5, kind = "plain" }, -- tight window reads as "small"
-		["Stampede"] = { window = 7, kind = "bulls" }, -- extra bull dots = more danger
-		["Team Rush"] = { window = 7, kind = "teams" }, -- red/blue split window
-		["Low Gravity"] = { window = 7, kind = "gravity" }, -- up-arrows = floaty
+		["Classic"] = { window = 9, kind = "plain" },
+		["Mega Grid"] = { window = 11, kind = "mega" }, -- fills the whole board
+		["Small Grid"] = { window = 7, kind = "plain" }, -- tight island reads as "small"
+		["Stampede"] = { window = 9, kind = "bulls" }, -- real bulls on the field
+		["Team Rush"] = { window = 9, kind = "teams" }, -- red/blue half tint
+		["Low Gravity"] = { window = 9, kind = "gravity" }, -- corner ▲ chip
+		["High Speed"] = { window = 9, kind = "speed" }, -- corner » chip
 	}
 	local TEAM_RED = Color3.fromRGB(255, 80, 70)
 	local TEAM_BLUE = Color3.fromRGB(95, 175, 255)
-	local BOARD_GRID = 9 -- Config.GRID_SIZE: the full arena is a 9x9 tile grid
+	local BOARD_GRID = 11 -- Config.GRID_SIZE (re-read live once Config resolves)
+	-- the real in-game tile palette (mirrors ShrinkService's reset)
+	local CHECKER_LIGHT = Color3.fromRGB(214, 182, 133)
+	local CHECKER_DARK = Color3.fromRGB(188, 152, 102)
 
-	-- Paint a top-down mode snapshot into the card's icon slot: hide the shipped
-	-- emblem, host a square board, tile the starting window, then overlay the
-	-- mode's indicator. Rebuilt per ballot inside a fresh clone, so no stale art.
-	local function drawMiniMap(icon, name, col)
-		icon.Image = ""
-		icon.BackgroundTransparency = 1
-		icon.ImageTransparency = 1
-		local old = icon:FindFirstChild("MiniMap")
-		if old then
-			old:Destroy()
+	-- live handles resolved off-thread below; until they land drawMiniMap's
+	-- diagram is the graceful fallback (upgraded in place once they resolve)
+	local GridUtil = nil -- ReplicatedStorage.Bullrush.GridUtil (canonical tile math)
+	local ConfigMod = nil -- ReplicatedStorage.Bullrush.Config (live startSize per mode)
+	local arenaSource = nil -- Workspace.BullrushArena (Tiles + LavaFloor)
+	local bullsFolder = nil -- ReplicatedStorage.BullrushAssets.Bulls (real bull models)
+
+	-- house gold ramp for the card's mode-name headline (same family as the
+	-- shop/daily headers: warm cream down to deep gold)
+	local GOLD_RAMP = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 243, 194)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 205, 110)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 170, 60)),
+	})
+
+	-- start-window side length for a mode: live Config first, fallback table second
+	local function windowFor(id, name)
+		if ConfigMod and typeof(ConfigMod.MODES) == "table" then
+			for _, m in ipairs(ConfigMod.MODES) do
+				if m.id == id and typeof(m.startSize) == "number" then
+					return m.startSize
+				end
+			end
 		end
-		local desc = MODE_SNAPSHOT[name] or { window = 7, kind = "plain" }
-		local w = math.max(1, desc.window)
+		local desc = MODE_SNAPSHOT[name]
+		return (desc and desc.window) or 9
+	end
 
-		-- keep the diagram square + centred no matter the icon slot's shape
+	local function clearArt(panel)
+		for _, nm in ipairs({ "ArenaShot", "MiniMap", "Chip" }) do
+			local old = panel:FindFirstChild(nm)
+			if old then
+				old:Destroy()
+			end
+		end
+	end
+
+	-- FALLBACK ONLY (pre-arena-resolve): flat top-down diagram — a dark board
+	-- footprint with the mode's starting window lit in its colour.
+	local function drawMiniMap(panel, name, col)
+		clearArt(panel)
+		local desc = MODE_SNAPSHOT[name] or { window = 9, kind = "plain" }
+		local w = math.clamp(desc.window, 1, BOARD_GRID)
+
+		-- keep the diagram square + centred no matter the panel's shape
 		local map = Instance.new("Frame")
 		map.Name = "MiniMap"
 		map.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -4213,9 +5218,8 @@ do
 		local ar = Instance.new("UIAspectRatioConstraint")
 		ar.AspectRatio = 1
 		ar.Parent = map
-		map.Parent = icon
+		map.Parent = panel
 
-		-- board = the full 9x9 arena footprint (the "map")
 		local board = Instance.new("Frame")
 		board.Name = "Board"
 		board.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -4226,14 +5230,8 @@ do
 		local bc = Instance.new("UICorner")
 		bc.CornerRadius = UDim.new(0, 4)
 		bc.Parent = board
-		local bs = Instance.new("UIStroke")
-		bs.Color = INK
-		bs.Thickness = 1.5
-		bs.Transparency = 0.15
-		bs.Parent = board
 		board.Parent = map
 
-		-- window = the lit starting play zone (startSize/9 of the board)
 		local frac = w / BOARD_GRID
 		local win = Instance.new("Frame")
 		win.Name = "Window"
@@ -4244,7 +5242,6 @@ do
 		win.Parent = board
 
 		local mid = (w + 1) / 2
-		local bright = col:Lerp(PAPER, 0.12)
 		for r = 1, w do
 			for c = 1, w do
 				local cell = Instance.new("Frame")
@@ -4252,164 +5249,68 @@ do
 				-- -1px gap bleeds the dark board through as tile grid lines
 				cell.Size = UDim2.new(1 / w, -1, 1 / w, -1)
 				cell.Position = UDim2.new((c - 1) / w, 0, (r - 1) / w, 0)
-				local cellCol = bright
+				local cellCol = col:Lerp(PAPER, 0.28)
 				if desc.kind == "teams" then
 					if c < mid then
-						cellCol = TEAM_RED:Lerp(PAPER, 0.06)
+						cellCol = TEAM_RED:Lerp(PAPER, 0.18)
 					elseif c > mid then
-						cellCol = TEAM_BLUE:Lerp(PAPER, 0.06)
+						cellCol = TEAM_BLUE:Lerp(PAPER, 0.18)
 					else
-						cellCol = Color3.fromRGB(40, 40, 46) -- no-man's-land seam
+						cellCol = Color3.fromRGB(40, 40, 46)
 					end
 				end
 				cell.BackgroundColor3 = cellCol
 				cell.Parent = win
 			end
 		end
-
-		-- trait indicator overlaid on the window
-		if desc.kind == "bulls" then
-			-- scattered dark dots ringed red = "more bulls charging"
-			for _, s in ipairs({ { 0.26, 0.3 }, { 0.72, 0.36 }, { 0.46, 0.72 } }) do
-				local dot = Instance.new("Frame")
-				dot.AnchorPoint = Vector2.new(0.5, 0.5)
-				dot.Position = UDim2.new(s[1], 0, s[2], 0)
-				dot.Size = UDim2.new(0.24, 0, 0.24, 0)
-				dot.BackgroundColor3 = Color3.fromRGB(22, 18, 20)
-				dot.BorderSizePixel = 0
-				local dcn = Instance.new("UICorner")
-				dcn.CornerRadius = UDim.new(1, 0)
-				dcn.Parent = dot
-				local dst = Instance.new("UIStroke")
-				dst.Color = TEAM_RED
-				dst.Thickness = 1.2
-				dst.Parent = dot
-				dot.Parent = win
-			end
-		elseif desc.kind == "gravity" then
-			-- floaty up-arrows
-			for _, x in ipairs({ 0.3, 0.7 }) do
-				local arr = Instance.new("TextLabel")
-				arr.BackgroundTransparency = 1
-				arr.AnchorPoint = Vector2.new(0.5, 0.5)
-				arr.Position = UDim2.new(x, 0, 0.5, 0)
-				arr.Size = UDim2.new(0.42, 0, 0.72, 0)
-				arr.Font = Enum.Font.GothamBlack
-				arr.Text = "▲"
-				arr.TextScaled = true
-				arr.TextColor3 = Color3.fromRGB(20, 20, 26)
-				arr.TextStrokeColor3 = PAPER
-				arr.TextStrokeTransparency = 0.25
-				arr.Parent = win
-			end
-		elseif desc.kind == "mega" then
-			-- concentric rings hinting the huge grid collapses inward
-			for i = 1, 2 do
-				local f = 1 - i * 0.28
-				local ring = Instance.new("Frame")
-				ring.AnchorPoint = Vector2.new(0.5, 0.5)
-				ring.Position = UDim2.new(0.5, 0, 0.5, 0)
-				ring.Size = UDim2.new(f, 0, f, 0)
-				ring.BackgroundTransparency = 1
-				local rst = Instance.new("UIStroke")
-				rst.Color = INK
-				rst.Thickness = 1.5
-				rst.Transparency = 0.35
-				rst.Parent = ring
-				ring.Parent = win
-			end
-		end
 	end
 
-	-- Real in-game arena render for the snapshot: resolved off-thread so the UI
-	-- never stalls if Bullrush / the arena is absent from a place copy. GridUtil
-	-- gives canonical tile positions so we rebuild a PRISTINE full grid regardless
-	-- of the arena's live shrink state at intermission (tiles sit sunk/charred
-	-- from last round until the next reset()). Until these resolve, drawMiniMap's
-	-- diagram is the graceful fallback.
-	local arenaSource = nil -- Workspace.BullrushArena (Tiles + Walls + LavaFloor)
-	local GridUtil = nil
-	task.spawn(function()
-		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
-		if bullrush then
-			local gu = bullrush:FindFirstChild("GridUtil")
-			if gu then
-				local ok, mod = pcall(require, gu)
-				if ok then
-					GridUtil = mod
-				end
-			end
-		end
-		local arena = workspace:WaitForChild("BullrushArena", 30)
-		if arena and arena:WaitForChild("Tiles", 10) then
-			arenaSource = arena
-		end
-	end)
-
-	-- Paint an ACTUAL top-down snapshot of the arena into the card's icon slot: a
-	-- ViewportFrame rendering clones of the real arena parts — the tile grid, the
-	-- LavaFloor moat it sits in, and the boundary walls — normalised to their
-	-- canonical positions. The mode's starting window (startSize) is lit + mode-
-	-- tinted and raised, the tiles outside it are charred and sunk (the shrunk/
-	-- dead ground), and the walls hug the window; the camera always frames the
-	-- full 9x9 so the arena SIZE reads (Small = small bright core in the lava,
-	-- Mega = fills the board). Team Rush splits the window red/blue.
-	local function drawArenaSnapshot(icon, name, col)
+	-- THE REAL PICTURE: a ViewportFrame rendering clones of the actual arena
+	-- parts — the checkerboard tile island at the mode's start size, sitting
+	-- in the real lava moat — exactly how the field looks at that mode's round
+	-- start (tiles outside the start window are invisible in-game, so they are
+	-- not rendered). The camera frames the full 11x11 footprint at a constant
+	-- scale, so the island SIZE is what changes between modes: Small Grid is a
+	-- tight island in a sea of lava, Mega Grid fills the frame. Stampede
+	-- scatters real bull models mid-charge on the field; Team Rush tints the
+	-- two halves; Low Gravity / High Speed wear a small corner glyph chip.
+	local function drawArenaShot(panel, id, name, col)
 		if not (arenaSource and GridUtil) then
-			drawMiniMap(icon, name, col) -- diagram fallback until the arena resolves
+			drawMiniMap(panel, name, col)
 			return
 		end
 		local tilesFolder = arenaSource:FindFirstChild("Tiles")
-		if not tilesFolder then
-			drawMiniMap(icon, name, col)
+		local sampleTile = tilesFolder and tilesFolder:FindFirstChildWhichIsA("BasePart")
+		if not sampleTile then
+			drawMiniMap(panel, name, col)
 			return
 		end
-		icon.Image = ""
-		icon.BackgroundTransparency = 1
-		icon.ImageTransparency = 1
-		local old = icon:FindFirstChild("ArenaShot")
-		if old then
-			old:Destroy()
-		end
-		local mini = icon:FindFirstChild("MiniMap")
-		if mini then
-			mini:Destroy()
-		end
+		clearArt(panel)
 
-		local desc = MODE_SNAPSHOT[name] or { window = 7, kind = "plain" }
-		local w = math.clamp(desc.window, 1, BOARD_GRID)
-		local margin = (BOARD_GRID - w) / 2 -- rings outside the window each side
-		local lo, hi = 1 + margin, BOARD_GRID - margin -- window index span
+		local desc = MODE_SNAPSHOT[name] or { window = 9, kind = "plain" }
+		local w = math.clamp(windowFor(id, name), 1, BOARD_GRID)
+		local margin = (BOARD_GRID - w) / 2
+		local lo, hi = 1 + margin, BOARD_GRID - margin
 		local mid = (BOARD_GRID + 1) / 2
 
 		local vp = Instance.new("ViewportFrame")
 		vp.Name = "ArenaShot"
-		vp.AnchorPoint = Vector2.new(0.5, 0.5)
-		vp.Position = UDim2.fromScale(0.5, 0.5)
 		vp.Size = UDim2.fromScale(1, 1)
-		vp.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
+		-- backdrop tone matches the lava so any sliver past the moat's edge
+		-- reads as more lava, never a black hole (user complaint 2026-07-10)
+		vp.BackgroundColor3 = Color3.fromRGB(110, 38, 14)
 		vp.BackgroundTransparency = 0
-		vp.Ambient = Color3.fromRGB(150, 146, 150)
-		vp.LightColor = Color3.fromRGB(255, 250, 240)
-		vp.LightDirection = Vector3.new(-0.4, -1, -0.55)
+		vp.Ambient = Color3.fromRGB(160, 155, 150)
+		vp.LightColor = Color3.fromRGB(255, 248, 235)
+		vp.LightDirection = Vector3.new(-0.35, -1, -0.5)
 		local vc = Instance.new("UICorner")
-		vc.CornerRadius = UDim.new(0, 6)
+		vc.CornerRadius = UDim.new(0, 8)
 		vc.Parent = vp
-		local vs = Instance.new("UIStroke")
-		vs.Color = INK
-		vs.Thickness = 1.5
-		vs.Transparency = 0.2
-		vs.Parent = vp
 
 		local world = Instance.new("Model")
 		world.Name = "Arena"
 
-		-- tile spacing (centres touch, so part width == spacing == 2*halfTile)
-		local sp = GridUtil.tileCenter(1, 2).X - GridUtil.tileCenter(1, 1).X
-		local halfTile = sp / 2
-
-		-- the environment: the LavaFloor moat the grid island sits in (clone as-is,
-		-- it keeps its orange colour / position under the tiles)
+		-- the real lava moat the island sits in (clone as-is)
 		local lavaPart = arenaSource:FindFirstChild("LavaFloor")
 		if lavaPart and lavaPart:IsA("BasePart") then
 			local lava = lavaPart:Clone()
@@ -4417,110 +5318,124 @@ do
 			lava.Anchored = true
 			lava.CanCollide = false
 			lava.CastShadow = false
+			-- oversize the moat so its far edge never enters the frame — the
+			-- lava must run to every corner of the shot, no backdrop showing
+			lava.Size = Vector3.new(lava.Size.X * 4, lava.Size.Y, lava.Size.Z * 4)
 			lava.Parent = world
 		end
 
-		local CHAR = Color3.fromRGB(46, 42, 40) -- charred dead ground outside the window
-		for _, src in ipairs(tilesFolder:GetChildren()) do
-			if src:IsA("BasePart") then
-				local r, c = string.match(src.Name, "^Tile_(%d+)_(%d+)$")
-				r, c = tonumber(r), tonumber(c)
-				if r and c then
-					local tile = src:Clone()
-					tile.Anchored = true
-					local inWindow = r >= lo and r <= hi and c >= lo and c <= hi
-					local top = GridUtil.tileCenter(r, c) -- canonical TOP-surface centre
-					-- sit out-of-window tiles a few studs lower so they read as sunk
-					local yTop = if inWindow then top.Y else top.Y - 4
-					tile.CFrame = CFrame.new(top.X, yTop - tile.Size.Y / 2, top.Z)
-					if inWindow then
-						local light = (r + c) % 2 == 0 -- checkerboard parity
-						local base = col
-						if desc.kind == "teams" then
-							base = if c < mid then TEAM_RED elseif c > mid then TEAM_BLUE else Color3.fromRGB(70, 70, 78)
-						end
-						tile.Color = if light then base:Lerp(PAPER, 0.18) else base:Lerp(INK, 0.28)
-						tile.Material = Enum.Material.SmoothPlastic
-						tile.Transparency = 0
-					else
-						tile.Color = CHAR
-						tile.Material = Enum.Material.Slate
-						tile.Transparency = 0.05
+		-- the island: only the start window's tiles, at canonical positions
+		-- with the real checkerboard palette (ShrinkService's reset look)
+		local sp = GridUtil.tileCenter(1, 2).X - GridUtil.tileCenter(1, 1).X
+		for r = lo, hi do
+			for c = lo, hi do
+				local tile = sampleTile:Clone()
+				tile:ClearAllChildren()
+				tile.Anchored = true
+				tile.CanCollide = false
+				tile.CastShadow = false
+				local top = GridUtil.tileCenter(r, c) -- canonical TOP-surface centre
+				tile.CFrame = CFrame.new(top.X, top.Y - tile.Size.Y / 2, top.Z)
+				local base = if (r + c) % 2 == 0 then CHECKER_LIGHT else CHECKER_DARK
+				if desc.kind == "teams" then
+					-- light half-tint so the red/blue split reads on real tiles
+					if c < mid then
+						base = base:Lerp(TEAM_RED, 0.3)
+					elseif c > mid then
+						base = base:Lerp(TEAM_BLUE, 0.3)
 					end
-					tile.Parent = world
+				end
+				tile.Color = base
+				tile.Transparency = 0
+				tile.Parent = world
+			end
+		end
+
+		-- Stampede: real bull models mid-charge on the field (stripped of
+		-- scripts/sounds/vfx — ViewportFrame clones must stay inert)
+		if desc.kind == "bulls" and bullsFolder then
+			local picks = { "Bull_COMMON_RED", "Bull_COMMON_YELLOW", "Bull_COMMON_STEEL" }
+			local lanes = {
+				{ axis = "row", index = math.floor(lo + (hi - lo) * 0.25 + 0.5), direction = 1, t = 0.3 },
+				{ axis = "row", index = math.floor(lo + (hi - lo) * 0.8 + 0.5), direction = -1, t = 0.55 },
+				{ axis = "col", index = math.floor(mid + 0.5), direction = 1, t = 0.72 },
+			}
+			local bounds = GridUtil.boundsForStage(0, w)
+			for i, lane in ipairs(lanes) do
+				local src = bullsFolder:FindFirstChild(picks[i]) or bullsFolder:FindFirstChildWhichIsA("Model")
+				if src then
+					pcall(function()
+						local bull = src:Clone()
+						for _, d in ipairs(bull:GetDescendants()) do
+							if
+								d:IsA("BaseScript")
+								or d:IsA("ModuleScript")
+								or d:IsA("Sound")
+								or d:IsA("ParticleEmitter")
+								or d:IsA("Beam")
+								or d:IsA("Trail")
+							then
+								d:Destroy()
+							elseif d:IsA("BasePart") then
+								d.Anchored = true
+								d.CanCollide = false
+								d.CastShadow = false
+							end
+						end
+						local startPos, endPos = GridUtil.lanePath(lane, bounds)
+						bull:PivotTo(CFrame.lookAt(startPos:Lerp(endPos, lane.t), endPos))
+						bull.Parent = world
+					end)
 				end
 			end
 		end
 
-		-- the boundaries: clone the guard walls and snap them to the start-window
-		-- perimeter (same math as ShrinkService.updateWalls). In-game they're
-		-- invisible physics fences (Transparency 1) — render them faintly here so
-		-- the enclosure reads, tinted to the mode. Their built height/Y is kept.
-		local wallsFolder = arenaSource:FindFirstChild("Walls")
-		if wallsFolder then
-			local WALL_T = 1
-			local minC, maxC = GridUtil.tileCenter(lo, lo), GridUtil.tileCenter(hi, hi)
-			local minX, maxX = minC.X - halfTile, maxC.X + halfTile
-			local minZ, maxZ = minC.Z - halfTile, maxC.Z + halfTile
-			local midX, midZ = (minX + maxX) / 2, (minZ + maxZ) / 2
-			local spanX = maxX - minX + 2 * WALL_T
-			local spanZ = maxZ - minZ + 2 * WALL_T
-			local function placeWall(nm, x, z, sx, sz)
-				local wsrc = wallsFolder:FindFirstChild(nm)
-				if not (wsrc and wsrc:IsA("BasePart")) then
-					return
-				end
-				local wl = wsrc:Clone()
-				wl:ClearAllChildren()
-				wl.Anchored = true
-				wl.CanCollide = false
-				wl.CastShadow = false
-				wl.Size = Vector3.new(sx, wl.Size.Y, sz)
-				wl.CFrame = CFrame.new(x, wl.Position.Y, z) -- keep the built wall height/Y
-				wl.Material = Enum.Material.SmoothPlastic
-				wl.Color = col:Lerp(PAPER, 0.4)
-				wl.Transparency = 0.55
-				wl.Parent = world
-			end
-			placeWall("WallNorth", midX, minZ - WALL_T / 2, spanX, WALL_T)
-			placeWall("WallSouth", midX, maxZ + WALL_T / 2, spanX, WALL_T)
-			placeWall("WallWest", minX - WALL_T / 2, midZ, WALL_T, spanZ)
-			placeWall("WallEast", maxX + WALL_T / 2, midZ, WALL_T, spanZ)
-		end
-
-		-- camera frames the FULL 9x9 tile grid (constant scale) angled top-down so
-		-- the lit window's SIZE is what changes between modes. Frame by the grid
-		-- span — NOT the world bbox, which the wide lava moat would blow out — and
-		-- aim at the top checkerboard surface, not mid-pillar.
-		local target = GridUtil.tileCenter(mid, mid) -- board centre, top surface
-		local gridSpan = BOARD_GRID * sp -- edge-to-edge width of the 9x9 grid
+		-- camera frames the FULL physical grid (constant scale across modes)
+		-- angled down at the island so tile depth + the lava moat both read;
+		-- pose eyeballed against the real arena in the editor 2026-07-10, then
+		-- zoomed twice on user feedback: 1.15 distance at a steeper 1.15
+		-- elevation = the board dominates the frame (Mega may kiss the frame
+		-- corners; smaller windows sit comfortably) with lava to every edge
+		local target = GridUtil.tileCenter(mid, mid)
+		local gridSpan = BOARD_GRID * sp
 		local camera = Instance.new("Camera")
 		camera.FieldOfView = 55
-		camera.CFrame = CFrame.lookAt(target + Vector3.new(-0.28, 1, -0.62).Unit * gridSpan * 1.35, target)
+		camera.CFrame = CFrame.lookAt(target + Vector3.new(-0.36, 1.15, -0.66).Unit * gridSpan * 1.15, target)
 		camera.Parent = vp
 		vp.CurrentCamera = camera
 		world.Parent = vp
-		vp.Parent = icon
-	end
+		vp.Parent = panel
 
-	-- Reuse the Daily reward day-card as the vote option: a polished dark-glass
-	-- plate with an icon, a title, a value line, and a styled claim button. We
-	-- clone it and repaint each slot (icon tint, mode name, live count, VOTE
-	-- button) — same "clone real kit UI" trick the Bull Roll section uses.
-	local function resolve(...)
-		local node = gui
-		for _, name in ipairs({ ... }) do
-			node = node and node:FindFirstChild(name)
+		-- trait chip for the modes whose difference isn't visible on the field
+		if desc.kind == "gravity" or desc.kind == "speed" then
+			local chip = Instance.new("TextLabel")
+			chip.Name = "Chip"
+			chip.AnchorPoint = Vector2.new(1, 0)
+			chip.Position = UDim2.new(1, -4, 0, 4)
+			chip.Size = UDim2.new(0, 22, 0, 22)
+			chip.BackgroundColor3 = INK
+			chip.BackgroundTransparency = 0.25
+			chip.BorderSizePixel = 0
+			chip.Font = Enum.Font.GothamBlack
+			chip.Text = if desc.kind == "gravity" then "▲" else "»"
+			chip.TextColor3 = col
+			chip.TextSize = 15
+			chip.ZIndex = 3
+			local chipCorner = Instance.new("UICorner")
+			chipCorner.CornerRadius = UDim.new(1, 0)
+			chipCorner.Parent = chip
+			chip.Parent = panel
 		end
-		return node
 	end
-	local SRC_CARD = resolve("Frames", "Daily", "Container", "1")
 
 	local voteRemote = nil -- Remotes.VoteMode, resolved off-thread below
 
 	local voteGui = Instance.new("ScreenGui")
 	voteGui.Name = "VoteGui"
-	voteGui.DisplayOrder = 9000 -- under the notif/elim overlay (10000), above frames
+	voteGui.DisplayOrder = -20 -- LOWEST priority: the Main ScreenGui (shop +
+	-- every tab frame) sits at DisplayOrder -10 (NOT the default 0!), the
+	-- Bullrush HUD at 10, notifs at 10000 — -20 keeps the vote HUD under all
+	-- of them, so any open tab covers it (user request 2026-07-10)
 	voteGui.ResetOnSpawn = false
 	voteGui.IgnoreGuiInset = false
 	voteGui.Enabled = false
@@ -4530,10 +5445,20 @@ do
 	panel.Name = "Panel"
 	panel.AnchorPoint = Vector2.new(0.5, 1)
 	panel.Position = UDim2.new(0.5, 0, 1, -18)
-	panel.Size = UDim2.new(0, 510, 0, 220)
+	panel.Size = UDim2.new(0, 510, 0, 236)
 	panel.BackgroundTransparency = 1
 	panel.Parent = voteGui
 	ensureScale(panel)
+
+	-- The panel is fixed-pixel (510x236), so on a phone viewport it swallows
+	-- most of the screen. Shrink the whole panel toward the viewport (min of the
+	-- width/height ratios vs a 1280x720 baseline, floored so the buttons stay
+	-- tappable); desktop keeps scale 1.
+	local function fitScale(): number
+		local cam = workspace.CurrentCamera
+		local vp = if cam then cam.ViewportSize else Vector2.new(1280, 720)
+		return math.clamp(math.min(vp.X / 1280, vp.Y / 720), 0.65, 1)
+	end
 
 	local header = Instance.new("TextLabel")
 	header.Name = "Header"
@@ -4548,13 +5473,61 @@ do
 	header.TextScaled = false
 	header.TextSize = 24
 	header.Text = "VOTE NEXT MODE"
+	local headerStroke = Instance.new("UIStroke")
+	headerStroke.Color = INK
+	headerStroke.Thickness = 2
+	headerStroke.Parent = header
 	header.Parent = panel
+
+	-- floating close X: a CLONE of the kit's red X (the Spinner's close button,
+	-- same source §11's roll screen clones) so it's pixel-identical to every
+	-- other close in the game — red stud plate + white "X" already on board,
+	-- just reanchored to the panel's top-right. Scratch red fallback if the kit
+	-- ever moves. Wired to hide() further down, after hide/revealToken exist.
+	local closeSrc = gui:FindFirstChild("Frames")
+	closeSrc = closeSrc and closeSrc:FindFirstChild("Spinner")
+	closeSrc = closeSrc and closeSrc:FindFirstChild("Close")
+	closeSrc = closeSrc and closeSrc:FindFirstChild("Close")
+	local closeBtn
+	if closeSrc and closeSrc:IsA("GuiButton") then
+		closeBtn = closeSrc:Clone()
+		closeBtn.Visible = true
+		closeBtn.Active = true
+		for _, d in ipairs(closeBtn:GetDescendants()) do
+			if d:IsA("UIAspectRatioConstraint") then
+				d:Destroy()
+			end
+		end
+	else
+		closeBtn = Instance.new("TextButton")
+		closeBtn.BackgroundColor3 = Color3.fromRGB(255, 80, 70)
+		closeBtn.BorderSizePixel = 0
+		closeBtn.AutoButtonColor = false
+		closeBtn.Font = Enum.Font.GothamBlack
+		closeBtn.Text = "X"
+		closeBtn.TextColor3 = PAPER
+		closeBtn.TextSize = 16
+		local closeCorner = Instance.new("UICorner")
+		closeCorner.CornerRadius = UDim.new(0, 10)
+		closeCorner.Parent = closeBtn
+		local closeStroke = Instance.new("UIStroke")
+		closeStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		closeStroke.Color = INK
+		closeStroke.Thickness = 2
+		closeStroke.Parent = closeBtn
+	end
+	closeBtn.Name = "Close"
+	closeBtn.AnchorPoint = Vector2.new(1, 0)
+	closeBtn.Position = UDim2.new(1, 6, 0, -6)
+	closeBtn.Size = UDim2.new(0, 34, 0, 34)
+	closeBtn.Parent = panel
+	addButtonFeedback(closeBtn)
 
 	local row = Instance.new("Frame")
 	row.Name = "Row"
 	row.AnchorPoint = Vector2.new(0.5, 1)
 	row.Position = UDim2.new(0.5, 0, 1, 0)
-	row.Size = UDim2.new(1, 0, 0, 182)
+	row.Size = UDim2.new(1, 0, 0, 198)
 	row.BackgroundTransparency = 1
 	row.Parent = panel
 
@@ -4566,7 +5539,8 @@ do
 	rowLayout.Padding = UDim.new(0, 14)
 	rowLayout.Parent = row
 
-	-- id -> { cell, stroke, count } for the cards currently on the row
+	-- id -> { card, stroke, count, btnLabel, panel/modeId/modeName/modeCol
+	-- (for the late-resolve re-render) } for the cards currently on the row
 	local cards = {}
 	local currentKey = nil -- concat of the ballot's ids; rebuild when it changes
 	local myVote = nil
@@ -4585,11 +5559,16 @@ do
 		for id, c in cards do
 			local selected = (id == myVote)
 			if c.stroke then
-				c.stroke.Color = if selected then SELECT_GOLD else c.strokeColor
+				c.stroke.Color = if selected then SELECT_GREEN else c.strokeColor
 				c.stroke.Thickness = if selected then 3 else c.strokeThick
 				c.stroke.Transparency = if selected then 0 else c.strokeTransp
 			end
-			c.count.TextColor3 = if selected then SELECT_GOLD else PAPER
+			if c.accentStroke then
+				c.accentStroke.Color = if selected then SELECT_GREEN else c.accentColor
+				c.accentStroke.Thickness = if selected then 2 else 1.5
+				c.accentStroke.Transparency = if selected then 0.1 else 0.4
+			end
+			c.count.TextColor3 = if selected then SELECT_GREEN else PAPER
 			if c.btnLabel then
 				c.btnLabel.Text = if selected then "VOTED" else "VOTE"
 			end
@@ -4605,107 +5584,197 @@ do
 			local name = tostring(opt.name or opt.id or "?")
 			local col = MODE_COLOR[name] or Color3.fromRGB(150, 150, 150)
 
-			-- clone the Daily reward day-card (dark-glass plate + icon + labels +
-			-- claim button). Falls back to a plain plate if the kit ever moves.
-			local card
-			if SRC_CARD and SRC_CARD:IsA("GuiObject") then
-				card = SRC_CARD:Clone()
-				for _, d in ipairs(card:GetDescendants()) do
-					if d:IsA("UIAspectRatioConstraint") then
-						d:Destroy()
-					end
-				end
-			else
-				card = Instance.new("Frame")
-				card.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-				local uc = Instance.new("UICorner")
-				uc.CornerRadius = UDim.new(0, 10)
-				uc.Parent = card
-				local us = Instance.new("UIStroke")
-				us.Color = INK
-				us.Thickness = 2.5
-				us.Parent = card
-			end
+			-- dark-glass plate with a faint mode-tinted sheen bleeding in from
+			-- the top (white bg so the gradient's colours render verbatim)
+			local card = Instance.new("Frame")
 			card.Name = "Vote_" .. tostring(opt.id)
-			card.Visible = true
 			card.LayoutOrder = i
-			card.AnchorPoint = Vector2.new(0.5, 0.5)
-			card.Position = UDim2.new(0.5, 0, 0.5, 0)
-			card.Size = UDim2.new(0, 152, 0, 174)
+			card.Size = UDim2.new(0, 150, 0, 190)
+			card.BackgroundColor3 = PAPER
+			card.BorderSizePixel = 0
+			local cardCorner = Instance.new("UICorner")
+			cardCorner.CornerRadius = UDim.new(0, 12)
+			cardCorner.Parent = card
+			local sheen = Instance.new("UIGradient")
+			sheen.Rotation = 90
+			sheen.Color = ColorSequence.new(col:Lerp(GLASS, 0.8), GLASS)
+			sheen.Parent = card
+			local stroke = Instance.new("UIStroke")
+			stroke.Color = INK
+			stroke.Thickness = 2.5
+			stroke.Parent = card
+
+			-- inner mode-tinted accent stroke: an inset ring that sits just
+			-- inside the INK outline for a layered, beveled plate edge
+			local accent = Instance.new("Frame")
+			accent.Name = "Accent"
+			accent.AnchorPoint = Vector2.new(0.5, 0.5)
+			accent.Position = UDim2.new(0.5, 0, 0.5, 0)
+			accent.Size = UDim2.new(1, -6, 1, -6)
+			accent.BackgroundTransparency = 1
+			accent.BorderSizePixel = 0
+			accent.ZIndex = card.ZIndex
+			local accentCorner = Instance.new("UICorner")
+			accentCorner.CornerRadius = UDim.new(0, 9)
+			accentCorner.Parent = accent
+			local accentStroke = Instance.new("UIStroke")
+			accentStroke.Color = col
+			accentStroke.Thickness = 1.5
+			accentStroke.Transparency = 0.4
+			accentStroke.Parent = accent
+			accent.Parent = card
+
 			card.Parent = row
 
-			-- icon -> an actual in-game snapshot of the arena for this mode: a
-			-- ViewportFrame render of the real tiles, lit window sized to the mode
-			-- (falls back to drawMiniMap's diagram until the arena resolves)
-			local icon = card:FindFirstChild("Icon")
-			if icon and icon:IsA("ImageLabel") then
-				drawArenaSnapshot(icon, name, col)
-			end
+			-- field-picture panel: dark inset window holding the arena render
+			local mini = Instance.new("Frame")
+			mini.Name = "MiniPanel"
+			mini.AnchorPoint = Vector2.new(0.5, 0)
+			mini.Position = UDim2.new(0.5, 0, 0, 10)
+			mini.Size = UDim2.new(1, -20, 0, 86)
+			mini.BackgroundColor3 = Color3.fromRGB(16, 14, 20)
+			mini.BorderSizePixel = 0
+			mini.ClipsDescendants = true
+			local miniCorner = Instance.new("UICorner")
+			miniCorner.CornerRadius = UDim.new(0, 8)
+			miniCorner.Parent = mini
+			local miniStroke = Instance.new("UIStroke")
+			miniStroke.Color = col
+			miniStroke.Thickness = 1.5
+			miniStroke.Transparency = 0.35
+			miniStroke.Parent = mini
+			mini.Parent = card
+			drawArenaShot(mini, opt.id, name, col)
 
-			-- Name label -> mode name
-			local nameLabel = card:FindFirstChild("Name")
-			if nameLabel and nameLabel:IsA("TextLabel") then
-				nameLabel.Text = name
-			end
+			-- mode name in the house gold-ramp headline style
+			local nameLabel = Instance.new("TextLabel")
+			nameLabel.Name = "Name"
+			nameLabel.AnchorPoint = Vector2.new(0.5, 0)
+			nameLabel.Position = UDim2.new(0.5, 0, 0, 102)
+			nameLabel.Size = UDim2.new(1, -12, 0, 22)
+			nameLabel.BackgroundTransparency = 1
+			nameLabel.Font = Enum.Font.GothamBlack
+			nameLabel.Text = name
+			nameLabel.TextColor3 = PAPER
+			nameLabel.TextScaled = true
+			local nameFit = Instance.new("UITextSizeConstraint")
+			nameFit.MaxTextSize = 18
+			nameFit.Parent = nameLabel
+			local nameGrad = Instance.new("UIGradient")
+			nameGrad.Rotation = 90
+			nameGrad.Color = GOLD_RAMP
+			nameGrad.Parent = nameLabel
+			local nameStroke = Instance.new("UIStroke")
+			nameStroke.Color = INK
+			nameStroke.Thickness = 1.6
+			nameStroke.Parent = nameLabel
+			nameLabel.Parent = card
 
-			-- Amount label -> live vote count line
-			local countLabel = card:FindFirstChild("Amount")
-			if not (countLabel and countLabel:IsA("TextLabel")) then
-				countLabel = card:FindFirstChildWhichIsA("TextLabel", true)
-			end
-			if countLabel then
-				countLabel.Text = "0 votes"
-			end
+			-- live vote counter (turns gold once this card is the local pick)
+			local countLabel = Instance.new("TextLabel")
+			countLabel.Name = "Count"
+			countLabel.AnchorPoint = Vector2.new(0.5, 0)
+			countLabel.Position = UDim2.new(0.5, 0, 0, 126)
+			countLabel.Size = UDim2.new(1, -12, 0, 16)
+			countLabel.BackgroundTransparency = 1
+			countLabel.Font = Enum.Font.GothamBold
+			countLabel.Text = "0 votes"
+			countLabel.TextColor3 = PAPER
+			countLabel.TextSize = 13
+			local countStroke = Instance.new("UIStroke")
+			countStroke.Color = INK
+			countStroke.Thickness = 1.2
+			countStroke.Parent = countLabel
+			countLabel.Parent = card
 
-			-- the claim button becomes the VOTE button: retint to the mode colour,
-			-- collapse its claim/locked state gradients to one, relabel "VOTE"
-			local button = card:FindFirstChildWhichIsA("ImageButton")
-			local btnLabel
-			if button then
-				button.Name = "VoteBtn"
-				button.Active = true
-				button.Visible = true
-				local first = true
-				for _, g in ipairs(button:GetChildren()) do
-					if g:IsA("UIGradient") then
-						if first then
-							g.Enabled = true
-							g.Rotation = 90
-							g.Color = modeRamp(col)
-							first = false
-						else
-							g.Enabled = false
-						end
-					end
+			-- the VOTE button: mode-tinted ramp pill with the shared hover/press feel
+			local button = Instance.new("TextButton")
+			button.Name = "VoteBtn"
+			button.AnchorPoint = Vector2.new(0.5, 1)
+			button.Position = UDim2.new(0.5, 0, 1, -10)
+			button.Size = UDim2.new(1, -24, 0, 34)
+			button.BackgroundColor3 = PAPER -- gradient below is the visible ramp
+			button.BorderSizePixel = 0
+			button.AutoButtonColor = false
+			button.Text = ""
+			local btnCorner = Instance.new("UICorner")
+			btnCorner.CornerRadius = UDim.new(0, 10)
+			btnCorner.Parent = button
+			local btnGrad = Instance.new("UIGradient")
+			btnGrad.Rotation = 90
+			btnGrad.Color = modeRamp(col)
+			btnGrad.Parent = button
+			local btnStroke = Instance.new("UIStroke")
+			btnStroke.Color = INK
+			btnStroke.Thickness = 2.5
+			btnStroke.Parent = button
+
+			-- inner PAPER highlight ring: an inset outline just inside the INK
+			-- edge that reads as a glossy bevel on the pill
+			local btnInner = Instance.new("Frame")
+			btnInner.Name = "InnerRing"
+			btnInner.AnchorPoint = Vector2.new(0.5, 0.5)
+			btnInner.Position = UDim2.new(0.5, 0, 0.5, 0)
+			btnInner.Size = UDim2.new(1, -5, 1, -5)
+			btnInner.BackgroundTransparency = 1
+			btnInner.BorderSizePixel = 0
+			btnInner.ZIndex = button.ZIndex
+			local btnInnerCorner = Instance.new("UICorner")
+			btnInnerCorner.CornerRadius = UDim.new(0, 8)
+			btnInnerCorner.Parent = btnInner
+			local btnInnerStroke = Instance.new("UIStroke")
+			btnInnerStroke.Color = PAPER
+			btnInnerStroke.Thickness = 1.25
+			btnInnerStroke.Transparency = 0.55
+			btnInnerStroke.Parent = btnInner
+			btnInner.Parent = button
+			local btnLabel = Instance.new("TextLabel")
+			btnLabel.Name = "Label"
+			btnLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+			btnLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+			btnLabel.Size = UDim2.new(1, -8, 1, -8)
+			btnLabel.BackgroundTransparency = 1
+			btnLabel.Font = Enum.Font.GothamBlack
+			btnLabel.Text = "VOTE"
+			btnLabel.TextColor3 = PAPER
+			btnLabel.TextScaled = true
+			local btnFit = Instance.new("UITextSizeConstraint")
+			btnFit.MaxTextSize = 16
+			btnFit.Parent = btnLabel
+			local btnLabelStroke = Instance.new("UIStroke")
+			btnLabelStroke.Color = INK
+			btnLabelStroke.Thickness = 1.4
+			btnLabelStroke.Parent = btnLabel
+			btnLabel.Parent = button
+			button.Parent = card
+			addButtonFeedback(button)
+			local id = opt.id
+			button.Activated:Connect(function()
+				if myVote == id then
+					return
 				end
-				btnLabel = button:FindFirstChildWhichIsA("TextLabel", true)
-				if btnLabel then
-					btnLabel.Text = "VOTE"
+				myVote = id
+				styleSelection()
+				if voteRemote then
+					voteRemote:FireServer(id)
 				end
-				addButtonFeedback(button)
-				local id = opt.id
-				button.Activated:Connect(function()
-					if myVote == id then
-						return
-					end
-					myVote = id
-					styleSelection()
-					if voteRemote then
-						voteRemote:FireServer(id)
-					end
-				end)
-			end
+			end)
 
-			-- selection rides the card's own outline; remember its resting look
-			local stroke = card:FindFirstChildOfClass("UIStroke")
+			-- selection rides the card's own outline; resting look is fixed INK
 			cards[opt.id] = {
 				card = card,
 				stroke = stroke,
-				strokeColor = stroke and stroke.Color or INK,
-				strokeThick = stroke and stroke.Thickness or 2.5,
-				strokeTransp = stroke and stroke.Transparency or 0,
+				accentStroke = accentStroke,
+				accentColor = col,
+				strokeColor = INK,
+				strokeThick = 2.5,
+				strokeTransp = 0,
 				count = countLabel,
 				btnLabel = btnLabel,
+				panel = mini,
+				modeId = opt.id,
+				modeName = name,
+				modeCol = col,
 			}
 		end
 	end
@@ -4729,9 +5798,10 @@ do
 		end
 		shown = true
 		voteGui.Enabled = true
+		local target = fitScale()
 		local scale = ensureScale(panel)
-		scale.Scale = 0.6
-		tween(scale, POP_IN, { Scale = 1 })
+		scale.Scale = 0.6 * target
+		tween(scale, POP_IN, { Scale = target })
 	end
 	local function hide()
 		if not shown then
@@ -4739,7 +5809,7 @@ do
 		end
 		shown = false
 		local scale = ensureScale(panel)
-		local tw = tween(scale, POP_OUT, { Scale = 0.6 })
+		local tw = tween(scale, POP_OUT, { Scale = 0.6 * fitScale() })
 		tw.Completed:Connect(function()
 			if not shown then
 				voteGui.Enabled = false
@@ -4747,10 +5817,33 @@ do
 		end)
 	end
 
+	-- refit on rotation / window resize while the panel is up (the camera can be
+	-- swapped out on respawn, so re-hook whenever CurrentCamera changes)
+	local function watchViewport()
+		local cam = workspace.CurrentCamera
+		if cam then
+			cam:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+				if shown then
+					ensureScale(panel).Scale = fitScale()
+				end
+			end)
+		end
+	end
+	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
+	watchViewport()
+
 	-- Hold the panel back until the local player is actually spawned in the lobby
 	-- (respawned after the round), then wait REVEAL_PAUSE for a deliberate beat.
 	-- The token cancels a pending reveal if the round starts before it fires.
 	local revealToken = 0
+
+	-- X = dismiss for this ballot: hide now, cancel any reveal still pending;
+	-- the next NEW ballot (key change -> scheduleReveal) brings the panel back
+	closeBtn.Activated:Connect(function()
+		revealToken += 1
+		hide()
+	end)
+
 	local function characterReady(): boolean
 		local char = player.Character
 		local humanoid = char and char:FindFirstChildOfClass("Humanoid")
@@ -4772,6 +5865,43 @@ do
 			end
 		end)
 	end
+
+	-- Resolve the live handles for the real field render off the main thread;
+	-- the UI must never stall if Bullrush / the arena is absent from a place
+	-- copy. Any cards built before this lands get upgraded in place.
+	task.spawn(function()
+		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+		if bullrush then
+			local gu = bullrush:FindFirstChild("GridUtil")
+			if gu then
+				local ok, mod = pcall(require, gu)
+				if ok then
+					GridUtil = mod
+				end
+			end
+			local cf = bullrush:FindFirstChild("Config")
+			if cf then
+				local ok, mod = pcall(require, cf)
+				if ok then
+					ConfigMod = mod
+					if typeof(mod.GRID_SIZE) == "number" then
+						BOARD_GRID = mod.GRID_SIZE
+					end
+				end
+			end
+		end
+		local assets = ReplicatedStorage:FindFirstChild("BullrushAssets")
+		bullsFolder = assets and assets:FindFirstChild("Bulls")
+		local arena = workspace:WaitForChild("BullrushArena", 30)
+		if arena and arena:WaitForChild("Tiles", 10) then
+			arenaSource = arena
+		end
+		for _, c in cards do
+			if c.panel and c.panel.Parent then
+				drawArenaShot(c.panel, c.modeId, c.modeName, c.modeCol)
+			end
+		end
+	end)
 
 	-- Hook the remotes off the main thread; UI must never stall if Bullrush is
 	-- missing from a place copy.
@@ -4808,5 +5938,252 @@ do
 				hide()
 			end
 		end)
+	end)
+end
+
+---------------------------------------------------------- 15) lobby update board
+-- The lobby "Update" notice board advertises the next Roblox Experience Event
+-- and lets players RSVP ("sign up") in-game. Roblox's event API is client-only,
+-- so this lives in the one UI LocalScript (it just drives the Workspace board):
+--   * SocialService:GetUpcomingExperienceEventsAsync() -> soonest upcoming event
+--   * SocialService:PromptRsvpToEventAsync(id) -> native RSVP / "notify me" prompt
+-- The board has two states: a minimal PROMO group (a big house-styled headline +
+-- INVITE FRIENDS button, shown when no event is scheduled) and an EVENT group
+-- (kicker pill, title, countdown, description, RSVP status). When no event is
+-- live a click opens the friend-invite flow instead of the RSVP prompt.
+-- Re-fetches every REFRESH_SECONDS; the countdown ticks between fetches.
+do
+	local GREEN = Color3.fromRGB(120, 226, 140)
+	local DIM = Color3.fromRGB(205, 200, 215)
+
+	-- fallback promo copy (overridden by Config.EVENTS_BOARD once it resolves)
+	local promo = {
+		HEADLINE = "STAY IN THE LOOP",
+		CTA = "INVITE FRIENDS",
+		REFRESH = 120,
+	}
+
+	task.spawn(function()
+		-- the board lives under the lobby and may be reparented, so find it
+		-- recursively rather than assuming a fixed path.
+		local board = workspace:FindFirstChild("Update", true)
+		local t0 = os.clock()
+		while not board and os.clock() - t0 < 30 do
+			task.wait(0.5)
+			board = workspace:FindFirstChild("Update", true)
+		end
+		local dp = board and board:FindFirstChild("DisplayPart")
+		local sg = dp and dp:FindFirstChild("Update")
+		local root = sg and sg:WaitForChild("Root", 10)
+		local cd = dp and dp:FindFirstChildOfClass("ClickDetector")
+		if not (root and cd) then
+			return -- board missing from this place copy; nothing to drive
+		end
+
+		local promoGroup = root:WaitForChild("Promo")
+		local headline = promoGroup:WaitForChild("Headline")
+		local eventGroup = root:WaitForChild("Event")
+		local title = eventGroup:WaitForChild("Title")
+		local whenL = eventGroup:WaitForChild("When")
+		local desc = eventGroup:WaitForChild("Desc")
+		local statusPill = eventGroup:WaitForChild("Status")
+		local hero = root:WaitForChild("Hero")
+		local ctaFrame = root:WaitForChild("Cta")
+		local ctaLabel = ctaFrame:WaitForChild("Label")
+
+		-- pull the fallback promo copy from Config if present
+		task.spawn(function()
+			local bull = ReplicatedStorage:WaitForChild("Bullrush", 30)
+			local ok, cfg = pcall(require, bull and bull:WaitForChild("Config"))
+			if ok and typeof(cfg) == "table" and typeof(cfg.EVENTS_BOARD) == "table" then
+				local e = cfg.EVENTS_BOARD
+				promo.HEADLINE = e.HEADLINE or promo.HEADLINE
+				promo.CTA = e.CTA or promo.CTA
+				promo.REFRESH = tonumber(e.REFRESH_SECONDS) or promo.REFRESH
+			end
+		end)
+
+		local current -- the event dict currently shown (nil = fallback promo)
+
+		-- ExperienceEvent carries both raw and localized display fields; prefer
+		-- the localized ones, falling back to raw, then a default.
+		local function pick(ev, displayKey, rawKey, default)
+			local v = ev[displayKey]
+			if v == nil or v == "" then v = ev[rawKey] end
+			if v == nil or v == "" then return default end
+			return tostring(v)
+		end
+
+		-- StartTime dict -> "STARTS IN 3D 4H  \194\183  JUL 15, 3:00 PM" (blank if unknown)
+		local function whenText(ev)
+			local st = ev.StartTime
+			if typeof(st) ~= "table" or not st.Year then
+				return ""
+			end
+			local ok, dt = pcall(function()
+				return DateTime.fromUniversalTime(st.Year, st.Month, st.Day, st.Hour or 0, st.Minute or 0, st.Second or 0, st.Millisecond or 0)
+			end)
+			if not ok or not dt then
+				return ""
+			end
+			local secs = dt.UnixTimestamp - os.time()
+			local lead
+			if ev.HasEnded then
+				return ""
+			elseif secs <= 60 then
+				lead = "HAPPENING NOW"
+			elseif secs < 3600 then
+				lead = ("STARTS IN %dM"):format(math.floor(secs / 60))
+			elseif secs < 86400 then
+				lead = ("STARTS IN %dH %dM"):format(math.floor(secs / 3600), math.floor((secs % 3600) / 60))
+			else
+				lead = ("STARTS IN %dD %dH"):format(math.floor(secs / 86400), math.floor((secs % 86400) / 3600))
+			end
+			local abs = ""
+			pcall(function()
+				abs = dt:FormatLocalTime("MMM D, h:mm A", "en-us")
+			end)
+			if abs ~= "" then
+				return lead .. "  \194\183  " .. abs:upper()
+			end
+			return lead
+		end
+
+		-- local player's RSVP for the event (prefer the dict field; else fetch)
+		local function isGoing(ev)
+			local rs = ev.UserRsvpStatus
+			if rs == nil then
+				local ok, v = pcall(function()
+					return SocialService:GetEventRsvpStatusAsync(ev.Id)
+				end)
+				if ok then
+					rs = v
+				end
+			end
+			return rs == Enum.RsvpStatus.Going
+		end
+
+		local function render(ev)
+			if ev then
+				eventGroup.Visible = true
+				promoGroup.Visible = false
+				title.Text = pick(ev, "DisplayTitle", "Title", "Upcoming Event")
+				desc.Text = pick(ev, "DisplayDescription", "Description", "")
+				whenL.Text = whenText(ev)
+				local thumb = typeof(ev.ThumbnailIds) == "table" and ev.ThumbnailIds[1]
+				if thumb then
+					hero.Image = "rbxassetid://" .. tostring(thumb)
+					hero.Visible = true
+				else
+					hero.Visible = false
+				end
+				local going = isGoing(ev)
+				statusPill.Visible = true
+				if going then
+					statusPill.Text = "YOU'RE GOING"
+					statusPill.TextColor3 = GREEN
+					ctaLabel.Text = "YOU'RE IN \226\128\148 TAP TO MANAGE"
+				else
+					statusPill.Text = "NOT SIGNED UP"
+					statusPill.TextColor3 = DIM
+					ctaLabel.Text = "TAP TO SIGN UP"
+				end
+			else
+				eventGroup.Visible = false
+				promoGroup.Visible = true
+				hero.Visible = false
+				headline.Text = promo.HEADLINE
+				ctaLabel.Text = promo.CTA
+			end
+		end
+
+		local function fetch()
+			local ok, events = pcall(function()
+				return SocialService:GetUpcomingExperienceEventsAsync()
+			end)
+			current = nil
+			if ok and typeof(events) == "table" then
+				for _, ev in ipairs(events) do
+					if typeof(ev) == "table" and ev.Id and not ev.HasEnded then
+						current = ev
+						break -- array is sorted soonest-first
+					end
+				end
+			end
+			render(current)
+		end
+
+		-- friend-invite fallback (mirrors the SideUI Invite button flow)
+		local function doInvite()
+			local ok, canSend = pcall(function()
+				return SocialService:CanSendGameInviteAsync(player)
+			end)
+			if ok and canSend then
+				local opts
+				pcall(function()
+					opts = Instance.new("ExperienceInviteOptions")
+					opts.PromptMessage = "Rally your friends for the stampede!"
+				end)
+				if pcall(function()
+					SocialService:PromptGameInvite(player, opts)
+				end) then
+					return
+				end
+			end
+			if pushNotif then
+				pushNotif("Sign-ups aren't available right now", "red", 3)
+			end
+		end
+
+		local clickBusy = false
+		cd.MouseClick:Connect(function()
+			if clickBusy then
+				return
+			end
+			clickBusy = true
+			task.spawn(function()
+				if current then
+					local ok, newStatus = pcall(function()
+						return SocialService:PromptRsvpToEventAsync(current.Id)
+					end)
+					if ok then
+						current.UserRsvpStatus = newStatus
+						render(current)
+						if newStatus == Enum.RsvpStatus.Going and pushNotif then
+							pushNotif("You're signed up! We'll notify you before it starts.", "green", 4)
+						end
+					else
+						doInvite() -- prompt unavailable (Studio/unpublished) -> invite
+					end
+				else
+					doInvite()
+				end
+				clickBusy = false
+			end)
+		end)
+
+		-- gentle hover feedback on the CTA
+		local hs = Instance.new("UIScale")
+		hs.Parent = ctaFrame
+		cd.MouseHoverEnter:Connect(function()
+			TweenService:Create(hs, TweenInfo.new(0.12), { Scale = 1.05 }):Play()
+		end)
+		cd.MouseHoverLeave:Connect(function()
+			TweenService:Create(hs, TweenInfo.new(0.12), { Scale = 1 }):Play()
+		end)
+
+		-- initial load, then keep the countdown ticking + re-fetch periodically
+		fetch()
+		local sinceFetch = 0
+		while true do
+			task.wait(15)
+			sinceFetch += 15
+			if sinceFetch >= (promo.REFRESH or 120) then
+				sinceFetch = 0
+				fetch()
+			elseif current then
+				whenL.Text = whenText(current) -- refresh the live countdown
+			end
+		end
 	end)
 end

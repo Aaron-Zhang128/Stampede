@@ -56,6 +56,36 @@ local function getActiveBullsFolder(): Folder
 	return folder
 end
 
+-- Mutation auras: a rolled mutation rides the charge as particles. The VFX
+-- rigs in ReplicatedStorage.Mutations are dead parts carrying tuned
+-- ParticleEmitters (some bare, some under Attachments); clone just the
+-- emitters/attachments onto the Body so no extra geometry ships with the
+-- bull. Missing rig/catalog entry -> silently plain (a data hiccup must
+-- never block a throw).
+local MutationRigs = ReplicatedStorage:FindFirstChild("Mutations")
+local function attachMutationVfx(body: BasePart?, mutId: string)
+	local def = BullCatalog.getMutation(mutId)
+	local rig = if def and MutationRigs then MutationRigs:FindFirstChild(def.vfxName) else nil
+	if not (body and rig) then
+		return
+	end
+	for _, child in ipairs(rig:GetChildren()) do
+		if child:IsA("ParticleEmitter") or child:IsA("Attachment") then
+			local copy = child:Clone()
+			if copy:IsA("ParticleEmitter") then
+				copy.Enabled = true
+			else
+				for _, d in ipairs(copy:GetDescendants()) do
+					if d:IsA("ParticleEmitter") then
+						d.Enabled = true
+					end
+				end
+			end
+			copy.Parent = body
+		end
+	end
+end
+
 -- The model charged down the lane: the bull's catalog modelName (per-rarity
 -- tier skins in ReplicatedStorage.BullrushAssets.Bulls, same Root+Body build
 -- as BullTemplate), or BullTemplate for wave bulls / commons / missing models.
@@ -81,8 +111,9 @@ end
 -- arena's ActiveBulls). This is the origin-agnostic core; BullService.charge
 -- below maps a main-arena lane onto it.
 -- style.bullId: the thrower's equipped BullCatalog id (revenge throws only) —
--- picks the model via templateFor above.
-function BullService.chargeAlong(startPos: Vector3, endPos: Vector3, crossCoord: number, axis: string, speed: number, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string? }?, onCharge, onCleared, parentFolder): number
+-- picks the model via templateFor above. style.mutation: the bull's worn
+-- mutation id — its aura emitters are cloned onto the Body at launch.
+function BullService.chargeAlong(startPos: Vector3, endPos: Vector3, crossCoord: number, axis: string, speed: number, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string?, mutation: string? }?, onCharge, onCleared, parentFolder): number
 	local duration = (endPos - startPos).Magnitude / speed
 	local rotation = CFrame.lookAt(startPos, endPos).Rotation
 
@@ -104,6 +135,9 @@ function BullService.chargeAlong(startPos: Vector3, endPos: Vector3, crossCoord:
 		-- always be able to pick out the bull they sent.
 		if style.throwerName then
 			bull:SetAttribute("ThrowerName", style.throwerName)
+		end
+		if style.mutation then
+			attachMutationVfx(body, style.mutation)
 		end
 		local glow = Instance.new("Highlight")
 		glow.Name = "RevengeGlow"
@@ -265,7 +299,7 @@ end
 -- through GridUtil (ARENA_ORIGIN-bound) and firing the ChargeStart / LaneCleared
 -- remotes so every client renders the telegraph/clear. Signature unchanged for
 -- Main.runWaves and RevengeService.
-function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string? }?): number
+function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string?, mutation: string? }?): number
 	local startPos, endPos = GridUtil.lanePath(lane, bounds)
 	local crossCoord = GridUtil.laneCrossCoord(lane)
 	return BullService.chargeAlong(

@@ -9,11 +9,28 @@
 	    BULL_ROLL_10     10 Robux bull rolls      -> BullRollService handler
 	    SPIN_1           1 Robux fortune spin     -> SpinService handler
 	    SPIN_10          10 Robux fortune spins   -> SpinService handler
+	    LUCKY_SECRET     Secret Block wheel spin  -> SpinService handler
+	    LUCKY_ALIEN      Alien Block wheel spin   -> SpinService handler
+	    LUCKY_GOD        GOD Block wheel spin     -> SpinService handler
 	    DAILY_CLAIM_ALL  whole 7-day daily loop   -> DailyRewardService handler
+	    SERVER_LUCK      server-wide roll luck    -> handled here (init)
+	    MONEY_PACK_1..5  buy Robux -> Money        -> handled here (init, Config.MONEY_PACKS)
 
 	  GAME PASSES (permanent perks)                Config.PASSES
-	    VIP            perk bundle + money boost -> PASS_BENEFITS below
-	    DOUBLE_MONEY   permanent 2x money        -> PASS_BENEFITS below
+	    VIP                  perk bundle: +50% money, x1.5 roll luck (stacks on
+	                         top of luck passes), 2x vote power, an extra daily
+	                         wheel spin, and a gold [VIP] chat tag. Money + luck
+	                         are here; vote power / daily spin / chat tag live in
+	                         the consuming services, keyed off the IsVIP attribute.
+	    DOUBLE_MONEY         permanent 2x money        -> PASS_BENEFITS below
+	    LUCK_2X/SUPER/MEGA   x2/x3/x5 Epic+Legendary roll luck (highest owned TIER
+	                         wins; VIP's x1.5 and Server Luck multiply on top;
+	                         getLuckMultiplier)
+	    STRAWBERRY_ELEPHANT  grants the Strawberry Elephant Legendary bull on buy
+
+	  LUCK: getLuckMultiplier(player) = highest owned luck pass x active Server Luck;
+	  boostedWeights(player, weights) lifts the Config.LUCK.BOOSTED rarities by it.
+	  BullRollService feeds every box roll through boostedWeights (box rolls only).
 
 	This module owns the ONE game-wide MarketplaceService.ProcessReceipt and the
 	ONE PromptGamePassPurchaseFinished handler - nothing else in the place sets
@@ -31,20 +48,26 @@
 	  MonetizationService.init()
 	  EconomyService.init(...)   -- registers DOUBLE_ROUND
 	  BullRollService.init()     -- registers BULL_ROLL / BULL_ROLL_10
-	  SpinService.init()         -- registers SPIN_1 / SPIN_10
+	  SpinService.init()         -- registers SPIN_1 / SPIN_10 + LUCKY_SECRET/ALIEN/GOD
 	  DailyRewardService.init()  -- registers DAILY_CLAIM_ALL
 ]]
 
 local Players = game:GetService("Players")
 local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local HttpService = game:GetService("HttpService")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local NotifyService = require(script.Parent.NotifyService)
+local DataHandler = require(ServerScriptService.UserData.DataHandler)
+
+local BullrushFolder = ReplicatedStorage:WaitForChild("Bullrush")
 
 local MonetizationService = {}
 
 local NotYet = Enum.ProductPurchaseDecision.NotProcessedYet
+local Granted = Enum.ProductPurchaseDecision.PurchaseGranted
 
 --==============================================================================
 -- Developer products
@@ -87,20 +110,56 @@ end
 
 -- The game's sole receipt callback. Dispatches to the registered handler;
 -- anything unrecognized is left for Roblox to retry (never granted blindly).
+--
+-- Roblox delivers receipts at-least-once and re-fires them until we return
+-- PurchaseGranted from a callback that has ALREADY committed the grant durably.
+-- So this callback enforces two invariants for every product:
+--   * Idempotency  - the PurchaseId is recorded in the profile, and a receipt
+--                    whose id we've already recorded is acked without re-granting
+--                    (no double money / double bull on a retry or duplicate).
+--   * Grant-then-save - the grant (in the profile) and its PurchaseId marker are
+--                    flushed to the DataStore in one write BEFORE we confirm; if
+--                    that write fails we return NotProcessedYet so Roblox retries
+--                    (this session or the next) instead of charging for a grant
+--                    that could evaporate before the next save.
 local function onReceipt(receipt): Enum.ProductPurchaseDecision
 	local handler = productHandlers[receipt.ProductId]
 	if not handler then
 		return NotYet
 	end
 	local player = Players:GetPlayerByUserId(receipt.PlayerId)
+
+	-- No loaded/saveable profile -> we can't record the grant. Leave it for Roblox
+	-- to retry rather than grant into something that won't persist.
+	if not player or player:GetAttribute("DataLoadFailed") then
+		return NotYet
+	end
+
+	-- Already granted this exact purchase. The marker rides in the same profile as
+	-- the grant, so if it's present the grant happened; just make sure it's durably
+	-- saved before we ack (it may be marked-in-memory from an earlier failed save).
+	if DataHandler.HasProcessedReceipt(player, receipt.PurchaseId) then
+		return if DataHandler.Save(player) then Granted else NotYet
+	end
+
 	local ok, decision = pcall(handler, receipt, player)
 	if not ok then
 		warn("MonetizationService: product handler errored:", receipt.ProductId, decision)
 		return NotYet -- handler blew up mid-grant: retry rather than charge for nothing
 	end
-	-- A handler that forgets to return is treated as "not done" so Roblox
-	-- retries instead of us silently swallowing the purchase.
-	return decision or NotYet
+
+	-- Handler declined (e.g. profile not ready, returned NotYet, or forgot to
+	-- return): nothing was granted, so nothing to record or save.
+	if decision ~= Granted then
+		return decision or NotYet
+	end
+
+	-- Grant landed in the profile. Record the PurchaseId and flush; only confirm
+	-- once the write lands. On a failed save we KEEP the marker (do not roll it
+	-- back) so the inevitable retry dedups instead of granting a second time, then
+	-- confirms as soon as a save succeeds.
+	DataHandler.MarkReceiptProcessed(player, receipt.PurchaseId)
+	return if DataHandler.Save(player) then Granted else NotYet
 end
 
 --==============================================================================
@@ -110,15 +169,61 @@ end
 -- Per-pass perks, keyed by Config.PASSES key. Fields (all optional):
 --   moneyBonus  added to the money multiplier while owned (getMoneyMultiplier);
 --               0.5 = +50%, 1 = +100%. Stacks across owned passes.
+--   luck        Epic/Legendary roll multiplier while owned (getLuckMultiplier);
+--               this is a TIER - only the HIGHEST owned luck-tier pass counts
+--               (tiers don't stack with each other).
+--   luckMult    a STACKING Epic/Legendary roll multiplier (VIP's x1.5); unlike
+--               luck tiers, every owned luckMult multiplies together and on top
+--               of the winning tier and Server Luck.
 --   attribute   a boolean player attribute set true while owned, for the
 --               client to read (badges, cosmetics, unlocked UI).
 --   apply(player)  arbitrary grant run once on join and once on purchase; make
 --               it idempotent (it can run again on rejoin).
 -- Add a pass by publishing it, pasting its id into Config.PASSES, and adding a
 -- row here - that is the whole integration.
-local PASS_BENEFITS: { [string]: { moneyBonus: number?, attribute: string?, apply: ((Player) -> ())? } } = {
-	VIP = { moneyBonus = 0.5, attribute = "IsVIP" },
+local PASS_BENEFITS: { [string]: { moneyBonus: number?, luck: number?, luckMult: number?, attribute: string?, apply: ((Player) -> ())? } } = {
+	-- VIP bundle: +50% money, a x1.5 stacking roll-luck boost, plus 2x vote power,
+	-- a daily bonus wheel spin, and a gold [VIP] chat tag - those last three read
+	-- the IsVIP attribute in Main.server / SpinService / the client chat hook.
+	VIP = { moneyBonus = 0.5, luckMult = 1.5, attribute = "IsVIP" },
 	DOUBLE_MONEY = { moneyBonus = 1.0, attribute = "HasDoubleMoney" },
+	LUCK_2X = { luck = 2, attribute = "Luck2x" },
+	LUCK_SUPER = { luck = 3, attribute = "LuckSuper" },
+	LUCK_MEGA = { luck = 5, attribute = "LuckMega" },
+	-- Grants the Strawberry Elephant LEGENDARY bull once (idempotent - it also
+	-- drops from rolls, so HasBull guards against a double grant / overwrite).
+	STRAWBERRY_ELEPHANT = {
+		attribute = "HasStrawberryElephant",
+		apply = function(player)
+			if typeof(player) ~= "Instance" then
+				return
+			end
+			-- Grant off-thread so we can wait out the join-vs-dataload race: a
+			-- bull added before the profile loads wouldn't save. HasBull guards
+			-- the double-grant (it's also rollable), so re-running is harmless.
+			task.spawn(function()
+				for _ = 1, 60 do
+					if player:GetAttribute("DataLoadFailed") then
+						return -- unsaveable session: don't hand out a bull that evaporates
+					end
+					local ok, bulls = pcall(DataHandler.GetStat, player, "Bulls")
+					if ok and bulls ~= nil then
+						break
+					end
+					task.wait(0.5)
+				end
+				if not player.Parent or DataHandler.HasBull(player, "STRAWBERRY") then
+					return
+				end
+				DataHandler.AddBull(player, "STRAWBERRY")
+				local ok, bulls = pcall(DataHandler.GetStat, player, "Bulls")
+				if ok and bulls then
+					player:SetAttribute("Bulls", HttpService:JSONEncode(bulls)) -- client inventory refresh
+				end
+				NotifyService.send(player, "You own the Celestial Bull! Equip it in your bull index.", "green", 6)
+			end)
+		end,
+	},
 }
 
 -- Cached ownership per player: owned[player][passKey] = true/false. Populated
@@ -203,6 +308,65 @@ function MonetizationService.getMoneyMultiplier(player: Player): number
 	return mult
 end
 
+--==============================================================================
+-- Luck (Epic/Legendary roll boost)
+--==============================================================================
+
+-- Server Luck: a dev product (SERVER_LUCK) buys everyone a temporary boost. The
+-- timer is a plain unix deadline; re-buying extends it. Replicated as an
+-- attribute so clients can show a countdown.
+local serverLuckUntil = 0
+
+local function serverLuckActive(): boolean
+	return os.time() < serverLuckUntil
+end
+
+local function serverLuckMultiplier(): number
+	return serverLuckActive() and Config.LUCK.SERVER.multiplier or 1
+end
+
+local function replicateServerLuck()
+	BullrushFolder:SetAttribute("ServerLuckUntil", serverLuckUntil)
+end
+
+-- Total Epic/Legendary luck for this player: the HIGHEST owned luck TIER (tiers
+-- don't stack with each other), times every owned stacking luckMult (VIP's
+-- x1.5), times the current Server Luck (which also stacks on top). 1 = no boost.
+-- Safe for bot/stub players (no owned bag -> just server).
+function MonetizationService.getLuckMultiplier(player): number
+	local tierMult = 1  -- highest owned luck TIER (LUCK_2X/SUPER/MEGA)
+	local stackMult = 1 -- product of every owned stacking luckMult (VIP)
+	local bag = owned[player]
+	if bag then
+		for passKey, benefit in PASS_BENEFITS do
+			if bag[passKey] then
+				if benefit.luck and benefit.luck > tierMult then
+					tierMult = benefit.luck
+				end
+				if benefit.luckMult then
+					stackMult *= benefit.luckMult
+				end
+			end
+		end
+	end
+	return tierMult * stackMult * serverLuckMultiplier()
+end
+
+-- Returns a copy of `weights` with the Config.LUCK.BOOSTED rarities multiplied by
+-- the player's luck (BullCatalog.roll renormalizes, so higher weight = higher
+-- odds). Unchanged table when luck is 1, so the no-boost path allocates nothing.
+function MonetizationService.boostedWeights(player, weights: { [string]: number }): { [string]: number }
+	local mult = MonetizationService.getLuckMultiplier(player)
+	if mult <= 1 then
+		return weights
+	end
+	local out = {}
+	for rarity, w in weights do
+		out[rarity] = if Config.LUCK.BOOSTED[rarity] then w * mult else w
+	end
+	return out
+end
+
 -- Server-side pass prompt. Pass a Config.PASSES key, e.g. "VIP".
 function MonetizationService.promptPass(player: Player, passKey: string): boolean
 	local id = passId(passKey)
@@ -253,6 +417,39 @@ function MonetizationService.init()
 	end
 
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(onPassPurchased)
+
+	-- Server Luck dev product: each buy extends the server-wide boost and
+	-- announces it. Skipped while its id is 0 (registerProduct ignores 0).
+	replicateServerLuck()
+	MonetizationService.registerProduct(Config.PRODUCTS.SERVER_LUCK, function(_receipt, player)
+		local now = os.time()
+		serverLuckUntil = math.max(serverLuckUntil, now) + Config.LUCK.SERVER.duration
+		replicateServerLuck()
+		local mins = math.floor(Config.LUCK.SERVER.duration / 60)
+		local who = if player then player.DisplayName else "Someone"
+		NotifyService.broadcast(
+			("%s activated SERVER LUCK! %dx Epic & Legendary odds for everyone (%d min)"):format(
+				who, Config.LUCK.SERVER.multiplier, mins), "green", 6)
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end)
+
+	-- Money Packs: grant `amount` Money RAW (a purchase, not round earnings, so
+	-- no boosts). Needs a loaded/saveable profile or the money would evaporate -
+	-- return NotProcessedYet so Roblox retries rather than eating the Robux.
+	for _, pack in Config.MONEY_PACKS do
+		MonetizationService.registerProduct(Config.PRODUCTS[pack.product], function(_receipt, player)
+			if not player or player:GetAttribute("DataLoadFailed") then
+				return NotYet
+			end
+			local ok, money = pcall(DataHandler.GetStat, player, "Money")
+			if not ok or money == nil then
+				return NotYet
+			end
+			DataHandler.SetStat(player, "Money", money + pack.amount)
+			NotifyService.send(player, ("You got %s from the %s!"):format(pack.label, pack.name), "green", 5)
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end)
+	end
 
 	-- Seed ownership for anyone already in (studio join can beat this connect).
 	for _, player in Players:GetPlayers() do

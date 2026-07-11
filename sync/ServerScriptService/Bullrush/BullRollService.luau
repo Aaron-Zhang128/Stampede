@@ -8,18 +8,27 @@
 	pulls auto-refund box.cost * rarity.dupeRefund Money - a refund, not an
 	earner, so it's granted RAW (no friend boost / mode multiplier).
 
+	Every pull is also a MUTATION lottery (box.mutationChance, then
+	BullCatalog.rollMutation by weight): a cosmetic particle aura that sticks
+	to THAT bull forever ({bullId = {mutId = true}}), dupes included - so a
+	dupe pull can still upgrade the bull it duplicates. The equipped bull
+	wears its rarest owned mutation (BullCatalog.bestMutation) on revenge
+	throws.
+
 	Client contract (StarterGui.Main owns ALL the UI, per the house rule):
 	- BullRoll:FireServer(boxId)      buy + open one Config.BULLS.BOXES box
 	- BullEquip:FireServer(bullId)    equip an owned BullCatalog id
 	- BullAck:FireClient(player, kind, data) answers the caller only:
-	    "ROLLED"   { results = {{bullId, rarity, isNew, refund}}, boxId,
+	    "ROLLED"   { results = {{bullId, rarity, isNew, refund,
+	                 mutation = mutId?, mutationIsNew = boolean?}}, boxId,
 	                 money = new balance, source = "MONEY" | "ROBUX" }
 	    "EQUIPPED" { bullId }
 	    "DENIED"   { reason = "NO_MONEY" (+ cost) | "DATA_NOT_LOADED"
 	                        | "NOT_OWNED" | "BAD_ID" | "BAD_BOX" }
 	Inventory replicates as player attributes (set on join by Data.server.luau,
 	refreshed here after every roll): Bulls = JSON { bullId = true },
-	EquippedBull = id - so the UI needs no fetch remote.
+	BullMutations = JSON { bullId = { mutId = true } }, EquippedBull = id -
+	so the UI needs no fetch remote.
 
 	Robux rolls (Config.PRODUCTS.BULL_ROLL = 1 roll, BULL_ROLL_10 = 10): the
 	client prompts the purchase itself via MarketplaceService; the receipts
@@ -91,6 +100,10 @@ local function refreshInventoryAttribute(player)
 	if ok and bulls then
 		player:SetAttribute("Bulls", HttpService:JSONEncode(bulls))
 	end
+	local okMuts, muts = pcall(DataHandler.GetStat, player, "BullMutations")
+	if okMuts and muts then
+		player:SetAttribute("BullMutations", HttpService:JSONEncode(muts))
+	end
 end
 
 --==============================================================================
@@ -110,19 +123,22 @@ end
 
 -- Grants `count` already-paid-for openings of `box` and acks the batch. Dupe
 -- refunds (box.cost basis) are summed and granted raw at the end (one profile
--- write, not one per dupe).
+-- write, not one per dupe). Each pull also rolls the box's mutationChance;
+-- a hit sticks a BullCatalog.Mutations aura to the pulled bull (dupes too,
+-- so a dupe pull can still upgrade the bull it duplicates).
 local function grantRolls(player, count: number, source: string, boxId: string, box)
 	local results = {}
 	local refundTotal = 0
 	for _ = 1, count do
-		local bullId = BullCatalog.roll(rng, box.weights)
+		-- luck (owned luck passes + active Server Luck) lifts Epic/Legendary odds
+		local bullId = BullCatalog.roll(rng, MonetizationService.boostedWeights(player, box.weights))
 		local bull = BullCatalog.get(bullId) :: BullCatalog.Bull
 		local isNew = not DataHandler.HasBull(player, bullId)
 		local refund = 0
+		local displayName = if typeof(player) == "Instance" then player.DisplayName else player.Name
 		if isNew then
 			DataHandler.AddBull(player, bullId)
 			if bull.rarity == "EPIC" or bull.rarity == "LEGENDARY" then
-				local displayName = if typeof(player) == "Instance" then player.DisplayName else player.Name
 				NotifyService.broadcast(
 					("%s pulled %s!"):format(displayName, bull.name:upper()), "green", 5)
 			end
@@ -130,7 +146,23 @@ local function grantRolls(player, count: number, source: string, boxId: string, 
 			refund = math.floor(box.cost * BullCatalog.Rarities[bull.rarity].dupeRefund)
 			refundTotal += refund
 		end
-		table.insert(results, { bullId = bullId, rarity = bull.rarity, isNew = isNew, refund = refund })
+		local mutId, mutationIsNew
+		if rng:NextNumber() < (box.mutationChance or 0) then
+			mutId = BullCatalog.rollMutation(rng)
+			local mut = BullCatalog.getMutation(mutId) :: BullCatalog.Mutation
+			mutationIsNew = not DataHandler.HasBullMutation(player, bullId, mutId)
+			if mutationIsNew then
+				DataHandler.AddBullMutation(player, bullId, mutId)
+			end
+			if mut.rarity == "EPIC" or mut.rarity == "LEGENDARY" then
+				NotifyService.broadcast(
+					("%s rolled a %s mutation on %s!"):format(displayName, mut.name:upper(), bull.name), "green", 5)
+			end
+		end
+		table.insert(results, {
+			bullId = bullId, rarity = bull.rarity, isNew = isNew, refund = refund,
+			mutation = mutId, mutationIsNew = mutationIsNew,
+		})
 	end
 	if refundTotal > 0 then
 		DataHandler.SetStat(player, "Money", (DataHandler.GetStat(player, "Money") or 0) + refundTotal)
@@ -205,13 +237,16 @@ export type EquippedBull = {
 	rarity: string,
 	speed: number,
 	modelName: string?,
+	mutation: string?,
 }
 
 -- Catalog entry (plus its id) of the player's equipped bull. Falls back to
 -- STARTER for bot/stub proxies (no UserId -> no profile), unloaded profiles,
 -- and ids that fell out of the catalog, so a throw can never crash on data
 -- problems. Ownership isn't rechecked: EquippedBull is only ever written
--- through validated equips.
+-- through validated equips. mutation = the bull's rarest owned aura
+-- (BullCatalog.bestMutation); BullService clones its emitters onto the
+-- launched model.
 function BullRollService.getEquippedBull(player): EquippedBull
 	local bullId = "STARTER"
 	local ok, equipped = pcall(DataHandler.GetEquippedBull, player)
@@ -219,12 +254,14 @@ function BullRollService.getEquippedBull(player): EquippedBull
 		bullId = equipped
 	end
 	local bull = BullCatalog.get(bullId) :: BullCatalog.Bull
+	local okMut, owned = pcall(DataHandler.GetBullMutations, player, bullId)
 	return {
 		id = bullId,
 		name = bull.name,
 		rarity = bull.rarity,
 		speed = bull.speed,
 		modelName = bull.modelName,
+		mutation = if okMut then BullCatalog.bestMutation(owned) else nil,
 	}
 end
 
@@ -251,6 +288,26 @@ function BullRollService.init()
 	end
 	MonetizationService.registerProduct(Config.PRODUCTS.BULL_ROLL, makeHandler(1))
 	MonetizationService.registerProduct(Config.PRODUCTS.BULL_ROLL_10, makeHandler(10))
+
+	-- OP Lucky Block: ROBUX elite bull rolls (Epic/Legendary-only pool). The box
+	-- isn't in BOXES (Robux-only, no Money card), so grant its table directly;
+	-- boxId "OP" is opaque to the client (its ROLLED handler ignores unknown ids).
+	local opRoll = Config.BULLS.OP_ROLL
+	if opRoll and opRoll.box then
+		for _, bundle in opRoll.bundles or {} do
+			local count = bundle.count
+			local productId = tonumber(Config.PRODUCTS[bundle.product]) or 0
+			if productId > 0 then
+				MonetizationService.registerProduct(productId, function(_receipt, player)
+					if not player or not profileReady(player) then
+						return Enum.ProductPurchaseDecision.NotProcessedYet
+					end
+					grantRolls(player, count, "ROBUX", "OP", opRoll.box)
+					return Enum.ProductPurchaseDecision.PurchaseGranted
+				end)
+			end
+		end
+	end
 end
 
 rollRemote.OnServerEvent:Connect(function(player, boxId)

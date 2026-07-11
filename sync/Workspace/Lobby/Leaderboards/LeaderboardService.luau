@@ -13,9 +13,10 @@
 -- falls back to a live ranking of the players currently in THIS server, so it is
 -- never blank and doubles as an in-Studio preview.
 --
--- Deliberately basic: a flat dark panel, an accent title with a divider, and plain
--- rank / name / value text rows. Only flair is a gold/silver/bronze tint on the
--- top-three rank numbers. The footer counts down to the next refresh.
+-- Deliberately basic, wild-west themed: a flat weathered-wood panel, a warm accent
+-- title with a divider, and plain rank / name / value text rows in aged parchment.
+-- Only flair is a gold/silver/copper tint on the top-three rank numbers. The footer
+-- counts down to the next refresh.
 
 local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
@@ -31,17 +32,18 @@ local REFRESH_INTERVAL = 30 -- seconds between reading the store + re-rendering
 
 local FONT = Enum.Font.GothamBlack -- the game's face (GothamSSm Heavy)
 
--- Keep it flat and simple: dark panel, near-black ink for the border + text
--- outline (the outline is what keeps the text readable), white names.
-local INK = Color3.fromRGB(13, 14, 18)     -- border + text outline
-local PANEL = Color3.fromRGB(28, 29, 36)   -- flat panel background
-local WHITE = Color3.fromRGB(255, 255, 255)
-local DIM = Color3.fromRGB(150, 155, 168)  -- empty seats + footer
+-- Wild-west saloon palette: dark weathered-wood panel, deep leather-brown ink
+-- for the border + text outline (the outline is what keeps the text readable),
+-- warm parchment/cream names. Keeps it flat and simple, just warmer.
+local INK = Color3.fromRGB(28, 17, 9)      -- dark leather brown: border + text outline
+local PANEL = Color3.fromRGB(48, 32, 20)   -- weathered saloon-wood background
+local WHITE = Color3.fromRGB(245, 231, 200) -- aged parchment / cream "white"
+local DIM = Color3.fromRGB(158, 132, 100)  -- faded tan: empty seats + footer
 
 local MEDAL = {
-	Color3.fromRGB(255, 205, 60),  -- 1st gold
-	Color3.fromRGB(207, 216, 230), -- 2nd silver
-	Color3.fromRGB(224, 148, 74),  -- 3rd bronze
+	Color3.fromRGB(240, 190, 70),  -- 1st sun gold
+	Color3.fromRGB(206, 200, 178), -- 2nd tarnished silver
+	Color3.fromRGB(196, 122, 66),  -- 3rd weathered copper/bronze
 }
 
 local function corner(inst: Instance, radius: number)
@@ -76,7 +78,7 @@ local BOARDS = {
 		stat = "Wins",
 		store = "Bullrush_LB_Wins_v1",
 		title = "TOP WINS",
-		accent = Color3.fromRGB(255, 199, 46),
+		accent = Color3.fromRGB(242, 186, 64), -- warm sun-gold
 		fmt = function(v: number) return commafmt(v) end,
 	},
 	{
@@ -84,7 +86,7 @@ local BOARDS = {
 		stat = "Money",
 		store = "Bullrush_LB_Money_v1",
 		title = "TOP MONEY",
-		accent = Color3.fromRGB(74, 214, 118),
+		accent = Color3.fromRGB(120, 178, 92), -- muted vintage greenback
 		fmt = function(v: number) return "$" .. commafmt(v) end,
 	},
 }
@@ -201,7 +203,7 @@ local function buildUI(cfg, folder: Instance): BoardUI
 		row.BackgroundTransparency = 1
 		row.Parent = list
 
-		-- Rank number (podium tinted gold/silver/bronze, the rest white).
+		-- Rank number (podium tinted gold/silver/copper, the rest parchment).
 		local rank = newLabel(row, medal or WHITE, 2)
 		rank.Name = "Rank"
 		rank.Position = UDim2.fromScale(0, 0)

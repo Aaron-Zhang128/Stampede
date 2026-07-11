@@ -30,11 +30,17 @@ function DataHandler.GetDefaultProfile()
 		Bulls = {STARTER = true},   -- stored as {bullId = true}, like Chairs/Trails
 		EquippedBull = "STARTER",
 
+		-- Mutations rolled onto specific bulls (BullRollService): a nested
+		-- dictionary {bullId = {mutId = true}}. The equipped bull wears its
+		-- rarest owned mutation (BullCatalog.bestMutation) on revenge throws.
+		BullMutations = {},
+
 		-- Fortune wheel (SpinService): banked spins + when the last free spin
 		-- accrued. LastFreeSpin=0 means a free spin banks immediately on the
 		-- next join (new players and old saves alike get one on first sight).
 		Spins = 0,
 		LastFreeSpin = 0,
+		LastVipSpin = 0, -- when the VIP pass's extra daily spin last accrued (VIP only)
 
 		-- Daily reward (DailyRewardService): DailyStreak = consecutive days
 		-- claimed (the day to claim next is DailyStreak % 7 + 1); LastDailyClaim
@@ -42,7 +48,56 @@ function DataHandler.GetDefaultProfile()
 		-- reward is ready immediately on join (new saves and old saves alike).
 		DailyStreak = 0,
 		LastDailyClaim = 0,
+
+		-- Processed dev-product receipts (MonetizationService). A ring of the most
+		-- recent PurchaseIds, recorded in the SAME durable write as the grant so a
+		-- retried/duplicated Roblox receipt is recognized and never granted twice.
+		ProcessedReceipts = {},
 	}
+end
+
+-- How many recent PurchaseIds to keep per profile (bounds DataStore growth for
+-- players who buy a lot; Roblox only retries a receipt for a short window, so a
+-- generous ring is far more than enough to dedup any real retry).
+local RECEIPT_HISTORY_CAP = 100
+
+-- Assigned by Data.server once the DataStore is wired up: forces an immediate,
+-- retried save of the player's whole profile and returns true only if the write
+-- actually landed. Lets ProcessReceipt persist a grant + its dedup marker before
+-- it confirms the purchase to Roblox. Missing (data script not up) -> treated as
+-- a failed save so the receipt stays NotProcessedYet and Roblox retries.
+DataHandler.SaveNow = nil
+
+function DataHandler.Save(player): boolean
+	if DataHandler.SaveNow then
+		return DataHandler.SaveNow(player) == true
+	end
+	return false
+end
+
+function DataHandler.HasProcessedReceipt(player, purchaseId): boolean
+	local profile = DataHandler.Profiles[player.UserId]
+	local hist = profile and profile.ProcessedReceipts
+	if not hist then return false end
+	local key = tostring(purchaseId)
+	for _, id in hist do
+		if id == key then return true end
+	end
+	return false
+end
+
+function DataHandler.MarkReceiptProcessed(player, purchaseId)
+	local profile = DataHandler.Profiles[player.UserId]
+	if not profile then return end
+	local hist = profile.ProcessedReceipts
+	if not hist then
+		hist = {}
+		profile.ProcessedReceipts = hist
+	end
+	table.insert(hist, tostring(purchaseId))
+	while #hist > RECEIPT_HISTORY_CAP do
+		table.remove(hist, 1)  -- drop oldest; recent ids are the ones that get retried
+	end
 end
 
 function DataHandler.GetStat(player, statName)
@@ -155,6 +210,38 @@ function DataHandler.SetEquippedBull(player, bullId)
 	if not profile then return end
 	profile.EquippedBull = bullId
 	player:SetAttribute("EquippedBull", bullId)
+end
+
+-- Bull mutation helpers -- BullMutations is {bullId = {mutId = true}}: a
+-- mutation is owned PER BULL (rolling Fire onto Magma doesn't put Fire on
+-- anything else). Old saves get the empty table from the default profile on
+-- load merge. BullRollService mirrors the whole table to the BullMutations
+-- player attribute after every roll.
+function DataHandler.AddBullMutation(player, bullId, mutId)
+	local profile = DataHandler.Profiles[player.UserId]
+	if not profile then return end
+	profile.BullMutations = profile.BullMutations or {}
+	local forBull = profile.BullMutations[bullId]
+	if not forBull then
+		forBull = {}
+		profile.BullMutations[bullId] = forBull
+	end
+	forBull[mutId] = true
+end
+
+function DataHandler.HasBullMutation(player, bullId, mutId)
+	local profile = DataHandler.Profiles[player.UserId]
+	local forBull = profile and profile.BullMutations and profile.BullMutations[bullId]
+	return (forBull and forBull[mutId]) == true
+end
+
+function DataHandler.GetBullMutations(player, bullId)
+	local profile = DataHandler.Profiles[player.UserId]
+	local muts = profile and profile.BullMutations
+	if bullId then
+		return muts and muts[bullId]
+	end
+	return muts
 end
 
 return DataHandler

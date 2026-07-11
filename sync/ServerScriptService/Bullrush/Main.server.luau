@@ -4,7 +4,7 @@
 
 	Each round runs one MODE from Config.MODES (weighted random, no immediate
 	repeat, modes needing more players skipped): the mode sets the starting
-	window size on the 9x9 physical grid (Mega 9x9 / Classic 7x7 / Small 5x5),
+	window size on the 11x11 physical grid (Mega 11x11 / Classic 9x9 / Small 7x7),
 	the shrink schedule, the bull difficulty (Stampede), and whether players
 	fight as Red/Blue teams (Team Rush: the last team with a member standing
 	wins as a GROUP - every member gets the win, dead or not).
@@ -35,6 +35,7 @@ local function ensureRemote(name: string): RemoteEvent
 	return remote
 end
 local VoteMode = ensureRemote("VoteMode") -- client -> server: cast/change next-mode vote
+local SetAFK = ensureRemote("SetAFK") -- client -> server: toggle AFK (sit out next round)
 
 local WaveDirector = require(script.Parent.WaveDirector)
 local BullService = require(script.Parent.BullService)
@@ -94,6 +95,32 @@ local function restoreGravity()
 	workspace.Gravity = DEFAULT_GRAVITY
 end
 
+-- Per-round player speed (High Speed mode). Set on each participant's humanoid
+-- at round start and reset at round end; eliminated players respawn fresh at the
+-- default anyway, so we only ever need to restore the ones still standing.
+local DEFAULT_WALK_SPEED = 16 -- Roblox StarterHumanoid default
+
+local function applyModeWalkSpeed(participants, mode)
+	local speed = mode.walkSpeed or DEFAULT_WALK_SPEED
+	for _, player in participants do
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = speed
+		end
+	end
+end
+
+local function restoreWalkSpeed(participants)
+	for _, player in participants do
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = DEFAULT_WALK_SPEED
+		end
+	end
+end
+
 --==============================================================================
 -- Round state broadcast
 --==============================================================================
@@ -125,6 +152,26 @@ local function playersWithCharacters(): { Player }
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if humanoid and humanoid.Health > 0 and character:FindFirstChild("HumanoidRootPart") then
 			table.insert(list, player)
+		end
+	end
+	return list
+end
+
+-- AFK mode (Settings toggle): players who opt in sit out the NEXT round — they
+-- stay in the lobby and are never added to the round roster. Stored as a
+-- replicated "AFK" player attribute (so their own Settings pill can mirror it);
+-- the attribute dies with the Player instance, so leaving clears it.
+SetAFK.OnServerEvent:Connect(function(player, wantAfk)
+	player:SetAttribute("AFK", wantAfk == true)
+end)
+
+-- The round roster: everyone alive in the lobby EXCEPT those in AFK mode. Used
+-- for the min-player gate, mode/vote sizing, and the participant list.
+local function activePlayers(): { Player }
+	local list = {}
+	for _, p in playersWithCharacters() do
+		if p:GetAttribute("AFK") ~= true then
+			table.insert(list, p)
 		end
 	end
 	return list
@@ -208,15 +255,26 @@ local function pickVoteCandidates(playerCount: number)
 	return ballot
 end
 
+-- How much a player's vote counts. VIP passes (IsVIP attribute, set by
+-- MonetizationService) get double voting power; everyone else counts as one.
+local function voteWeight(voter): number
+	if typeof(voter) == "Instance" and voter:GetAttribute("IsVIP") then
+		return 2
+	end
+	return 1
+end
+
 -- Zero-filled tally over the current ballot only (stale votes are ignored).
+-- Each vote counts for its caster's voteWeight (VIP = 2), so tallies are power,
+-- not head count.
 local function countVotes(): { [string]: number }
 	local counts = {}
 	for _, cand in voteCandidates do
 		counts[cand.id] = 0
 	end
-	for _, modeId in votes do
+	for voter, modeId in votes do
 		if counts[modeId] ~= nil then
-			counts[modeId] += 1
+			counts[modeId] += voteWeight(voter)
 		end
 	end
 	return counts
@@ -493,7 +551,15 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 
 		local bounds = ShrinkService.getBounds()
 		local intensity = math.min((os.clock() - roundStart) / rampTime, 1)
-		local waveData = WaveDirector.getWave(intensity, bounds, difficulty, occupied)
+		-- Larger maps (startSize >= 9) feel empty opening with a lone pair, so
+		-- floor the count: 2 bulls on the first wave, then >= 3 from the second
+		-- on (the ramp/mode can still push higher, e.g. Stampede to 4). The Small
+		-- 7x7 grid keeps the gentle probabilistic ramp (no floor).
+		local minBulls = nil
+		if mode.startSize >= 9 then
+			minBulls = if wave <= 1 then 2 else 3
+		end
+		local waveData = WaveDirector.getWave(intensity, bounds, difficulty, occupied, minBulls)
 
 		setRoundState("ACTIVE", {
 			aliveCount = RoundService.aliveCount(),
@@ -553,7 +619,7 @@ end
 
 while true do
 	setRoundState("WAITING", {})
-	while #playersWithCharacters() < Config.MIN_PLAYERS do
+	while #activePlayers() < Config.MIN_PLAYERS do
 		task.wait(0.5)
 	end
 
@@ -561,7 +627,7 @@ while true do
 	if Config.VOTING_ENABLED then
 		-- Open the ballot: pick a few random eligible modes, clear last round's
 		-- votes, and let the per-second resends carry the live tally (Main §14).
-		voteCandidates = pickVoteCandidates(#playersWithCharacters() + AIService.botCount())
+		voteCandidates = pickVoteCandidates(#activePlayers() + AIService.botCount())
 		table.clear(votes)
 		votingOpen = true
 		for timeLeft = Config.INTERMISSION_TIME, 1, -1 do
@@ -574,9 +640,9 @@ while true do
 		end
 		votingOpen = false
 		-- Winner decided AFTER the ballot closes; fall back if it's empty.
-		mode = resolveVoteWinner() or pickMode(#playersWithCharacters() + AIService.botCount())
+		mode = resolveVoteWinner() or pickMode(#activePlayers() + AIService.botCount())
 	else
-		mode = pickMode(#playersWithCharacters() + AIService.botCount())
+		mode = pickMode(#activePlayers() + AIService.botCount())
 		-- Round identity rides the client's sticky intermission countdown card
 		-- (Main §6), painted from the per-second INTERMISSION resends below.
 		for timeLeft = Config.INTERMISSION_TIME, 1, -1 do
@@ -589,7 +655,7 @@ while true do
 		end
 	end
 
-	local participants = playersWithCharacters()
+	local participants = activePlayers() -- AFK players sit this one out
 	if #participants > 0 then -- bots never run a round by themselves
 		for _, bot in AIService.prepareForRound() do
 			table.insert(participants, bot)
@@ -629,6 +695,9 @@ while true do
 			end
 		end
 
+		-- Zippy round if the mode asks for it (restored after the waves).
+		applyModeWalkSpeed(participants, mode)
+
 		RoundService.startRound(participants, isTeams)
 		EconomyService.roundStarted(participants, mode)
 		RevengeService.roundStarted()
@@ -661,6 +730,7 @@ while true do
 		stopWatcher()
 		RevengeService.roundEnded()
 		restoreGravity() -- back to normal for the end banner + lobby
+		restoreWalkSpeed(participants) -- reset any survivors' sprint
 
 		local aliveList = RoundService.getAlive()
 		local summaryWinner: { [string]: any } = {} -- for the Summary tab (EconomyService.settle)
@@ -684,14 +754,31 @@ while true do
 						end
 					end
 				end
-				local winnerName = if winTeam == "RED" then "RED TEAM" else "BLUE TEAM"
-				summaryWinner = { winnerName = winnerName, teamColor = winTeam }
+				-- Featured winner: a random survivor of the winning side (everyone
+				-- still alive is on winTeam, since the round only ends when the
+				-- other team is wiped out). Prefer real players over bots so the
+				-- Summary card shows an actual portrait when any human survived.
+				local pool = {}
+				for _, player in aliveList do
+					if typeof(player) == "Instance" then
+						table.insert(pool, player)
+					end
+				end
+				if #pool == 0 then
+					pool = aliveList
+				end
+				local featured = pool[math.random(#pool)]
+				summaryWinner = {
+					winnerName = featured.Name,
+					winnerUserId = if typeof(featured) == "Instance" then featured.UserId else nil,
+					teamColor = winTeam,
+				}
 				setRoundState("WINNER", {
-					winnerName = winnerName,
+					winnerName = featured.Name,
 					teamColor = winTeam,
 					modeName = mode.name,
 				})
-				NotifyService.broadcast((winnerName .. " WINS THE STAMPEDE"):upper(), "green", 5)
+				NotifyService.broadcast((featured.Name .. " WINS THE STAMPEDE"):upper(), "green", 5)
 			else
 				-- The herd got everyone: nobody won, everybody's streak breaks.
 				for _, player in participants do

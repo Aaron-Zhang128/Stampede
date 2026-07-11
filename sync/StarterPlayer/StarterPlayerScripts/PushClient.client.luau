@@ -31,9 +31,11 @@
 	(bot rigs are server-owned). Bots never push back.
 ]]
 
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
@@ -76,10 +78,10 @@ fxHost.Parent = Workspace
 
 local targetHighlight = Instance.new("Highlight")
 targetHighlight.Name = "PushTarget"
-targetHighlight.FillColor = Color3.fromRGB(255, 70, 70)
-targetHighlight.FillTransparency = 0.82
-targetHighlight.OutlineColor = Color3.fromRGB(255, 120, 120)
-targetHighlight.OutlineTransparency = 0.1
+targetHighlight.FillColor = Color3.fromRGB(255, 0, 0)
+targetHighlight.FillTransparency = 0.3
+targetHighlight.OutlineColor = Color3.fromRGB(255, 30, 30)
+targetHighlight.OutlineTransparency = 0
 targetHighlight.DepthMode = Enum.HighlightDepthMode.Occluded
 targetHighlight.Adornee = nil
 targetHighlight.Parent = fxHost
@@ -212,6 +214,81 @@ Remotes.RoundState.OnClientEvent:Connect(function(state: string)
 end)
 
 --==============================================================================
+-- Shove feedback: when YOU push, a quick two-hand thrust gesture + an effort
+-- whoosh, fired the instant the shove leaves (optimistic, like BullrushDash) so
+-- it feels responsive. The gesture plays on your OWN Animator, so it replicates
+-- to everyone who can see you; the whoosh is local. The shared 3D impact thud on
+-- the victim is server-authored in PushService, so the shove reads from every
+-- vantage — and bot shoves get audio too.
+--==============================================================================
+
+local SHOVE_ANIM_ID = 522638767 -- Roblox-owned "R15 Sword Lunge": a forward thrust
+local WHOOSH_ID = 12222095 -- Rocket whoosh 01; same id the dash uses
+
+-- One track per character, (re)loaded on spawn. pcall-guarded and optional: an
+-- R6 avatar or a failed load just degrades to whoosh-only, never an error.
+local shoveTrack: AnimationTrack? = nil
+
+local function loadShoveTrack(character: Model)
+	shoveTrack = nil
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		return
+	end
+	local anim = Instance.new("Animation")
+	anim.AnimationId = "rbxassetid://" .. SHOVE_ANIM_ID
+	local ok, track = pcall(function()
+		return animator:LoadAnimation(anim)
+	end)
+	if ok and track then
+		track.Priority = Enum.AnimationPriority.Action
+		track.Looped = false
+		shoveTrack = track
+	end
+end
+
+if player.Character then
+	loadShoveTrack(player.Character)
+end
+player.CharacterAdded:Connect(loadShoveTrack)
+
+local function playWhoosh(pitch: number, volume: number)
+	local sound = Instance.new("Sound")
+	pcall(function()
+		sound.SoundId = "rbxassetid://" .. WHOOSH_ID
+	end)
+	sound.PlaybackSpeed = pitch
+	sound.Volume = volume
+	sound.Parent = SoundService
+	pcall(function()
+		sound:Play()
+	end)
+	Debris:AddItem(sound, 4)
+end
+
+local function playShoveFeedback()
+	local track = shoveTrack
+	if track then
+		pcall(function()
+			track:Stop(0)
+			track:Play(0.05)
+			track:AdjustSpeed(1.6) -- a shove is a jab, not a full sword lunge
+		end)
+		-- The lunge holds a pose at its end; cut it short so it snaps back to
+		-- normal movement rather than lingering.
+		task.delay(0.5, function()
+			if track.IsPlaying then
+				pcall(function()
+					track:Stop(0.15)
+				end)
+			end
+		end)
+	end
+	playWhoosh(1.15, 0.28)
+end
+
+--==============================================================================
 -- The shove: F / gamepad Y / the HUD button all funnel here. The server
 -- re-validates everything (alive-in-round, cooldown, distance), so the local
 -- cooldown gate is purely so the button's sweep matches what will be accepted.
@@ -224,11 +301,14 @@ local function attemptPush()
 	if os.clock() < readyAt then
 		return -- still cooling down locally
 	end
+
+	-- We always swing, play the whoosh and start the cooldown — even with nobody in
+	-- range. A punch that connects with air is a MISS: currentTarget is nil, so the
+	-- server sees a nil target and replies with a red "You missed!" card. The
+	-- cooldown applies either way, so whiffing costs you the same beat as landing it.
 	local target = currentTarget
-	if not target then
-		return -- nobody in range
-	end
-	Remotes.Push:FireServer(target) -- Player, or a bot rig Model
+	Remotes.Push:FireServer(target) -- Player / bot rig Model, or nil on a miss
+	playShoveFeedback()
 	readyAt = os.clock() + PUSH.COOLDOWN
 	pushBridge:SetAttribute("ReadyAt", readyAt)
 end
@@ -261,6 +341,40 @@ local function aliveRoot(): BasePart?
 	return nil
 end
 
+-- A short, decaying jolt on the victim's OWN camera — the single biggest "this
+-- hurt" cue. Bound one priority AFTER the default camera so we layer our offset
+-- on top of the CFrame it just set (a plain RenderStepped connection would be
+-- overwritten by the camera update that runs after it). Re-binds cleanly if a
+-- second shove lands mid-shake.
+local SHAKE_BIND = "PushCamShake"
+local SHAKE_POS = 0.9 -- studs of positional jitter at peak
+local SHAKE_ROT = 5 -- degrees of rotational jitter at peak
+local SHAKE_TIME = 0.3 -- seconds to settle
+
+local function shakeCamera()
+	pcall(function()
+		RunService:UnbindFromRenderStep(SHAKE_BIND)
+	end)
+	local startedAt = os.clock()
+	RunService:BindToRenderStep(SHAKE_BIND, Enum.RenderPriority.Camera.Value + 1, function()
+		local cam = Workspace.CurrentCamera
+		local t = os.clock() - startedAt
+		if not cam or t >= SHAKE_TIME then
+			pcall(function()
+				RunService:UnbindFromRenderStep(SHAKE_BIND)
+			end)
+			return
+		end
+		local falloff = 1 - t / SHAKE_TIME
+		falloff = falloff * falloff -- sharp at impact, quick settle
+		local p = SHAKE_POS * falloff
+		local r = math.rad(SHAKE_ROT * falloff)
+		cam.CFrame = cam.CFrame
+			* CFrame.new((math.random() * 2 - 1) * p, (math.random() * 2 - 1) * p, (math.random() * 2 - 1) * p)
+			* CFrame.Angles((math.random() * 2 - 1) * r, (math.random() * 2 - 1) * r, (math.random() * 2 - 1) * r)
+	end)
+end
+
 Remotes.Pushed.OnClientEvent:Connect(function(direction: Vector3)
 	local root = aliveRoot()
 	if not root then
@@ -272,22 +386,52 @@ Remotes.Pushed.OnClientEvent:Connect(function(direction: Vector3)
 	end
 	flat = flat.Unit
 
-	-- One burst with a small upward pop, then hold the horizontal velocity for
-	-- PUSH.TIME while gravity takes the vertical back over.
+	-- Camera jolt fires the instant the shove lands, selling the hit through the
+	-- victim's own view.
+	shakeCamera()
+
+	-- Hitstop: a brief freeze at the instant of contact. Robs the shove of its
+	-- floatiness and makes the launch that follows read as a violent hit rather
+	-- than a glide. Anchor freezes the whole assembly; we bail if the player
+	-- died / respawned during the freeze.
+	if PUSH.HITSTOP > 0 then
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.Anchored = true
+		task.wait(PUSH.HITSTOP)
+		if aliveRoot() ~= root then
+			root.Anchored = false
+			return
+		end
+		root.Anchored = false
+	end
+
+	-- Knockback: a hard spike at contact (full SPEED) that eases to a stop over
+	-- PUSH.TIME, so the body FEELS the deceleration instead of gliding at a
+	-- constant speed. Only a small footing-break hop up; stays grounded.
 	root.AssemblyLinearVelocity = Vector3.new(flat.X * PUSH.SPEED, PUSH.UP, flat.Z * PUSH.SPEED)
 	local startedAt = os.clock()
 	local connection
 	connection = RunService.Heartbeat:Connect(function()
 		local nowRoot = aliveRoot()
+		local t = os.clock() - startedAt
 		-- nowRoot ~= root catches death / respawn mid-knockback.
-		if nowRoot ~= root or os.clock() - startedAt >= PUSH.TIME then
+		if nowRoot ~= root or t >= PUSH.TIME then
 			connection:Disconnect()
 			return
 		end
+		local falloff = 1 - t / PUSH.TIME
+		falloff = falloff * falloff -- ease-out: hardest at contact, decays to nothing
+		-- Vertical pop: ramp Y from +UP to -UP over UP_TIME (constant, snappy accel
+		-- up AND down), so they leave the ground fast and get slammed back fast with
+		-- no hang time. Once the pop window is done, hand Y back to physics.
+		local vy = root.AssemblyLinearVelocity.Y
+		if t < PUSH.UP_TIME then
+			vy = PUSH.UP - (2 * PUSH.UP / PUSH.UP_TIME) * t
+		end
 		root.AssemblyLinearVelocity = Vector3.new(
-			flat.X * PUSH.SPEED,
-			root.AssemblyLinearVelocity.Y,
-			flat.Z * PUSH.SPEED
+			flat.X * PUSH.SPEED * falloff,
+			vy,
+			flat.Z * PUSH.SPEED * falloff
 		)
 	end)
 end)

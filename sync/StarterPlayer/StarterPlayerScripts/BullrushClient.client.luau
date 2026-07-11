@@ -8,7 +8,7 @@
 -- the shakes, and the
 -- round HUD (including per-round MODE display and Team Rush team counts).
 -- Client-only; reads the shared contract in ReplicatedStorage.Bullrush and
--- never touches server state. The physical arena is 9x9; each round plays a
+-- never touches server state. The physical arena is 11x11; each round plays a
 -- mode-sized centered window of it that shrinks during the round. The SERVER
 -- owns tile sinking/recoloring, this script only telegraphs the danger and
 -- reacts at the sink moment.
@@ -1840,7 +1840,7 @@ if revengeAckRemote then
 			local victim = if typeof(data) == "table" then tostring(data.victimName or "someone") else "someone"
 			local amount = if typeof(data) == "table" then tonumber(data.amount) else nil
 			showHitPopup(if amount
-				then ("TRAMPLED %s! +%d💰"):format(victim, amount)
+				then ("TRAMPLED %s! +$%d"):format(victim, amount)
 				else ("TRAMPLED %s!"):format(victim))
 			addTrauma(0.35)
 			playHapticPulse("GameplayCollision")
@@ -1968,3 +1968,30 @@ RunService.RenderStepped:Connect(function(dt)
 		setGamepadRumble(0)
 	end
 end)
+
+--==============================================================================
+-- VIP chat tag: a gold [VIP] badge in front of the sender's name for anyone who
+-- owns the VIP pass. IsVIP is set server-side by MonetizationService and
+-- replicated as a player attribute, so every client can read it here.
+-- OnIncomingMessage runs locally for each message on each client (this is the
+-- modern TextChatService path - verified ChatVersion), so all players see the
+-- tag and nothing is stored on the message itself.
+--==============================================================================
+
+local TextChatService = game:GetService("TextChatService")
+local VIP_TAG_HEX = Color3.fromRGB(255, 205, 60):ToHex() -- house gold
+
+TextChatService.OnIncomingMessage = function(message: TextChatMessage)
+	local source = message.TextSource
+	if not source then
+		return -- system / non-player messages carry no TextSource
+	end
+	local sender = Players:GetPlayerByUserId(source.UserId)
+	if not (sender and sender:GetAttribute("IsVIP")) then
+		return -- non-VIP (or the sender already left): leave the message untouched
+	end
+	-- Prepend the gold badge, keeping whatever prefix the chat already built.
+	local props = Instance.new("TextChatMessageProperties")
+	props.PrefixText = ('<font color="#%s">[VIP]</font> %s'):format(VIP_TAG_HEX, message.PrefixText)
+	return props
+end

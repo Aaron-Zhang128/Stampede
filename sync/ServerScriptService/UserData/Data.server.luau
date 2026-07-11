@@ -40,14 +40,16 @@ local function withRetry(fn)
 	return false, lastErr
 end
 
-local function savePlayer(player)
+-- Returns true only if the profile was actually written (used by ProcessReceipt
+-- to confirm a purchase only after its grant is durably saved).
+local function savePlayer(player): boolean
 	local profile = DataHandler.Profiles[player.UserId]
-	if not profile then return end
+	if not profile then return false end
 
 	-- Guard: never clobber a real save with a profile that failed to load.
 	if not dataLoaded[player.UserId] then
 		warn("Skipping save for " .. player.Name .. " -- data never loaded cleanly (protecting real save)")
-		return
+		return false
 	end
 
 	-- UpdateAsync (vs SetAsync) is an atomic read-modify-write on the key, so
@@ -63,7 +65,11 @@ local function savePlayer(player)
 	if not ok then
 		warn("Failed to save data for " .. player.Name .. ": " .. tostring(err))
 	end
+	return ok
 end
+
+-- Let services (MonetizationService.ProcessReceipt) force a durable save on demand.
+DataHandler.SaveNow = savePlayer
 
 Players.PlayerAdded:Connect(function(player)
 	local profile = DataHandler.GetDefaultProfile()
@@ -100,6 +106,7 @@ Players.PlayerAdded:Connect(function(player)
 	player:SetAttribute("EquippedTrail", profile.EquippedTrail or "None")
 	player:SetAttribute("Bulls", HttpService:JSONEncode(profile.Bulls or {}))
 	player:SetAttribute("EquippedBull", profile.EquippedBull or "STARTER")
+	player:SetAttribute("BullMutations", HttpService:JSONEncode(profile.BullMutations or {}))
 	player:SetAttribute("GroupRewardClaimed", profile.GroupRewardClaimed or false)
 
 	-- Leaderstats: only Money and Wins are shown in the player list (column order

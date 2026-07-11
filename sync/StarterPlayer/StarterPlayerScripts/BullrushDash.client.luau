@@ -1,6 +1,7 @@
 --[[
 	BullrushDash - dodge dash: a quick horizontal burst on a cooldown.
-	Q / gamepad X / the auto-created mobile touch button (ContextActionService).
+	Triggered by a DOUBLE JUMP: press jump a second time while already airborne
+	(space / gamepad A / the mobile jump button all count, via JumpRequest).
 
 	Purely client-side: Roblox character movement is client-authoritative, so
 	a server round-trip would add latency without adding trust. No HUD by
@@ -13,22 +14,53 @@
 	velocity so gravity and jumps behave.
 ]]
 
-local ContextActionService = game:GetService("ContextActionService")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 
-local DASH_SPEED = 56 -- studs/s, vs 16 walk and 36-62 bulls
-local DASH_TIME = 0.18 -- ~10 studs: enough to clear a kill box, not a lane hop
-local COOLDOWN = 3.5 -- roughly every other wave late-game
+local DASH_SPEED = 60 -- studs/s, vs 16 walk and 36-62 bulls (nudged up a touch for snap)
+local DASH_TIME = 0.18 -- ~11 studs: enough to clear a kill box, not a lane hop
+local COOLDOWN = 2 -- roughly every wave late-game
 local FOV_KICK = 6 -- degrees of momentary camera widen
-local TRAIL_COLOR = Color3.fromRGB(255, 236, 190)
+local TRAIL_COLOR = Color3.fromRGB(240, 246, 255) -- airy near-white: reads as wind, not a warm streak
 
 local WHOOSH_ID = 12222095 -- Rocket whoosh 01.wav; same id BullrushClient uses
+
+-- Roblox's default R15 tool-lunge animation (the sword-thrust lunge) reused as a
+-- forward dash pose. It's a full-body forward drive, so it reads as a dash from
+-- any camera angle. Time-scaled per-use to finish just after the burst ends.
+local LUNGE_ID = "rbxassetid://522638767"
+local lungeAnim = Instance.new("Animation")
+lungeAnim.AnimationId = LUNGE_ID
+
+local lungeTrack: AnimationTrack? = nil
+local lungeHumanoid: Humanoid? = nil
+
+-- Load (and cache) the lunge track for the given humanoid, re-loading on respawn.
+local function getLungeTrack(humanoid: Humanoid): AnimationTrack?
+	if lungeTrack and lungeHumanoid == humanoid then
+		return lungeTrack
+	end
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		return nil
+	end
+	local ok, track = pcall(function()
+		return animator:LoadAnimation(lungeAnim)
+	end)
+	if not ok or not track then
+		return nil
+	end
+	track.Priority = Enum.AnimationPriority.Action
+	lungeTrack = track
+	lungeHumanoid = humanoid
+	return track
+end
 
 local lastDashAt = -math.huge
 local dashing = false
@@ -57,20 +89,34 @@ local function aliveParts(): (Humanoid?, BasePart?)
 	return nil, nil
 end
 
+-- A windswept streak that rips off the body during the dash. Taller than the
+-- character, always broadside to camera, and self-lit so it pops even in shade.
 local function attachTrail(root: BasePart)
 	local a0 = Instance.new("Attachment")
-	a0.Position = Vector3.new(0, 1, 0)
+	a0.Position = Vector3.new(0, 2.2, 0) -- tall sheet, top -> reads as a gust, not a thin ribbon
 	a0.Parent = root
 	local a1 = Instance.new("Attachment")
-	a1.Position = Vector3.new(0, -1, 0)
+	a1.Position = Vector3.new(0, -2.6, 0) -- ...to the feet
 	a1.Parent = root
 	local trail = Instance.new("Trail")
 	trail.Attachment0 = a0
 	trail.Attachment1 = a1
 	trail.Color = ColorSequence.new(TRAIL_COLOR)
-	trail.Transparency = NumberSequence.new(0.4, 1)
-	trail.Lifetime = 0.25
-	trail.WidthScale = NumberSequence.new(1, 0.3)
+	-- Bright and solid at the body, streaking out to nothing behind.
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.05),
+		NumberSequenceKeypoint.new(0.5, 0.4),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	trail.Lifetime = 0.4 -- longer tail = a proper wind streak
+	trail.WidthScale = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.4),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	trail.FaceCamera = true -- always broadside to the camera = always visible
+	trail.LightInfluence = 0 -- self-lit; doesn't get swallowed by lobby shade
+	trail.Texture = "rbxassetid://241629053" -- soft wisp, stretched into windswept streaks
+	trail.TextureMode = Enum.TextureMode.Stretch
 	trail.Parent = root
 	Debris:AddItem(a0, DASH_TIME + 1)
 	Debris:AddItem(a1, DASH_TIME + 1)
@@ -150,6 +196,16 @@ local function dash()
 	fovKick()
 	attachTrail(root)
 
+	local track = getLungeTrack(humanoid)
+	if track then
+		track:Play(0.05)
+		-- Scale so the lunge plays across ~1.6x the burst: snappy, but it lands a
+		-- beat after the movement stops rather than freezing mid-pose.
+		if track.Length > 0 then
+			track:AdjustSpeed(track.Length / (DASH_TIME * 1.6))
+		end
+	end
+
 	local connection
 	connection = RunService.Heartbeat:Connect(function()
 		local _nowHumanoid, nowRoot = aliveParts()
@@ -157,6 +213,9 @@ local function dash()
 		if nowRoot ~= root or os.clock() - lastDashAt >= DASH_TIME then
 			connection:Disconnect()
 			dashing = false
+			if lungeTrack and lungeTrack.IsPlaying then
+				lungeTrack:Stop(0.12) -- fade out; lunge tail overhangs the movement slightly
+			end
 			if nowRoot == root then
 				landingPuff(root) -- only if we survived the dash (not a mid-dash death)
 			end
@@ -176,13 +235,20 @@ local function dash()
 	end)
 end
 
-local function onAction(_name: string, state: Enum.UserInputState)
-	if state == Enum.UserInputState.Begin then
-		dash()
-	end
-	return Enum.ContextActionResult.Sink
+-- Double jump = dash. JumpRequest fires on space / gamepad A / the mobile jump
+-- button; if one lands while the character is already off the ground, it's the
+-- second jump, so we spend it on a dash instead. Grounded requests are normal
+-- jumps and pass through untouched.
+local function isAirborne(humanoid: Humanoid): boolean
+	local state = humanoid:GetState()
+	return state == Enum.HumanoidStateType.Freefall
+		or state == Enum.HumanoidStateType.Jumping
+		or humanoid.FloorMaterial == Enum.Material.Air
 end
 
-ContextActionService:BindAction("BullrushDash", onAction, true,
-	Enum.KeyCode.Q, Enum.KeyCode.ButtonX)
-ContextActionService:SetTitle("BullrushDash", "Dash")
+UserInputService.JumpRequest:Connect(function()
+	local humanoid = select(1, aliveParts())
+	if humanoid and isAirborne(humanoid) then
+		dash()
+	end
+end)

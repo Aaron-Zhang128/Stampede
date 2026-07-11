@@ -31,6 +31,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
+local BullCatalog = require(ReplicatedStorage.Bullrush.BullCatalog)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
 
 local BullService = require(script.Parent.BullService)
@@ -154,9 +155,12 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 	local bull = BullRollService.getEquippedBull(thrower)
 
 	cooldownUntil[thrower] = now + Config.REVENGE.COOLDOWN
+	-- The worn mutation leads the name ("Radioactive El Diablo charging...")
+	local mutDef = bull.mutation and BullCatalog.getMutation(bull.mutation)
+	local throwName = if mutDef then mutDef.name .. " " .. bull.name else bull.name
 	NotifyService.send(thrower,
 		("%s charging down %s %d!"):format(
-			bull.name, if axis == "row" then "row" else "column", index), "green")
+			throwName, if axis == "row" then "row" else "column", index), "green")
 	ack(thrower, "THROW_OK", { cooldown = Config.REVENGE.COOLDOWN, lane = lane, bullId = bull.id })
 
 	task.spawn(function()
@@ -183,7 +187,7 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 			end
 		end
 		BullService.charge(lane, bull.speed, bounds, RoundService.getAliveCached, onKill,
-			{ throwerName = thrower.Name, bullId = bull.id })
+			{ throwerName = thrower.Name, bullId = bull.id, mutation = bull.mutation })
 	end)
 end
 

@@ -2,7 +2,7 @@
 	ShrinkService - owns the shrinking arena floor (Workspace.BullrushArena.Tiles)
 	and the guard walls (Workspace.BullrushArena.Walls).
 
-	The physical grid is 9x9; each round plays in a centered window of it.
+	The physical grid is 11x11; each round plays in a centered window of it.
 	reset(startSize, stages) configures the round: tiles inside the window are
 	restored (checkerboard, canonical height, visible), tiles OUTSIDE it vanish
 	into the pit immediately (no telegraph - they were never in play). Stage 0 =
