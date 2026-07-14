@@ -32,10 +32,10 @@ local TRAIL_COLOR = Color3.fromRGB(240, 246, 255) -- airy near-white: reads as w
 
 local WHOOSH_ID = 12222095 -- Rocket whoosh 01.wav; same id BullrushClient uses
 
--- Roblox's default R15 tool-lunge animation (the sword-thrust lunge) reused as a
+-- Roblox's classic R6 tool-lunge animation (the sword-thrust lunge) reused as a
 -- forward dash pose. It's a full-body forward drive, so it reads as a dash from
 -- any camera angle. Time-scaled per-use to finish just after the burst ends.
-local LUNGE_ID = "rbxassetid://522638767"
+local LUNGE_ID = "rbxassetid://129967478"
 local lungeAnim = Instance.new("Animation")
 lungeAnim.AnimationId = LUNGE_ID
 

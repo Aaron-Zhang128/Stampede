@@ -238,11 +238,11 @@ end)
 -- vantage — and bot shoves get audio too.
 --==============================================================================
 
-local SHOVE_ANIM_ID = 522638767 -- Roblox-owned "R15 Sword Lunge": a forward thrust
+local SHOVE_ANIM_ID = 129967478 -- Roblox-owned classic R6 tool lunge: a forward thrust
 local WHOOSH_ID = 12222095 -- Rocket whoosh 01; same id the dash uses
 
--- One track per character, (re)loaded on spawn. pcall-guarded and optional: an
--- R6 avatar or a failed load just degrades to whoosh-only, never an error.
+-- One track per character, (re)loaded on spawn. pcall-guarded and optional: a
+-- failed load just degrades to whoosh-only, never an error.
 local shoveTrack: AnimationTrack? = nil
 
 local function loadShoveTrack(character: Model)

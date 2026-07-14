@@ -94,7 +94,7 @@ end
 local function buildRig(name: string): Model?
 	local ok, rig = pcall(function()
 		return Players:CreateHumanoidModelFromDescription(
-			Instance.new("HumanoidDescription"), Enum.HumanoidRigType.R15)
+			Instance.new("HumanoidDescription"), Enum.HumanoidRigType.R6)
 	end)
 	if not ok or typeof(rig) ~= "Instance" then
 		warn("Bullrush: could not build bot rig:", rig)

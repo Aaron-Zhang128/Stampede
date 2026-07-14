@@ -681,15 +681,19 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 		end
 
 		local bounds = ShrinkService.getBounds()
-		local intensity = math.min((os.clock() - roundStart) / rampTime, 1)
+		-- CURVE (> 1) bows the ramp downward: the opening and the rampTime
+		-- finale stay put, but the middle of the round runs a notch below the
+		-- old straight line ("mid game a bit easier", 2026-07-13).
+		local intensity = math.min((os.clock() - roundStart) / rampTime, 1) ^ (Config.DIFFICULTY.CURVE or 1)
 		-- Larger maps (startSize >= 9) feel empty once the round is rolling, so
 		-- floor the count — but only after an opening grace: the first few waves
 		-- ride the gentle probabilistic ramp everywhere (a single slow bull to
-		-- learn on), then the floor steps in at 2 and reaches 3 as the ramp
-		-- passes a third (the ramp/mode can still push higher, e.g. Stampede
-		-- to 4). The Small 7x7 grid keeps the gentle ramp throughout (no floor).
+		-- learn on), then the floor steps in at 2 and reaches 3 once the curved
+		-- ramp passes a third (~72s on the base ramp; the ramp/mode can still
+		-- push higher, e.g. Stampede to 4). The Small 7x7 grid keeps the gentle
+		-- ramp throughout (no floor).
 		local minBulls = nil
-		if mode.startSize >= 9 and wave > 3 then
+		if mode.startSize >= 9 and wave > 4 then
 			minBulls = if intensity < 0.35 then 2 else 3
 		end
 		local waveData = WaveDirector.getWave(intensity, bounds, difficulty, occupied, minBulls)

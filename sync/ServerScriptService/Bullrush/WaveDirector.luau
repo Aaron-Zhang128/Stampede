@@ -10,8 +10,8 @@
 	don't double-book a lane (best-effort: ignored if picks run dry).
 
 	minBulls = optional floor on this wave's bull count (still capped at
-	difficulty.FINAL.bulls). Main uses it to fill larger maps faster — the
-	opening wave stays at 2 bulls, then >= 3 from the second wave on.
+	difficulty.FINAL.bulls). Main uses it to fill larger maps faster after an
+	opening grace: 2 bulls mid-ramp, 3 once the (curved) ramp passes a third.
 
 	intensity = 0..1 round progress (Main computes elapsed / rampTime,
 	clamped here as well); telegraph/gap/speed/bull count each lerp
@@ -106,9 +106,9 @@ function WaveDirector.getWave(intensity: number, bounds, difficulty, excluded, m
 
 	-- Fractional part of the lerped count = chance of one extra bull.
 	local count = math.floor(lerp(START.bulls, FINAL.bulls, intensity) + math.random())
-	-- Optional per-wave floor (Main uses it to fill larger maps faster: 2 on the
-	-- opening wave, then >= 3 from the second wave on). Capped to FINAL.bulls so it
-	-- never exceeds the mode's designed peak.
+	-- Optional per-wave floor (Main uses it to fill larger maps faster after an
+	-- opening grace: 2 mid-ramp, then 3). Capped to FINAL.bulls so it never
+	-- exceeds the mode's designed peak.
 	if minBulls then
 		count = math.max(count, minBulls)
 	end

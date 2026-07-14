@@ -7151,30 +7151,25 @@ do
 	hintStroke.Parent = hint
 	hint.Parent = tutGui
 
-	-- One pulsing stroke, reparented onto whatever needs pressing. An Index
-	-- rebuild can destroy it along with its card, and a destroyed instance's
-	-- Parent is locked — so re-park through pcall and remake on failure.
-	local function makeGlow(): UIStroke
-		local s = Instance.new("UIStroke")
-		s.Name = "TutorialGlow"
-		s.Color = GOLD
-		s.Thickness = 4
-		s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		return s
-	end
-	local glow = makeGlow()
-	local function parkGlow(target: GuiObject?)
-		if glow.Parent == target then
-			return
-		end
-		local ok = pcall(function()
-			glow.Parent = target
-		end)
-		if not ok then
-			glow = makeGlow()
-			glow.Parent = target
-		end
-	end
+	-- The pulsing gold halo. It USED to be a UIStroke parented into the
+	-- target button, but a Border stroke draws outside the parent's rect and
+	-- clipping ancestors eat it — the Index rarity tabs sit in exactly such a
+	-- column, so "Check this tab!" showed text with no halo (user caught it).
+	-- Now it's a screen-space overlay in tutGui, sized to the target's
+	-- absolute bounds every frame like the hint: no clipping, no z-order
+	-- fights, nothing to lose when an Index rebuild destroys its card.
+	local halo = Instance.new("Frame")
+	halo.Name = "TutorialHalo"
+	halo.BackgroundTransparency = 1
+	halo.Visible = false
+	local haloCorner = Instance.new("UICorner")
+	haloCorner.CornerRadius = UDim.new(0, 10)
+	haloCorner.Parent = halo
+	local haloStroke = Instance.new("UIStroke")
+	haloStroke.Color = GOLD
+	haloStroke.Thickness = 4
+	haloStroke.Parent = halo
+	halo.Parent = tutGui
 
 	-- World marker for step 2's "get to the stall" leg: a billboard over the
 	-- ShopPrompt part, found with the same streaming-proof scan as the shop
@@ -7521,21 +7516,24 @@ do
 		setArrowTarget(if kind == "stall" then stallPart else nil)
 
 		if kind ~= "ui" or not target then
-			parkGlow(nil)
+			halo.Visible = false
 			hint.Visible = false
 			return
 		end
 
-		parkGlow(target)
 		local wave = 0.5 + 0.5 * math.sin(os.clock() * 5)
-		glow.Thickness = 3 + 2 * wave
-		glow.Transparency = 0.3 - 0.3 * wave
-
-		hint.Text = text or ""
-		hint.Visible = true
 		local screen = tutGui.AbsoluteSize
 		local rel = target.AbsolutePosition - tutGui.AbsolutePosition
 		local size = target.AbsoluteSize
+		local pad = 5 + 2 * wave -- the halo breathes by growing off the target
+		halo.Visible = true
+		halo.Position = UDim2.fromOffset(rel.X - pad, rel.Y - pad)
+		halo.Size = UDim2.fromOffset(size.X + pad * 2, size.Y + pad * 2)
+		haloStroke.Thickness = 3 + 2 * wave
+		haloStroke.Transparency = 0.3 - 0.3 * wave
+
+		hint.Text = text or ""
+		hint.Visible = true
 		local cx = rel.X + size.X / 2
 		local cy = rel.Y + size.Y / 2
 		local bob = 4 * math.sin(os.clock() * 3)

@@ -372,6 +372,13 @@ Config.SHRINK = {
 Config.DIFFICULTY = {
 	RAMP_TIME = 157, -- 2026-07-12: ramps stretched another ~40% (25% pass was 112; original 90)
 
+	-- 2026-07-13 "mid game a bit easier" pass (target: ~2.5 min rounds): Main
+	-- raises the round's 0..1 ramp progress to this power, bowing the line
+	-- downward. The widest dip lands mid-round (~10 intensity points around 40%
+	-- in: slower bulls, roomier telegraphs/gaps), the opening moves only a hair,
+	-- and FINAL still lands at rampTime with the same bite. 1 = old linear ramp.
+	CURVE = 1.35,
+
 	-- Gentle opening, eased ~40% further 2026-07-12 (was telegraph 1.7 / gap 1.4 /
 	-- speed 24; original pre-easing: 1.4 / 1.0 / 31 / bulls 2): rounds start with a
 	-- single slow, well-telegraphed bull so new players can learn the dodge before
@@ -418,25 +425,28 @@ Config.SPECIAL_BULLS = {
 --                  standing wins as a group (every member gets the win)
 --   gravity        workspace gravity for the round (default ~196; lower = floaty)
 --   walkSpeed      participant WalkSpeed for the round (default 16; higher = zippy)
+-- 2026-07-13 easing pass: shrink times pushed ~5-10s later (more room mid-round)
+-- and the outlier rampTimes pulled toward the base 157 so every mode's FINAL
+-- lands near the ~2.5-minute round target.
 Config.MODES = {
 	{
 		id = "CLASSIC", name = "Classic", weight = 3, minPlayers = 1,
 		startSize = 9,
-		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
+		shrink = { times = { 45, 90 }, aliveFractions = { 0.6, 0.3 } },
 		rampTime = 157,
 	},
 	{
 		id = "MEGA", name = "Mega Grid", weight = 2, minPlayers = 1,
 		startSize = 11,
-		shrink = { times = { 30, 65, 100 }, aliveFractions = { 0.75, 0.5, 0.25 } },
-		rampTime = 182,
+		shrink = { times = { 35, 72, 110 }, aliveFractions = { 0.75, 0.5, 0.25 } },
+		rampTime = 170,
 		moneyMult = 1.1,
 	},
 	{
 		id = "SMALL", name = "Small Grid", weight = 2, minPlayers = 1,
 		startSize = 7,
-		shrink = { times = { 35 }, aliveFractions = { 0.45 } },
-		rampTime = 105,
+		shrink = { times = { 40 }, aliveFractions = { 0.45 } },
+		rampTime = 125,
 		moneyMult = 1.15,
 		difficulty = {
 			START = { telegraph = 2.4, gap = 2.0, speed = 16, bulls = 1 },
@@ -446,8 +456,8 @@ Config.MODES = {
 	{
 		id = "STAMPEDE", name = "Stampede", weight = 2, minPlayers = 1,
 		startSize = 9,
-		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
-		rampTime = 132,
+		shrink = { times = { 45, 90 }, aliveFractions = { 0.6, 0.3 } },
+		rampTime = 145,
 		moneyMult = 1.25,
 		difficulty = {
 			START = { telegraph = 2.4, gap = 2.0, speed = 17, bulls = 1 },
@@ -465,7 +475,7 @@ Config.MODES = {
 	{
 		id = "LOWGRAV", name = "Low Gravity", weight = 2, minPlayers = 1,
 		startSize = 9,
-		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
+		shrink = { times = { 45, 90 }, aliveFractions = { 0.6, 0.3 } },
 		rampTime = 157,
 		gravity = 45,                 -- floaty moon-jumps; default is ~196
 		moneyMult = 1.15,
@@ -473,7 +483,7 @@ Config.MODES = {
 	{
 		id = "HIGHSPEED", name = "High Speed", weight = 2, minPlayers = 1,
 		startSize = 9,
-		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
+		shrink = { times = { 45, 90 }, aliveFractions = { 0.6, 0.3 } },
 		rampTime = 157,
 		walkSpeed = 32,               -- players sprint at 2x (default 16)
 		moneyMult = 1.2,
