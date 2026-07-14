@@ -1872,6 +1872,14 @@ local NOTIF_TEXT_TINTS = {
 		ColorSequenceKeypoint.new(0.45, Color3.fromRGB(72, 224, 96)),
 		ColorSequenceKeypoint.new(1, Color3.fromRGB(16, 128, 46)),
 	}),
+	-- "kill" — your-elimination confirmations ("You killed X"): a hot gold ramp
+	-- that reads as a reward without borrowing green's money colour. pushNotif
+	-- also fires the kill sting for this style (see below).
+	kill = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 236, 170)),
+		ColorSequenceKeypoint.new(0.45, Color3.fromRGB(255, 196, 64)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(176, 120, 8)),
+	}),
 }
 
 -- Notifs get their own ScreenGui at an extreme DisplayOrder so they always
@@ -2018,6 +2026,12 @@ function pushNotif(text, style, duration) -- assigns the forward-declared local
 	local card, label = buildNotifCard(text, style)
 	if not card then
 		return
+	end
+	-- "kill" cards ("You killed X" — push or thrown-bull) get a one-shot kill
+	-- sting on top of the gold lettering. Both kill sources route through here,
+	-- so the sound lives in one place.
+	if style == "kill" then
+		playSfx("Among Us (Kill)", 1, 1, 2)
 	end
 	notifCounter += 1
 	card.Name = "Notif" .. notifCounter
@@ -2483,6 +2497,13 @@ task.spawn(function()
 			return
 		end
 		pushElim(playerName, cause, byName)
+		-- A PUSH elimination the server credited to ME: pop a "You killed X"
+		-- card, which also plays the kill sting via the "kill" style. Thrown-bull
+		-- kills are announced the same way, straight from RevengeService's card.
+		if cause == "PUSH" and byName == player.Name and pushNotif then
+			local victimDisplay = elimIdentity(playerName)
+			pushNotif("You killed " .. victimDisplay, "kill", 3)
+		end
 	end)
 end)
 
@@ -2710,18 +2731,55 @@ if cashLabel then
 			return
 		end
 		local lastMoney = money.Value -- no popup for the initial load
-		local function refresh()
-			cashLabel.Text = "$" .. comma(money.Value)
+
+		-- Count-up: the counter rolls from its current number to the new total
+		-- rather than snapping, so a gain visibly "ticks up". One RenderStepped
+		-- loop eases the shown value toward the target (ease-out cubic, decelerating
+		-- into the final number); a newer change just retargets the same loop.
+		local COUNT_DUR = 0.5 -- seconds to roll to the new total
+		local displayed = money.Value
+		local countConn
+		local function render()
+			cashLabel.Text = "$" .. comma(displayed)
 		end
+		local function animateTo(target)
+			if countConn then
+				countConn:Disconnect()
+				countConn = nil
+			end
+			local from = displayed
+			local diff = target - from
+			-- ±1 tick (or no change): snap, no point animating a rounding blip
+			if math.abs(diff) < 2 then
+				displayed = target
+				render()
+				return
+			end
+			local elapsed = 0
+			countConn = RunService.RenderStepped:Connect(function(dt)
+				elapsed += dt
+				local alpha = math.min(elapsed / COUNT_DUR, 1)
+				local eased = 1 - (1 - alpha) ^ 3 -- ease-out cubic
+				displayed = from + diff * eased
+				render()
+				if alpha >= 1 then
+					displayed = target
+					render()
+					countConn:Disconnect()
+					countConn = nil
+				end
+			end)
+		end
+
+		render() -- initial snap to the loaded value
 		money.Changed:Connect(function(value)
 			local delta = value - lastMoney
 			lastMoney = value
-			refresh()
+			animateTo(value)
 			if delta ~= 0 then
 				popDelta(delta)
 			end
 		end)
-		refresh()
 	end)
 end
 
@@ -3519,6 +3577,126 @@ do
 			end
 		end
 
+		-- ── Dragon teaser (first-spin near-miss) ────────────────────────────
+		-- A glowing "???" dragon medallion embedded at a slice BOUNDARY of the
+		-- dial. It rides the dial like a 7th mini-wedge but is NOT a reward, so a
+		-- spin can only ever rest BESIDE it (SpinService rigs a new player's very
+		-- first spin to land on the neighbouring slice). Built on demand for both
+		-- dials (this window + the lobby-face mirror) from ReplicatedStorage.Dragon,
+		-- which lives ONLY here -- the model exists nowhere else in the game.
+		local dragonSource, dragonConfig
+		local dragonGlows = {} -- UIStrokes pulsed together below
+
+		local function frameDragonViewport(viewport)
+			local model = dragonSource:Clone()
+			for _, p in model:GetDescendants() do
+				if p:IsA("BasePart") then
+					p.Anchored = true
+					p.CanCollide = false
+					p.CanQuery = false
+				end
+			end
+			model.Parent = viewport
+			local cam = Instance.new("Camera")
+			cam.Parent = viewport
+			viewport.CurrentCamera = cam
+			viewport.Ambient = Color3.fromRGB(150, 140, 160)
+			viewport.LightColor = Color3.fromRGB(255, 244, 230)
+			local cf, size = model:GetBoundingBox()
+			local center = cf.Position
+			local reach = math.max(size.X, size.Y, size.Z)
+			local dist = size.Magnitude * 0.6 + reach * 0.9 + 2
+			local dir = Vector3.new(0.45, 0.28, 1).Unit -- front-right, a touch above
+			cam.CFrame = CFrame.lookAt(center + dir * dist, center)
+			cam.FieldOfView = 45
+		end
+
+		local function maybeBuildDragon(dial)
+			if not (dial and dragonSource and dragonConfig) then
+				return
+			end
+			if dial:FindFirstChild("DragonTeaser") then
+				return -- already built (or arrived via the mirror clone)
+			end
+			-- Full-size container rotated to the boundary angle: exactly like a
+			-- slice, its children sit at the top rim and the rotation carries them
+			-- around, so it stays pinned between two prizes as the dial spins.
+			local teaser = Instance.new("Frame")
+			teaser.Name = "DragonTeaser"
+			teaser.BackgroundTransparency = 1
+			teaser.AnchorPoint = Vector2.new(0.5, 0.5)
+			teaser.Position = UDim2.fromScale(0.5, 0.5)
+			teaser.Size = UDim2.fromScale(1, 1)
+			teaser.Rotation = tonumber(dragonConfig.boundaryRotation) or 90
+			teaser.ZIndex = 5
+			teaser.Parent = dial
+
+			local badge = Instance.new("Frame")
+			badge.Name = "Badge"
+			badge.AnchorPoint = Vector2.new(0.5, 0.5)
+			badge.Position = UDim2.fromScale(0.5, 0.14) -- the rim band the slice icons live in
+			badge.Size = UDim2.fromScale(0.19, 0.19)
+			badge.BackgroundColor3 = Color3.fromRGB(24, 16, 30)
+			badge.ZIndex = 5
+			badge.Parent = teaser
+			local badgeCorner = Instance.new("UICorner")
+			badgeCorner.CornerRadius = UDim.new(1, 0) -- full circle
+			badgeCorner.Parent = badge
+			local badgeStroke = Instance.new("UIStroke")
+			badgeStroke.Color = Color3.fromRGB(255, 140, 40) -- dragon-fire glow
+			badgeStroke.Thickness = 3
+			badgeStroke.Parent = badge
+			dragonGlows[#dragonGlows + 1] = badgeStroke
+
+			local view = Instance.new("ViewportFrame")
+			view.Name = "View"
+			view.BackgroundTransparency = 1
+			view.AnchorPoint = Vector2.new(0.5, 0.5)
+			view.Position = UDim2.fromScale(0.5, 0.5)
+			view.Size = UDim2.fromScale(0.92, 0.92)
+			view.ZIndex = 6
+			view.Parent = badge
+			pcall(frameDragonViewport, view)
+
+			local mystery = Instance.new("TextLabel")
+			mystery.Name = "Mystery"
+			mystery.BackgroundTransparency = 1
+			mystery.AnchorPoint = Vector2.new(0.5, 0)
+			mystery.Position = UDim2.fromScale(0.5, 0.245)
+			mystery.Size = UDim2.fromScale(0.17, 0.055)
+			mystery.Font = Enum.Font.GothamBlack
+			mystery.Text = "???"
+			mystery.TextScaled = true
+			mystery.TextColor3 = Color3.fromRGB(255, 190, 90)
+			mystery.ZIndex = 6
+			local mysteryStroke = Instance.new("UIStroke")
+			mysteryStroke.Color = Color3.fromRGB(0, 0, 0)
+			mysteryStroke.Thickness = 2
+			mysteryStroke.Parent = mystery
+			mystery.Parent = teaser
+		end
+
+		-- Pulse every dragon glow together (cheap: no-ops until the first is built).
+		RunService.RenderStepped:Connect(function()
+			if #dragonGlows == 0 then
+				return
+			end
+			local pulse = 0.5 + 0.5 * math.sin(os.clock() * 3)
+			for _, stroke in dragonGlows do
+				stroke.Thickness = 2 + 2.5 * pulse
+				stroke.Transparency = 0.1 - 0.1 * pulse
+			end
+		end)
+
+		task.spawn(function()
+			local d = ReplicatedStorage:WaitForChild("Dragon", 30)
+			if d then
+				dragonSource = d
+				maybeBuildDragon(spinDial)
+				maybeBuildDragon(surfaceDial)
+			end
+		end)
+
 		-- both spinners share the dial-angle math (slice 1 up at angle 0);
 		-- parking the UI dial at 0 keeps them mirrored from the first frame
 		spinDial.Rotation = 0
@@ -3767,8 +3945,11 @@ do
 				-- slice labels + odds come from the shared reward table
 				if typeof(bullrushConfig.SPINNER) == "table" then
 					spinnerRewards = bullrushConfig.SPINNER.REWARDS
+					dragonConfig = bullrushConfig.SPINNER.DRAGON
 					paintDial(spinDial)
 					paintDial(surfaceDial)
+					maybeBuildDragon(spinDial)
+					maybeBuildDragon(surfaceDial)
 				end
 			end
 
@@ -3935,11 +4116,18 @@ do
 				local dial = replica:FindFirstChild("Spin")
 				if dial then
 					dial.Rotation = 0
+					-- the clone may have copied the window's teaser; drop it and
+					-- rebuild a fresh one so this dial owns its own glow + viewport
+					local strayTeaser = dial:FindFirstChild("DragonTeaser")
+					if strayTeaser then
+						strayTeaser:Destroy()
+					end
 				end
 				replica.Parent = surface
 				surface.Parent = player:WaitForChild("PlayerGui")
 				surfaceDial = dial
 				paintDial(surfaceDial)
+				maybeBuildDragon(surfaceDial)
 			end
 
 			local ring = wheelModel:FindFirstChild("Ring")
@@ -4372,12 +4560,50 @@ do
 	-- icon box (viewports can't render particles, so the aura shows as its tag) }.
 	local CYAN = Color3.fromRGB(118, 214, 255) -- the shop cards' fixed Highlight-rim accent
 
+	-- Which bulls the player already owns (Bulls JSON, mirrored by BullRollService).
+	-- STARTER is always in hand. Used to silhouette the bulls you haven't unlocked
+	-- yet as they scroll past — see buildBullPreview's `shadow`.
+	local function isOwnedBull(bullId)
+		if bullId == "STARTER" then
+			return true
+		end
+		local ok, decoded = pcall(function()
+			return game:GetService("HttpService"):JSONDecode(player:GetAttribute("Bulls") or "{}")
+		end)
+		return ok and type(decoded) == "table" and decoded[bullId] ~= nil
+	end
+
+	-- Flatten a cloned bull to a near-black silhouette: paint every part dark and
+	-- matte, and strip the skins/decals/PBR that would otherwise show through — a
+	-- SurfaceAppearance overrides Color so it has to go, and mesh textures are
+	-- cleared. Darkening the MODEL (not the viewport's ImageColor3, which also
+	-- tints the light background and just dimmed the whole frame) is what makes the
+	-- shape read against the pale fill.
+	local SILHOUETTE = Color3.fromRGB(28, 28, 34)
+	local function silhouetteModel(model)
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("BasePart") then
+				d.Color = SILHOUETTE
+				d.Material = Enum.Material.SmoothPlastic
+				d.Reflectance = 0
+				if d:IsA("MeshPart") then
+					d.TextureID = ""
+				end
+			elseif d:IsA("Decal") or d:IsA("Texture") then
+				d.Transparency = 1
+			elseif d:IsA("SurfaceAppearance") then
+				d:Destroy()
+			end
+		end
+	end
+
 	-- The icon = a ViewportFrame rendering the bull's REAL model (tier skins from
 	-- BullrushAssets.Bulls, BullTemplate for commons) with section 12's 3/4-front
 	-- camera — bulls face -Z, so the eye sits off the -Z side, high and to the
 	-- left. Falls back to a BULL text glyph until the assets resolve or if a
-	-- modelName ever goes missing.
-	local function buildBullPreview(parent, bull, z)
+	-- modelName ever goes missing. `shadow` blacks out the model and drops a pale
+	-- fill behind it, so locked bulls read as a clear silhouette.
+	local function buildBullPreview(parent, bull, z, shadow)
 		local source = bull
 			and ((bull.modelName and modelsFolder and modelsFolder:FindFirstChild(bull.modelName)) or fallbackModel)
 		if not source then
@@ -4394,15 +4620,24 @@ do
 		end
 		local viewport = Instance.new("ViewportFrame")
 		viewport.Name = "BullPreview"
-		viewport.BackgroundTransparency = 1
+		-- every card sits on the same muted slate fill so the row reads uniform —
+		-- locked bulls show a black silhouette on it, unlocked show in full colour
+		viewport.BackgroundColor3 = Color3.fromRGB(120, 125, 140)
+		viewport.BackgroundTransparency = 0
 		viewport.AnchorPoint = Vector2.new(0.5, 0.5)
 		viewport.Position = UDim2.fromScale(0.5, 0.5)
 		viewport.Size = UDim2.fromScale(0.96, 0.92)
 		viewport.ZIndex = z
-		viewport.Ambient = Color3.fromRGB(165, 160, 155)
+		viewport.Ambient = if shadow then Color3.fromRGB(70, 70, 80) else Color3.fromRGB(165, 160, 155)
 		viewport.LightColor = Color3.fromRGB(255, 250, 240)
 		viewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
+		-- ImageColor3 tints the background too, so keep it neutral and let the model
+		-- itself carry the shadow (see silhouetteModel)
+		viewport.ImageColor3 = Color3.new(1, 1, 1)
 		local model = source:Clone()
+		if shadow then
+			silhouetteModel(model)
+		end
 		model:PivotTo(CFrame.new())
 		local center, size = Vector3.zero, Vector3.new(10, 10, 10)
 		pcall(function()
@@ -4477,7 +4712,7 @@ do
 			local rarStroke = Instance.new("UIStroke"); rarStroke.Thickness = 2.5; rarStroke.Parent = iconFrame
 			tierGradient(90).Parent = rarStroke -- lit-top -> shaded-bottom tier border
 		end
-		buildBullPreview(iconFrame, bull, z)
+		buildBullPreview(iconFrame, bull, z, opts.shadow)
 		iconFrame.Parent = card
 
 		local nameLabel = kitLabel((bull and bull.name) or "???", INK)
@@ -4537,8 +4772,15 @@ do
 
 	-------------------------------------------------- strip + animation
 	local winnerCard = nil -- the WINNER_INDEX card, popped when the wheel lands
+	-- Every card's ViewportFrame, so the animation can CULL the ~48 cards scrolled
+	-- off-screen: a ViewportFrame renders its 3D scene every frame even when clipped
+	-- out of view, so only Visible=false actually skips that cost. We hide the
+	-- viewport, NOT the card — the strip's UIListLayout drops Visible=false children
+	-- and would collapse the whole row, so the card keeps its slot.
+	local stripViews = {} -- { { card = Frame, view = ViewportFrame? }, ... }
 	local function buildStrip(headline) -- headline = the winning result {bullId, mutation?}
 		winnerCard = nil
+		table.clear(stripViews)
 		for _, c in ipairs(strip:GetChildren()) do
 			if c:IsA("Frame") then
 				c:Destroy()
@@ -4547,12 +4789,33 @@ do
 		for i = 1, STRIP_LEN do
 			local isWinner = i == WINNER_INDEX
 			local id = isWinner and headline.bullId or randomFiller()
+			-- Locked bulls scroll past as silhouettes; the winner always reveals in
+			-- full colour (it's the payoff — and by now the server has granted it).
 			local card = makeCard(id, UDim2.fromOffset(CARD_W, CARD_H),
-				if isWinner then { mutation = headline.mutation } else nil)
+				if isWinner then { mutation = headline.mutation }
+				else { shadow = not isOwnedBull(id) })
 			card.LayoutOrder = i
 			card.Parent = strip
+			local iconFrame = card:FindFirstChild("IconFrame")
+			stripViews[i] = { card = card, view = iconFrame and iconFrame:FindFirstChild("BullPreview") }
 			if isWinner then
 				winnerCard = card
+			end
+		end
+	end
+
+	-- Render only the cards inside the carousel window (+ one card of slack each
+	-- side so nothing pops in at the edges). Card i's left edge sits at
+	-- stripOffset + (i-1)*STEP in carousel-local space (strip anchor X=0, Left-
+	-- aligned list, STEP spacing), so we derive visibility from the offset we just
+	-- wrote this frame — no AbsolutePosition read (which lags a frame behind).
+	local function cullStrip()
+		local stripX = strip.Position.X.Offset
+		local winW = carousel.AbsoluteSize.X
+		for i, e in ipairs(stripViews) do
+			if e.view then
+				local cardLeft = stripX + (i - 1) * STEP
+				e.view.Visible = (cardLeft + CARD_W >= -CARD_W) and (cardLeft <= winW + CARD_W)
 			end
 		end
 	end
@@ -4669,6 +4932,7 @@ do
 		local settleFrames, scaleSettled = 0, 0
 		repeat
 			RunService.Heartbeat:Wait()
+			cullStrip() -- don't render all 55 during the ~1s settle either
 			settleFrames += 1
 			scaleSettled = if rollScale.Scale == 1 then scaleSettled + 1 else 0
 		until (winnerCard and winnerCard.AbsoluteSize.X > 0
@@ -4706,6 +4970,7 @@ do
 			local alpha = 1 - (1 - elapsed / DURATION) ^ 3
 			local x = startOffset + delta * alpha
 			strip.Position = UDim2.new(0, x, 0.5, 0)
+			cullStrip() -- only the cards under the window render as the strip flies past
 
 			local idx = math.floor((vpCenter - x - CARD_W / 2) / STEP + 0.5) + 1
 			if idx ~= lastIdx then
@@ -4727,6 +4992,7 @@ do
 					targetOffset += (centerX(marker) + jitter) - centerX(winnerCard)
 				end
 				strip.Position = UDim2.new(0, targetOffset, 0.5, 0)
+				cullStrip() -- re-cull for the exact resting position (no more frames after this)
 				activeConn:Disconnect()
 				activeConn = nil
 				if drum then
@@ -7100,6 +7366,9 @@ do
 	local HttpService = game:GetService("HttpService")
 
 	local GOLD = Color3.fromRGB(255, 210, 60)
+	-- Bright "GO here" green: the hint text and the highlight ring now share it
+	-- (user request) so the one click target reads as a single green cue.
+	local GREEN = Color3.fromRGB(70, 255, 105)
 
 	-- §12's rarity tab pairing, needed to point at the right Index tab
 	local RARITY_TAB = {
@@ -7131,6 +7400,10 @@ do
 	tutGui.Name = "TutorialGui"
 	tutGui.ResetOnSpawn = false
 	tutGui.DisplayOrder = 3
+	-- Cover the WHOLE screen: without this the ~36px topbar inset sits above the
+	-- dimmer's four dark bands and shows as a bright gap along the top edge.
+	-- The halo/hint math subtracts tutGui.AbsolutePosition, so it stays aligned.
+	tutGui.IgnoreGuiInset = true
 	tutGui.Parent = gui.Parent
 
 	local hint = Instance.new("TextLabel")
@@ -7140,7 +7413,8 @@ do
 	hint.Size = UDim2.fromOffset(0, 0)
 	hint.Font = Enum.Font.GothamBlack
 	hint.TextSize = 22
-	hint.TextColor3 = GOLD
+	hint.TextColor3 = GREEN
+	hint.ZIndex = 6 -- above the dimmer's darkness (built below)
 	hint.Visible = false
 	-- crisp UIStroke outline (user request) instead of the soft legacy
 	-- TextStroke* fuzz; the stall billboard label clones this stroke along
@@ -7161,15 +7435,42 @@ do
 	local halo = Instance.new("Frame")
 	halo.Name = "TutorialHalo"
 	halo.BackgroundTransparency = 1
+	halo.ZIndex = 6 -- above the dimmer's darkness (built below)
 	halo.Visible = false
 	local haloCorner = Instance.new("UICorner")
 	haloCorner.CornerRadius = UDim.new(0, 10)
 	haloCorner.Parent = halo
 	local haloStroke = Instance.new("UIStroke")
-	haloStroke.Color = GOLD
+	haloStroke.Color = GREEN
 	haloStroke.Thickness = 4
 	haloStroke.Parent = halo
 	halo.Parent = tutGui
+
+	-- Spotlight dimmer (user request): grey out everything on screen EXCEPT the
+	-- one thing to click. A full-screen mask can't cut a hole, so it's built
+	-- from four dark frames tiled around the target's rect (top / bottom /
+	-- left / right) — the uncovered gap in the middle is the "spotlight" and
+	-- the green halo rings it. Plain Frames don't sink input, so the target
+	-- stays clickable even where the darkness overlaps it. Only shown for "ui"
+	-- steps; the walk-to-the-stall leg keeps the 3D view clear.
+	local dimmer = Instance.new("Frame")
+	dimmer.Name = "TutorialDimmer"
+	dimmer.BackgroundTransparency = 1
+	dimmer.Size = UDim2.fromScale(1, 1)
+	dimmer.ZIndex = 2 -- under the halo/hint, over the game UI
+	dimmer.Visible = false
+	dimmer.Parent = tutGui
+	local dimParts: { Frame } = {}
+	for i = 1, 4 do
+		local p = Instance.new("Frame")
+		p.Name = "Dim" .. i
+		p.BorderSizePixel = 0
+		p.BackgroundColor3 = Color3.new(0, 0, 0)
+		p.BackgroundTransparency = 0.4 -- 60% black; irrelevant UI reads as "off"
+		p.ZIndex = 2
+		p.Parent = dimmer
+		dimParts[i] = p
+	end
 
 	-- World marker for step 2's "get to the stall" leg: a billboard over the
 	-- ShopPrompt part, found with the same streaming-proof scan as the shop
@@ -7518,6 +7819,7 @@ do
 		if kind ~= "ui" or not target then
 			halo.Visible = false
 			hint.Visible = false
+			dimmer.Visible = false
 			return
 		end
 
@@ -7526,19 +7828,45 @@ do
 		local rel = target.AbsolutePosition - tutGui.AbsolutePosition
 		local size = target.AbsoluteSize
 		local pad = 5 + 2 * wave -- the halo breathes by growing off the target
+		local hx, hy = rel.X - pad, rel.Y - pad -- spotlight hole (matches halo)
+		local hw, hh = size.X + pad * 2, size.Y + pad * 2
 		halo.Visible = true
-		halo.Position = UDim2.fromOffset(rel.X - pad, rel.Y - pad)
-		halo.Size = UDim2.fromOffset(size.X + pad * 2, size.Y + pad * 2)
+		halo.Position = UDim2.fromOffset(hx, hy)
+		halo.Size = UDim2.fromOffset(hw, hh)
 		haloStroke.Thickness = 3 + 2 * wave
 		haloStroke.Transparency = 0.3 - 0.3 * wave
+
+		-- Tile the four darkness frames around the hole so only the target
+		-- (and its green ring) stays lit. Clamp to the screen so a target near
+		-- an edge doesn't spawn negative-sized strips.
+		-- Snap the hole edges to whole pixels: the bands are separate frames, so
+		-- a fractional edge (the pad breathes with sin) rounds independently on
+		-- each and leaves a ~1px bright seam across the screen. Integer edges
+		-- make adjacent bands share the exact same boundary — no seam.
+		local right = math.floor(math.clamp(hx + hw, 0, screen.X))
+		local bottom = math.floor(math.clamp(hy + hh, 0, screen.Y))
+		local left = math.floor(math.clamp(hx, 0, screen.X))
+		local top = math.floor(math.clamp(hy, 0, screen.Y))
+		dimmer.Visible = true
+		dimParts[1].Position = UDim2.fromOffset(0, 0) -- top band
+		dimParts[1].Size = UDim2.fromOffset(screen.X, top)
+		dimParts[2].Position = UDim2.fromOffset(0, bottom) -- bottom band
+		dimParts[2].Size = UDim2.fromOffset(screen.X, math.max(0, screen.Y - bottom))
+		dimParts[3].Position = UDim2.fromOffset(0, top) -- left band (hole height)
+		dimParts[3].Size = UDim2.fromOffset(left, math.max(0, bottom - top))
+		dimParts[4].Position = UDim2.fromOffset(right, top) -- right band
+		dimParts[4].Size = UDim2.fromOffset(math.max(0, screen.X - right), math.max(0, bottom - top))
 
 		hint.Text = text or ""
 		hint.Visible = true
 		local cx = rel.X + size.X / 2
 		local cy = rel.Y + size.Y / 2
-		local bob = 4 * math.sin(os.clock() * 3)
+		-- Wobble in lockstep with the halo pulse (user request): same os.clock()*5
+		-- rate as `wave` above, so the text and the ring beat together. The
+		-- bottom-strip hint bobs UP/DOWN; side hints keep their left-right sway.
+		local bob = 10 * math.sin(os.clock() * 5)
 		if side ~= "right" and cy > screen.Y * 0.78 then
-			-- bottom strip (the SEND BULL panel): sit above the target
+			-- bottom strip (the SEND BULL panel): sit above the target, bob vertically
 			hint.AnchorPoint = Vector2.new(0.5, 1)
 			hint.Position = UDim2.fromOffset(cx, rel.Y - 10 + bob)
 		elseif side == "right" or cx <= screen.X / 2 then

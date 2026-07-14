@@ -274,6 +274,20 @@ function SpinService.requestSpin(player)
 	refreshAttributes(player) -- the SPEND shows now; the win stays hidden below
 
 	local index = rollSlice()
+
+	-- Curiosity hook: a brand-new player's FIRST-EVER spin is rigged to land on
+	-- the slice beside the dragon teaser emblem (never on it) for a "so close!"
+	-- near-miss. One-time -- the persisted WheelSpun flag flips here so every
+	-- later spin is a fair weighted roll.
+	local dragon = Config.SPINNER.DRAGON
+	local firstSpin = typeof(player) == "Instance"
+		and dragon ~= nil
+		and DataHandler.GetStat(player, "WheelSpun") == false
+	if firstSpin then
+		index = dragon.landIndex or index
+		DataHandler.SetStat(player, "WheelSpun", true)
+	end
+
 	local extra, reveal = grantReward(player, index) -- quiet profile writes only
 
 	-- Commit the whole animation server-side so the UI wheel and the lobby
@@ -283,7 +297,7 @@ function SpinService.requestSpin(player)
 		index = index,
 		reward = Config.SPINNER.REWARDS[index],
 		revolutions = rng:NextInteger(4, 5),
-		jitter = rng:NextNumber(-20, 20),
+		jitter = if firstSpin then (dragon.landJitter or 0) else rng:NextNumber(-20, 20),
 		duration = Config.SPINNER.SPIN_DURATION,
 	}
 	for key, value in extra do -- bull isNew/consolation, or box bullId/rarity/isNew/refund

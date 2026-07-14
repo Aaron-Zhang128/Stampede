@@ -272,14 +272,15 @@ eliminatedRemote.OnClientEvent:Connect(function(_playerName, aliveCount)
 	setHeartbeat(tonumber(aliveCount))
 end)
 
--- Any player's death, anywhere: the kill stinger. Hooked on Humanoid.Died
--- rather than the Eliminated remote so practice-arena and lobby deaths count
--- too, and so it lands on the actual death frame.
+-- Any player's death, anywhere: a punchy fist/hit thwack. Hooked on
+-- Humanoid.Died rather than the Eliminated remote so practice-arena and lobby
+-- deaths count too, and so it lands on the actual death frame. (The killer's
+-- own "You killed X" card carries the Among Us sting instead — see Main.)
 local function watchCharacter(character: Model)
 	local humanoid = character:WaitForChild("Humanoid", 10)
 	if humanoid and humanoid:IsA("Humanoid") then
 		humanoid.Died:Once(function()
-			playSfx("Among Us (Kill)", 0.6)
+			playSfx("punch7", 0.7)
 		end)
 	end
 end

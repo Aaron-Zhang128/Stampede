@@ -1543,7 +1543,7 @@ local function updateNearMisses()
 				if currentState == "ACTIVE" and not locallyEliminated then
 					local closeness = 1
 						- math.clamp((track.minDist - GRAZE_DEADLY) / (GRAZE_RANGE - GRAZE_DEADLY), 0, 1)
-					addTrauma(0.35 + 0.45 * closeness)
+					addTrauma((0.35 + 0.45 * closeness) * 2) -- 2x shake on a near miss
 					playOneShot("chargeWhoosh", { Volume = 0.14 + 0.245 * closeness, PlaybackSpeed = 1.25 })
 					local popDir = track.dir or (root.Position - here)
 					nearMissPop(here, Vector3.new(popDir.X, 0, popDir.Z).Unit, closeness)
@@ -2320,13 +2320,12 @@ if revengeAckRemote then
 			playHapticPulse("GameplayCollision")
 			playLibSfx("Confirm", 0.9)
 		elseif kind == "HIT" then
-			-- Server still sends the green money card; this is the BIG payoff:
+			-- Server sends the "You killed X" kill card; this is the BIG payoff:
 			-- a center-screen burst + shake so a trample never goes unnoticed.
+			-- Money is deliberately NOT shown here (it still lands silently — the
+			-- cash popup + Summary tab report it); the kill is the headline.
 			local victim = if typeof(data) == "table" then tostring(data.victimName or "someone") else "someone"
-			local amount = if typeof(data) == "table" then tonumber(data.amount) else nil
-			showHitPopup(if amount
-				then ("TRAMPLED %s! +$%d"):format(victim, amount)
-				else ("TRAMPLED %s!"):format(victim))
+			showHitPopup(("TRAMPLED %s!"):format(victim))
 			addTrauma(0.35)
 			playHapticPulse("GameplayCollision")
 			playOneShot("slam", { Volume = 0.315 })

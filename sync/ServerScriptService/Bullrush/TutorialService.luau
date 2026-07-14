@@ -31,9 +31,20 @@
 
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
 local NotifyService = require(script.Parent.NotifyService)
+
+-- TUTORIAL TESTING MODE (STUDIO ONLY) --------------------------------------
+-- Flip this true to make EVERY join restart the tour as a brand-new
+-- first-timer: fresh STARTER-only inventory, one banked free BASIC box, and
+-- TutorialStep reset to 0 so the next elimination opens step 1 (a young
+-- mid-round join still auto-starts it immediately). Hard-gated to
+-- RunService:IsStudio() below, so a stray `true` can NEVER wipe a live
+-- player's bulls. TURN OFF before publishing.
+local TEST_MODE = false
 
 local DONE = 4
 local REWARD = 150 -- completion gift; keep small, the economy is deliberately lean
@@ -179,6 +190,25 @@ local function watchJoin(player: Player)
 			or player:GetAttribute("DataReady") ~= true
 			or player:GetAttribute("DataLoadFailed") then
 			return
+		end
+		-- Studio testing mode: wipe this session back to a fresh first-timer so
+		-- the tour runs from scratch on every Play. Studio-only (see TEST_MODE).
+		if TEST_MODE and RunService:IsStudio() then
+			safeData(function()
+				local profile = DataHandler.Profiles[player.UserId]
+				if not profile then
+					return
+				end
+				profile.Bulls = { STARTER = true }
+				profile.EquippedBull = "STARTER"
+				profile.FreeBoxRolls = { BASIC = 1 }
+				DataHandler.SetStat(player, "TutorialStep", 0)
+				DataHandler.SetStat(player, "WheelSpun", false) -- re-arm the dragon first-spin near-miss
+				player:SetAttribute("Bulls", HttpService:JSONEncode(profile.Bulls))
+				player:SetAttribute("FreeBoxRolls", HttpService:JSONEncode(profile.FreeBoxRolls))
+				player:SetAttribute("EquippedBull", "STARTER")
+				player:SetAttribute("TutorialStep", 0)
+			end)
 		end
 		local step = getStep(player)
 		if step == 0 then

@@ -68,6 +68,11 @@ function DataHandler.GetDefaultProfile()
 		Spins = 0,
 		LastFreeSpin = 0,
 		LastVipSpin = 0, -- when the VIP pass's extra daily spin last accrued (VIP only)
+		-- Has the player EVER spun the wheel? Their first-ever spin is rigged to a
+		-- dragon near-miss (SpinService); this one-way persisted flag makes it a
+		-- one-time thing. Old saves are grandfathered to true in Data.server so a
+		-- returning veteran's first spin isn't hijacked.
+		WheelSpun = false,
 
 		-- Daily reward (DailyRewardService): DailyStreak = consecutive days
 		-- claimed (the day to claim next is DailyStreak % 7 + 1); LastDailyClaim

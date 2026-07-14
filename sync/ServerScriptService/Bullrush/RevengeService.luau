@@ -189,8 +189,10 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 			if wasAlive and thrower.Parent ~= nil and shouldReward(thrower, victim) then
 				local paid = RoundService.awardMoney(thrower, Config.REVENGE.MONEY_PER_HIT)
 				EconomyService.noteRevenge(thrower, paid) -- shows on the Summary tab
+				-- The kill is the headline; the money still lands silently (cash
+				-- popup + Summary tab report it). "kill" style plays the sting.
 				NotifyService.send(thrower,
-					("+%d Money — your bull hit %s!"):format(paid, victim.Name), "green")
+					("You killed %s"):format(victim.DisplayName or victim.Name), "kill")
 				ack(thrower, "HIT", {
 					victimName = victim.Name,
 					amount = paid,

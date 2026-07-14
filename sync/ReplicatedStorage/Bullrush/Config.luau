@@ -25,9 +25,9 @@ Config.BULL_HIT_HALF_LENGTH = 3.5 -- kill box half-length along the travel axis
 Config.BULL_HIT_HALF_WIDTH = 3.9  -- kill box half-width across the lane
 
 Config.MIN_PLAYERS = 2            -- matches need 2+ players; a lone player waits in the lobby (practice arena is always open)
--- Deliberately disabled so Studio matches live: a solo playtest sits in WAITING
--- (with the waiting card) instead of starting a round alone. Drop the `false and`
--- to restore instant solo rounds.
+-- Studio-only solo rounds (testing): a lone playtester starts a round instead
+-- of sitting in WAITING. Live is unaffected (IsStudio gate). Drop the `false and`
+-- to re-enable solo Studio rounds.
 if false and game:GetService("RunService"):IsStudio() then
 	Config.MIN_PLAYERS = 1
 end
@@ -166,6 +166,17 @@ Config.SPINNER = {
 		{ kind = "box",   boxId = "MEGA", label = "Mega Box", weight = 10 },  -- lucky block: free Mega box roll
 		{ kind = "money", amount = 75,  label = "$75",      weight = 30 },  -- small money
 		{ kind = "money", amount = 150, label = "$150",     weight = 30 },  -- medium money 1
+	},
+	-- First-spin dragon teaser (Main.client §10 emblem + SpinService rig): a
+	-- glowing "???" dragon rides the dial at a slice BOUNDARY, so a spin can rest
+	-- right beside it but never ON it (it is not a reward slice). A brand-new
+	-- player's very first spin is rigged to land on `landIndex` so the emblem
+	-- comes to rest next to the pointer -- a curiosity-sparking near-miss. Purely
+	-- a tease: the dragon exists nowhere else in the game.
+	DRAGON = {
+		boundaryRotation = 90, -- dial-local angle of the emblem (boundary between slice 2 and slice 3)
+		landIndex = 2,         -- first-ever spin lands on this slice (the one beside the emblem)
+		landJitter = 0,        -- where in that slice the arrow rests (0 = dead-centre on the win, emblem one wedge over)
 	},
 }
 
@@ -356,6 +367,13 @@ Config.AI_PLAYERS = {
 	DODGE_CHANCE = 0.8,            -- odds a bot reacts to a telegraph at all
 	REACTION_TIME = { 0.25, 0.9 }, -- delay before a reacting bot starts moving
 }
+-- Studio-only: bots fill every round so solo playtests have company (and the
+-- round stays ACTIVE after the tester dies, which the tutorial's spectate/send
+-- step needs). Live never spawns bots (IsStudio gate) — no publish-time toggle
+-- to forget. Drop the `false and` to re-enable bots for solo testing.
+if false and game:GetService("RunService"):IsStudio() then
+	Config.AI_PLAYERS.ENABLED = true
+end
 
 -- Shared shrink mechanics (FX timing + out-of-bounds rules). The per-round
 -- shrink SCHEDULE (when stages fire, how many there are) lives on each mode.

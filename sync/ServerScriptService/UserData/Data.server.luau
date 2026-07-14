@@ -114,6 +114,12 @@ Players.PlayerAdded:Connect(function(player)
 			if savedData.TutorialStep == nil then
 				profile.TutorialStep = 4
 			end
+			-- WheelSpun postdates old saves too: a veteran's first spin shouldn't
+			-- be hijacked by the new dragon near-miss, so a missing key means
+			-- "already spun" rather than keeping the new-player default.
+			if savedData.WheelSpun == nil then
+				profile.WheelSpun = true
+			end
 		end
 		dataLoaded[player.UserId] = true
 	else
