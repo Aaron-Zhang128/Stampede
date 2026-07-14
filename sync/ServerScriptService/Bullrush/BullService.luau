@@ -45,8 +45,8 @@ end
 local BullVisual = ensureRemote("BullVisual") -- server -> client: build + drive this bull locally
 local BullVisualEnd = ensureRemote("BullVisualEnd") -- server -> client: tear the bull down
 
-local LAUNCH_SPEED_SCALE = 1.15 -- victim fling speed relative to bull speed
-local LAUNCH_SPEED_BASE = 12 -- studs/s added on top, so slow bulls still send you
+local LAUNCH_SPEED_SCALE = 1.4 -- victim fling speed relative to bull speed
+local LAUNCH_SPEED_BASE = 16 -- studs/s added on top, so slow bulls still send you
 
 local BullService = {}
 
@@ -76,11 +76,13 @@ end
 -- the main arena's ActiveBulls) — it also marks the charge as outside round
 -- cleanup's cancelAll. This is the origin-agnostic core; BullService.charge
 -- below maps a main-arena lane onto it.
--- style.bullId: the thrower's equipped BullCatalog id (revenge throws only) —
--- picks the client-rendered model. style.mutation: the bull's worn mutation
+-- style.bullId: a BullCatalog id (revenge throws + Main's special wave bulls)
+-- — picks the client-rendered model. style.mutation: the bull's worn mutation
 -- id — clients clone its aura emitters onto the Body. style.throwerName rides
 -- the payload so the thrower's own client can boost their bull's glow.
-function BullService.chargeAlong(startPos: Vector3, endPos: Vector3, crossCoord: number, axis: string, speed: number, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string?, mutation: string? }?, onCharge, onCleared, parentFolder): number
+-- style.special: the rarity key of a special wave bull — clients swap the red
+-- revenge treatment for a rarity-colored glow + the bull's name tag.
+function BullService.chargeAlong(startPos: Vector3, endPos: Vector3, crossCoord: number, axis: string, speed: number, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string?, mutation: string?, special: string? }?, onCharge, onCleared, parentFolder): number
 	local duration = (endPos - startPos).Magnitude / speed
 
 	nextChargeId += 1
@@ -131,6 +133,12 @@ function BullService.chargeAlong(startPos: Vector3, endPos: Vector3, crossCoord:
 						RagdollService.launch(character, endPos - startPos,
 							speed * LAUNCH_SPEED_SCALE + LAUNCH_SPEED_BASE)
 						onKill(player)
+						if state.cancelled then
+							-- That kill decided the round (onEliminated ->
+							-- cancelAll): spare the rest of this frame's
+							-- sweep so the last one standing actually wins.
+							break
+						end
 					end
 				end
 			end
@@ -149,7 +157,7 @@ end
 -- through GridUtil (ARENA_ORIGIN-bound) and firing the ChargeStart / LaneCleared
 -- remotes so every client renders the telegraph/clear. Signature unchanged for
 -- Main.runWaves and RevengeService.
-function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string?, mutation: string? }?): number
+function BullService.charge(lane, speed: number, bounds, getAlivePlayers, onKill, style: { throwerName: string?, bullId: string?, mutation: string?, special: string? }?): number
 	local startPos, endPos = GridUtil.lanePath(lane, bounds)
 	local crossCoord = GridUtil.laneCrossCoord(lane)
 	return BullService.chargeAlong(

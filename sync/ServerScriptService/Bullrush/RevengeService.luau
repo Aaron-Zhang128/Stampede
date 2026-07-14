@@ -1,14 +1,15 @@
 --[[
-	RevengeService - eliminated participants send one bull down a lane of the
-	CURRENT window from the overhead bull-cam (BullrushClient owns the camera
-	and the arrow-key lane selection; StarterGui.Main owns the ◀ SEND BULL ▶
-	buttons), on a per-player cooldown, and earn Money for every alive player
-	their bull tramples.
+	RevengeService - ROUND SPECTATORS (eliminated participants + anyone
+	watching from outside the round: late/first joiners, AFK sitters) send one
+	bull down a lane of the CURRENT window from the overhead bull-cam
+	(BullrushClient owns the camera and the arrow-key lane selection;
+	StarterGui.Main owns the ◀ SEND BULL ▶ buttons), on a per-player cooldown,
+	and earn Money for every alive player their bull tramples.
 
 	Throws arrive on the RevengeThrow RemoteEvent as a lane table
 	{ axis, index, direction }. The remote is trivially spoofable, so
 	requestThrow re-validates EVERYTHING server-side: round window open,
-	lane shape, caller is an eliminated participant of the current round,
+	lane shape, caller is not ALIVE in the current round,
 	cooldown lapsed, lane still inside the (possibly shrunken) bounds.
 
 	Client contract (see GridUtil header):
@@ -40,6 +41,7 @@ local RoundService = require(script.Parent.RoundService)
 local ShrinkService = require(script.Parent.ShrinkService)
 local EconomyService = require(script.Parent.EconomyService)
 local BullRollService = require(script.Parent.BullRollService)
+local TutorialService = require(script.Parent.TutorialService)
 
 local REQUEST_GAP = 0.3 -- silent spam guard, well inside the real cooldown
 local DENIED_ACK_GAP = 4 -- send-mashers on cooldown get one red card per card-lifetime
@@ -52,7 +54,9 @@ local lastRequestAt: { [Player]: number } = {}
 local lastDeniedAt: { [Player]: number } = {}
 
 -- The Team Rush payout flip lives here: to stop paying for teammate hits,
--- change the body to: return thrower.Team == nil or thrower.Team ~= victim.Team
+-- compare the players' RushTeam attributes (nil outside Team Rush):
+-- return thrower:GetAttribute("RushTeam") == nil
+--     or thrower:GetAttribute("RushTeam") ~= victim:GetAttribute("RushTeam")
 local function shouldReward(thrower: Player, victim: Player): boolean
 	return true
 end
@@ -119,7 +123,11 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 	then
 		return
 	end
-	if not RoundService.isEliminatedParticipant(thrower) then
+	-- Any ROUND SPECTATOR may throw (2026-07-13 widening): eliminated
+	-- participants plus everyone watching from outside the round — late/first
+	-- joiners, AFK sitters. Only players still ALIVE on the grid are barred.
+	-- Mirrors the client's isRoundSpectator()-based canThrowRevenge() gate.
+	if RoundService.isAlive(thrower) then
 		return
 	end
 	if now < (cooldownUntil[thrower] or 0) then
@@ -162,6 +170,9 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 		("%s charging down %s %d!"):format(
 			throwName, if axis == "row" then "row" else "column", index), "green")
 	ack(thrower, "THROW_OK", { cooldown = Config.REVENGE.COOLDOWN, lane = lane, bullId = bull.id })
+
+	-- Tutorial step 1 (send a bull) completes on any accepted throw.
+	TutorialService.onThrow(thrower)
 
 	task.spawn(function()
 		Remotes.Telegraph:FireAllClients({ lane }, Config.REVENGE.TELEGRAPH, bounds)

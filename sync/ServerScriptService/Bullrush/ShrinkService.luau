@@ -10,26 +10,26 @@
 	GridUtil.boundsForStage.
 
 	advanceTo() is BLOCKING: per step it fires ArenaShrink, waits out the
-	telegraph, then drops the removed pillars (server-side position tween +
-	charcoal recolor) SINK_DEPTH studs - a full pillar collapse in plain view -
-	then waits out the fall. The moment a pillar lands it VANISHES
-	(Transparency 1, CanCollide off), so anyone riding one down keeps falling
-	into the void; Main's out-of-bounds watcher does the eliminating. The
-	guard walls track the window too: reset() and each completed stage snap
-	them flush to the boundary tiles' outer edges.
+	telegraph, then snaps the removed pillars straight to their landed state
+	(parked SINK_DEPTH down, invisible, no collision) in one write per
+	property — the visible SINK_TIME collapse is client-rendered by
+	BullrushClient from the same ArenaShrink payload, so the fall costs no
+	replication. Anyone on a doomed pillar free-falls into the void; Main's
+	out-of-bounds watcher does the eliminating. The guard walls track the
+	window too: reset() and each completed stage snap them flush to the
+	boundary tiles' outer edges.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local GridUtil = require(ReplicatedStorage.Bullrush.GridUtil)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
 
-local CHECKER_LIGHT = Color3.fromRGB(214, 182, 133) -- (row + col) even
-local CHECKER_DARK = Color3.fromRGB(188, 152, 102) -- (row + col) odd
-local CHARCOAL = Color3.fromRGB(55, 48, 42) -- dropped tiles
+local CHECKER_LIGHT = Config.TILE_CHECKER_LIGHT -- (row + col) even
+local CHECKER_DARK = Config.TILE_CHECKER_DARK -- (row + col) odd
+local CHARCOAL = Config.TILE_CHARCOAL -- dropped tiles
 
 local ShrinkService = {}
 
@@ -161,34 +161,38 @@ function ShrinkService.advanceTo(targetStage: number)
 		Remotes.ArenaShrink:FireAllClients(s, newBounds, removedCells, Config.SHRINK.TELEGRAPH)
 		task.wait(Config.SHRINK.TELEGRAPH)
 
-		-- TweenService doesn't step in some server contexts (observed frozen in
-		-- Studio Run mode), so sink via a Heartbeat lerp like BullService's charge.
+		-- The pillar fall is CLIENT-RENDERED (BullrushClient drops a local
+		-- stand-in pillar from the tile's pre-sink spot, same quad ease-in):
+		-- the server snaps each removed pillar straight to its landed state in
+		-- ONE write per property, instead of the old per-frame position lerp
+		-- that replicated ~100 updates per pillar to every client — the game's
+		-- biggest bandwidth burst. Anyone still on a doomed pillar free-falls
+		-- into the pit the moment collision drops (they used to ride it down;
+		-- either way the out-of-bounds watcher does the eliminating).
 		local myGeneration = sinkGeneration
-		local sinking = {}
 		for _, cell in removedCells do
 			local tile = getTile(cell.row, cell.col)
 			if tile then
-				tile.Color = CHARCOAL -- color snaps; only the position animates
-				table.insert(sinking, { tile = tile, from = tilePartPosition(cell.row, cell.col) })
+				-- The Color write is LOAD-BEARING even though the tile is
+				-- invisible: clients paint doomed tiles red locally and rely on
+				-- this replicated charcoal to stomp it (abandonTile drops the
+				-- claim without restoring). It also makes reset()'s checkerboard
+				-- restore a real server-side change — same-value writes don't
+				-- replicate, so without the charcoal step the local red would
+				-- survive into the next round's regenerated tiles.
+				tile.Color = CHARCOAL
+				tile.Position = tilePartPosition(cell.row, cell.col)
+					- Vector3.new(0, Config.SHRINK.SINK_DEPTH, 0)
+				tile.Transparency = 1
+				tile.CanCollide = false
 			end
 		end
-		local elapsed = 0
-		while elapsed < Config.SHRINK.SINK_TIME and sinkGeneration == myGeneration do
-			local dt = RunService.Heartbeat:Wait()
-			elapsed = math.min(elapsed + dt, Config.SHRINK.SINK_TIME)
-			local alpha = elapsed / Config.SHRINK.SINK_TIME
-			alpha *= alpha -- Quad ease-in
-			for _, item in sinking do
-				item.tile.Position = item.from - Vector3.new(0, Config.SHRINK.SINK_DEPTH * alpha, 0)
-			end
-		end
-		-- Landed: the pillar vanishes. (A reset() mid-fall bumps the generation
-		-- and restores every tile itself, so only finish the job if the fall ran out.)
-		if sinkGeneration == myGeneration then
-			for _, item in sinking do
-				item.tile.Transparency = 1
-				item.tile.CanCollide = false
-			end
+		-- Bounds (and with them the out-of-bounds grace clock) still commit
+		-- only after the fall has played out on clients — same rhythm as when
+		-- the server animated it.
+		task.wait(Config.SHRINK.SINK_TIME)
+		if sinkGeneration ~= myGeneration then
+			return -- reset() mid-fall: it restored the tiles and owns the state now
 		end
 
 		stage = s

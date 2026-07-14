@@ -10,8 +10,8 @@
 
 	The dash is positional only: no invincibility frames, the bull kill box
 	stays honest. It pushes along the humanoid's move direction (camera-flat
-	look direction when standing still) for DASH_TIME, preserving vertical
-	velocity so gravity and jumps behave.
+	look direction when standing still) for DASH_TIME, with a one-time updraft
+	kick at the start; after that vertical velocity is left to gravity.
 ]]
 
 local Debris = game:GetService("Debris")
@@ -25,6 +25,7 @@ local player = Players.LocalPlayer
 
 local DASH_SPEED = 60 -- studs/s, vs 16 walk and 36-62 bulls (nudged up a touch for snap)
 local DASH_TIME = 0.18 -- ~11 studs: enough to clear a kill box, not a lane hop
+local DASH_UPDRAFT = 20 -- studs/s upward kick at dash start: a lift, not a launch (jump is 50)
 local COOLDOWN = 2 -- roughly every wave late-game
 local FOV_KICK = 6 -- degrees of momentary camera widen
 local TRAIL_COLOR = Color3.fromRGB(240, 246, 255) -- airy near-white: reads as wind, not a warm streak
@@ -189,6 +190,14 @@ local function dash()
 
 	lastDashAt = os.clock()
 	dashing = true
+
+	-- Updraft: one-time upward kick so the dash lifts as it bursts. Any downward
+	-- momentum is cancelled first (max with 0) so the lift reads the same whether
+	-- the player dashed off a jump's apex or mid-fall. The heartbeat loop below
+	-- preserves Y each frame, so gravity takes it from here.
+	local vel = root.AssemblyLinearVelocity
+	root.AssemblyLinearVelocity = Vector3.new(vel.X, math.max(vel.Y, 0) + DASH_UPDRAFT, vel.Z)
+
 	playWhoosh(1.4, 0.315)
 	fovKick()
 	attachTrail(root)

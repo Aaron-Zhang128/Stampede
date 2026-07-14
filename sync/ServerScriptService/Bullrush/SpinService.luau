@@ -14,10 +14,7 @@
 	- SpinAck:FireClient(player, kind, data) answers the caller only:
 	    "SPUN"    { index, reward = REWARDS[index], revolutions, jitter,
 	                duration, spins, money, isNew, consolation (bull slice),
-	                bullId/bullName/rarity/isNew/refund (box "lucky block" slice);
-	                for a Store Lucky Block also rewards = the tier's full 6-slice
-	                table + luckyTier = "SECRET"|"ALIEN"|"GOD" so the client
-	                repaints the wheel to that tier for the one reveal }
+	                bullId/bullName/rarity/isNew/refund (box "lucky block" slice) }
 	    "GRANTED" { granted, spins }   (a Robux spin purchase landed)
 	    "DENIED"  { reason = "NO_SPINS" | "DATA_NOT_LOADED" }
 	- SpinStarted:FireAllClients(payload) - same index/revolutions/jitter/
@@ -146,11 +143,10 @@ end
 -- Rolling
 --==============================================================================
 
--- Weighted pick over a reward table (defaults to the free wheel's); returns the
--- slice index the arrow must land on. A Lucky Block passes its own richer table.
--- Weights are authored to sum to 100 but any total works.
-local function rollSlice(rewards): number
-	rewards = rewards or Config.SPINNER.REWARDS
+-- Weighted pick over the wheel's reward table; returns the slice index the
+-- arrow must land on. Weights are authored to sum to 100 but any total works.
+local function rollSlice(): number
+	local rewards = Config.SPINNER.REWARDS
 	local total = 0
 	for _, reward in rewards do
 		total += reward.weight
@@ -165,10 +161,29 @@ local function rollSlice(rewards): number
 	return #rewards -- float dust at the top of the range
 end
 
+-- Grants are REVEAL-GATED: the profile (the saved truth) is written right
+-- here, so a leave/crash/receipt force-save can never lose a prize — but
+-- everything the player can SEE (the Money tick, the Bulls/Spins attributes,
+-- the server-wide win broadcast) comes back as a `reveal` closure the caller
+-- runs only when the committed wheel animation lands. Nothing on screen can
+-- spoil a spin that is still turning.
+
+-- Mirrors the Bulls inventory to its player attribute (section 12's Index UI
+-- rides it); split out so reveal closures can defer it.
+local function syncBullsAttribute(player)
+	if typeof(player) ~= "Instance" then
+		return
+	end
+	local ok, bulls = pcall(DataHandler.GetStat, player, "Bulls")
+	if ok and bulls then
+		player:SetAttribute("Bulls", HttpService:JSONEncode(bulls))
+	end
+end
+
 -- Opens one Config.BULLS.BOXES box as a free roll (the "lucky block" slice):
 -- adds the bull if new (EPIC/LEGENDARY broadcast), else refunds
 -- box.cost * dupeRefund Money - same economics as a bought box, minus the cost.
-local function grantBox(player, boxId: string): { [string]: any }
+local function grantBox(player, boxId: string): ({ [string]: any }, () -> ())
 	local box = Config.BULLS.BOXES[boxId]
 	if not box then -- misconfigured slice: fall back to any box so a spin never dead-ends
 		boxId, box = next(Config.BULLS.BOXES)
@@ -177,61 +192,64 @@ local function grantBox(player, boxId: string): { [string]: any }
 	local bull = BullCatalog.get(bullId) :: BullCatalog.Bull
 	local isNew = not DataHandler.HasBull(player, bullId)
 	local refund = 0
+	local reveal
 	if isNew then
 		DataHandler.AddBull(player, bullId)
-		if typeof(player) == "Instance" then
-			local ok, bulls = pcall(DataHandler.GetStat, player, "Bulls")
-			if ok and bulls then
-				player:SetAttribute("Bulls", HttpService:JSONEncode(bulls))
-			end
-			if bull.rarity == "EPIC" or bull.rarity == "LEGENDARY" then
+		reveal = function()
+			syncBullsAttribute(player)
+			if typeof(player) == "Instance" and (bull.rarity == "EPIC" or bull.rarity == "LEGENDARY") then
 				NotifyService.broadcast(
 					("%s won %s from a lucky block!"):format(player.DisplayName, bull.name:upper()), "green", 5)
 			end
 		end
 	else
 		refund = math.floor(box.cost * BullCatalog.Rarities[bull.rarity].dupeRefund)
-		DataHandler.SetStat(player, "Money", (DataHandler.GetStat(player, "Money") or 0) + refund)
+		DataHandler.AddStatQuiet(player, "Money", refund)
+		reveal = function()
+			DataHandler.SyncStat(player, "Money")
+		end
 	end
-	return { boxId = boxId, bullId = bullId, bullName = bull.name, rarity = bull.rarity, isNew = isNew, refund = refund }
+	return { boxId = boxId, bullId = bullId, bullName = bull.name, rarity = bull.rarity, isNew = isNew, refund = refund },
+		reveal
 end
 
--- Applies rewards[index] to the profile (defaults to the free wheel's table; a
--- Lucky Block passes its own). Returns a table of reward-specific ack fields
--- (bull isNew/consolation, box roll bullId/rarity/isNew/refund, ...) that the
--- caller merges into the SPUN payload for the client's reveal.
-local function grantReward(player, index: number, rewards): { [string]: any }
-	rewards = rewards or Config.SPINNER.REWARDS
-	local reward = rewards[index]
+-- Applies Config.SPINNER.REWARDS[index] to the profile (quiet writes). Returns
+-- the reward-specific ack fields (bull isNew/consolation, box roll
+-- bullId/rarity/isNew/refund, ...) the caller merges into the SPUN payload,
+-- plus the reveal closure carrying the visible half of the grant.
+local function grantReward(player, index: number): ({ [string]: any }, (() -> ())?)
+	local reward = Config.SPINNER.REWARDS[index]
 	if reward.kind == "money" then
-		DataHandler.SetStat(player, "Money", (DataHandler.GetStat(player, "Money") or 0) + reward.amount)
-		return {}
+		DataHandler.AddStatQuiet(player, "Money", reward.amount)
+		return {}, function()
+			DataHandler.SyncStat(player, "Money")
+		end
 	elseif reward.kind == "spin" then
-		DataHandler.SetStat(player, "Spins", (DataHandler.GetStat(player, "Spins") or 0) + reward.amount)
-		return {}
+		DataHandler.AddStatQuiet(player, "Spins", reward.amount)
+		return {}, nil -- the caller's reveal refreshAttributes picks up the banked spin
 	elseif reward.kind == "box" then
 		return grantBox(player, reward.boxId)
 	elseif reward.kind == "bull" then
 		local isNew = not DataHandler.HasBull(player, reward.bullId)
 		if isNew then
 			DataHandler.AddBull(player, reward.bullId)
-			if typeof(player) == "Instance" then
-				local ok, bulls = pcall(DataHandler.GetStat, player, "Bulls")
-				if ok and bulls then
-					player:SetAttribute("Bulls", HttpService:JSONEncode(bulls))
+			return { isNew = true }, function()
+				syncBullsAttribute(player)
+				if typeof(player) == "Instance" then
+					local bull = BullCatalog.get(reward.bullId)
+					NotifyService.broadcast(
+						("%s won %s on the wheel!"):format(player.DisplayName, (bull and bull.name or reward.bullId):upper()),
+						"green", 5)
 				end
-				local bull = BullCatalog.get(reward.bullId)
-				NotifyService.broadcast(
-					("%s won %s on the wheel!"):format(player.DisplayName, (bull and bull.name or reward.bullId):upper()),
-					"green", 5)
 			end
-			return { isNew = true }
 		end
 		local consolation = reward.consolation or 0
-		DataHandler.SetStat(player, "Money", (DataHandler.GetStat(player, "Money") or 0) + consolation)
-		return { isNew = false, consolation = consolation }
+		DataHandler.AddStatQuiet(player, "Money", consolation)
+		return { isNew = false, consolation = consolation }, function()
+			DataHandler.SyncStat(player, "Money")
+		end
 	end
-	return {}
+	return {}, nil
 end
 
 -- Public (not just the remote's target) so smoke tests can call it directly.
@@ -253,10 +271,10 @@ function SpinService.requestSpin(player)
 		return
 	end
 	DataHandler.SetStat(player, "Spins", spins - 1)
+	refreshAttributes(player) -- the SPEND shows now; the win stays hidden below
 
 	local index = rollSlice()
-	local extra = grantReward(player, index)
-	refreshAttributes(player)
+	local extra, reveal = grantReward(player, index) -- quiet profile writes only
 
 	-- Commit the whole animation server-side so the UI wheel and the lobby
 	-- wheel model land identically: full extra turns + where in the 60-degree
@@ -281,48 +299,25 @@ function SpinService.requestSpin(player)
 		jitter = payload.jitter,
 		duration = payload.duration,
 	})
+
+	-- Reveal gate: the visible half of the grant (Money tick, Spins/Bulls
+	-- attributes, win broadcast) lands when the client's wheel does — the
+	-- committed duration plus a hair of latency pad, so the HUD confirms the
+	-- result instead of leaking it early. The profile was already written
+	-- above, so a leave mid-spin keeps the prize (the closures no-op safely
+	-- on a gone profile). Stub players (smoke tests) commit synchronously.
+	local function commitReveal()
+		if reveal then
+			reveal()
+		end
+		refreshAttributes(player)
+	end
+	if typeof(player) == "Instance" then
+		task.delay((tonumber(payload.duration) or 6) + 0.4, commitReveal)
+	else
+		commitReveal()
+	end
 	return payload -- smoke tests assert on this
-end
-
--- Premium "Lucky Block" spin: rolls tierId's OWN richer reward table
--- (Config.LUCKY_BLOCKS) and pushes a PRIVATE wheel spin to the buyer - the
--- SPUN payload carries the tier's full REWARDS so the client repaints the 6
--- slices for the reveal, then restores the free wheel. No SpinStarted
--- broadcast: the physical lobby wheel stays on the free table (only the
--- buyer's Spinner window animates). Returns true on a completed grant so the
--- product receipt can resolve; false leaves the receipt for Roblox to retry.
-function SpinService.spinLuckyBlock(player, tierId: string): boolean
-	local tier = Config.LUCKY_BLOCKS and Config.LUCKY_BLOCKS[tierId]
-	if not tier then
-		-- Misconfigured product mapping: don't eat the Robux, let it retry.
-		return false
-	end
-	if not profileReady(player) then
-		return false
-	end
-
-	local rewards = tier.REWARDS
-	local index = rollSlice(rewards)
-	local extra = grantReward(player, index, rewards)
-	refreshAttributes(player)
-
-	local payload = {
-		index = index,
-		reward = rewards[index],
-		rewards = rewards, -- client repaints the dial to this tier for the reveal
-		luckyTier = tierId,
-		revolutions = rng:NextInteger(4, 5),
-		jitter = rng:NextNumber(-20, 20),
-		duration = Config.SPINNER.SPIN_DURATION,
-	}
-	for key, value in extra do -- bull isNew/consolation, or box bullId/rarity/isNew/refund
-		payload[key] = value
-	end
-	payload.spins = DataHandler.GetStat(player, "Spins")
-	payload.money = DataHandler.GetStat(player, "Money")
-
-	ack(player, "SPUN", payload)
-	return true
 end
 
 --==============================================================================
@@ -346,24 +341,34 @@ function SpinService.init()
 	MonetizationService.registerProduct(Config.PRODUCTS.SPIN_1, makeHandler(1))
 	MonetizationService.registerProduct(Config.PRODUCTS.SPIN_10, makeHandler(10))
 
-	-- Lucky Blocks (Store): each product opens its tier's richer wheel spin.
-	for tierId, tier in Config.LUCKY_BLOCKS or {} do
-		local productId = Config.PRODUCTS[tier.product]
-		MonetizationService.registerProduct(productId, function(_receipt, player)
-			if not player then
-				return Enum.ProductPurchaseDecision.NotProcessedYet
-			end
-			if SpinService.spinLuckyBlock(player, tierId) then
-				return Enum.ProductPurchaseDecision.PurchaseGranted
-			end
-			-- data not loaded / misconfigured: retry rather than eat the Robux
-			return Enum.ProductPurchaseDecision.NotProcessedYet
-		end)
+	-- On-join seed: the moment Data.server flips DataReady (profile loaded,
+	-- loading screen about to release), push the real Spins/NextFreeSpin
+	-- attributes and bank any owed accrual — otherwise the wheel UI reads
+	-- nil→0 for up to ACCRUAL_TICK seconds after entering.
+	local function seedPlayer(player)
+		local function seed()
+			refreshAttributes(player)
+			accrueFreeSpin(player)
+			accrueVipSpin(player)
+		end
+		if player:GetAttribute("DataReady") then
+			seed()
+		else
+			local conn
+			conn = player:GetAttributeChangedSignal("DataReady"):Connect(function()
+				conn:Disconnect()
+				seed()
+			end)
+		end
+	end
+	Players.PlayerAdded:Connect(seedPlayer)
+	for _, player in Players:GetPlayers() do
+		seedPlayer(player)
 	end
 
 	-- Free-spin clock: lazy sweep, so the "Free spin ready" flip happens
-	-- while playing, not just on rejoin. Profiles load async, so the same
-	-- sweep doubles as the on-join accrual + attribute seed.
+	-- while playing, not just on rejoin. Also the backstop seed for any
+	-- session the DataReady hook above missed.
 	task.spawn(function()
 		while true do
 			for _, player in Players:GetPlayers() do

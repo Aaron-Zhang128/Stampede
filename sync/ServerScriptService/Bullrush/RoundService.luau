@@ -18,8 +18,16 @@ local DataHandler = require(ServerScriptService.UserData.DataHandler)
 local FriendBoostService = require(script.Parent.FriendBoostService)
 local MonetizationService = require(script.Parent.MonetizationService)
 local EconomyService = require(script.Parent.EconomyService)
+local LevelService = require(script.Parent.LevelService)
+local TutorialService = require(script.Parent.TutorialService)
 
 local RoundService = {}
+
+-- Fired after every successful elimination, whatever the cause. Main wires
+-- this per round (runWaves) to end the round the INSTANT it's decided -
+-- without it, bulls already in flight keep killing through the telegraph/gap
+-- waits and rounds end with nobody standing. Cleared in cleanup().
+RoundService.onEliminated = nil :: (() -> ())?
 
 local alive: { [Player]: boolean } = {}
 local participantSet: { [Player]: boolean } = {} -- everyone the round started with
@@ -42,9 +50,10 @@ local function isRealPlayer(player): boolean
 	return typeof(player) == "Instance"
 end
 
--- Last shove each victim took (PushService.notePush). A fall within
--- Config.PUSH.KILL_CREDIT seconds of a shove is credited to the pusher:
--- the feed shows "<pusher> ELIMINATED <victim>" instead of "<victim> FELL".
+-- Last shove each victim took (PushService.notePush). A fall or bull death
+-- within Config.PUSH.KILL_CREDIT seconds of a shove is credited to the
+-- pusher: the feed shows "<pusher> ELIMINATED <victim>" instead of the
+-- unattributed row.
 local recentPush: { [Player]: { byName: string, at: number } } = {}
 
 function RoundService.notePush(victim: Player, pusher: Player)
@@ -62,9 +71,18 @@ end
 
 function RoundService.startRound(participants: { Player }, deferStreaks: boolean?)
 	RoundService.cleanup()
-	startCount = #participants
+	startCount = 0
 	deferStreakReset = deferStreaks == true
 	for _, player in participants do
+		-- Main captures the roster before the on-field countdown, so a player
+		-- can quit before we get here. PlayerRemoving is only wired below, so
+		-- admitting a leaver plants a permanent ghost in the alive set — no
+		-- character means neither bulls nor the bounds watcher can ever
+		-- eliminate them, and the round can never reach 0 alive to end.
+		if isRealPlayer(player) and player.Parent == nil then
+			continue
+		end
+		startCount += 1
 		if not alive[player] then
 			aliveCountValue += 1
 		end
@@ -97,7 +115,8 @@ end
 -- Idempotent: safe to call from bull hits, Died, and PlayerRemoving alike.
 -- cause tags the elimination for the client feed: "BULL" (wave bulls),
 -- "REVENGE" (thrown bulls), "FELL" (void/boundary/reset), "LEFT" (quit).
--- A FELL right after a shove upgrades to "PUSH" + the pusher's name.
+-- A FELL/BULL/REVENGE right after a shove upgrades to "PUSH" + the
+-- pusher's name.
 function RoundService.eliminate(player: Player, cause: string?)
 	if not alive[player] then
 		return
@@ -115,7 +134,10 @@ function RoundService.eliminate(player: Player, cause: string?)
 	local pushedBy: string? = nil
 	local push = recentPush[player]
 	recentPush[player] = nil
-	if cause == "FELL" and push
+	-- FELL, BULL, and REVENGE deaths inside the credit window are the
+	-- pusher's play: the shove either knocked the victim off the grid or
+	-- held them in a bull's path. LEFT stays LEFT - quitting isn't a kill.
+	if (cause == "FELL" or cause == "BULL" or cause == "REVENGE") and push
 		and os.clock() - push.at <= (Config.PUSH.KILL_CREDIT or 6) then
 		cause = "PUSH"
 		pushedBy = push.byName
@@ -139,10 +161,22 @@ function RoundService.eliminate(player: Player, cause: string?)
 	-- shot + ELIMINATED on the screen edge); it no longer goes through the
 	-- NotifyService card stack. pushedBy rides along for "PUSH" rows.
 	Remotes.Eliminated:FireAllClients(player.Name, remaining, cause, pushedBy)
+
+	-- First death of an untaught player starts the tutorial (quits don't
+	-- count - a leaver isn't watching, and their first REAL death should
+	-- land them in the launch classroom instead of burning the trigger).
+	if isRealPlayer(player) and cause ~= "LEFT" then
+		TutorialService.onEliminated(player)
+	end
+
+	if RoundService.onEliminated then
+		RoundService.onEliminated()
+	end
 end
 
--- Participant of the current round who has since been eliminated. Gates who
--- may throw revenge bulls: lobby latecomers and alive players don't qualify.
+-- Participant of the current round who has since been eliminated. (No longer
+-- the revenge-throw gate — that widened to "not alive", see RevengeService —
+-- but kept for anything that needs the narrower died-this-round test.)
 function RoundService.isEliminatedParticipant(player: Player): boolean
 	return participantSet[player] == true and alive[player] == nil
 end
@@ -161,6 +195,9 @@ function RoundService.awardMoney(player: Player, amount: number): number
 		DataHandler.SetStat(player, "Money",
 			(DataHandler.GetStat(player, "Money") or 0) + paid)
 	end)
+	-- XP rides the PRE-multiplier amount (Config.LEVELS): boosts and passes
+	-- scale the money, never the leveling curve.
+	LevelService.addXP(player, amount)
 	return paid
 end
 
@@ -225,6 +262,7 @@ function RoundService.isAlive(player: Player): boolean
 end
 
 function RoundService.cleanup()
+	RoundService.onEliminated = nil
 	for _, connection in connections do
 		connection:Disconnect()
 	end

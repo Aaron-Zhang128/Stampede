@@ -21,7 +21,7 @@ local function attachTag(player: Player, character: Model)
 	billboard.Adornee = head
 	-- Scale sizing (relative to the head, not fixed pixels): the tag shrinks with
 	-- distance like a normal world billboard, so far-off players read as smaller.
-	billboard.Size = UDim2.fromScale(7.5, 1.25)
+	billboard.Size = UDim2.fromScale(5.25, 0.875)
 	billboard.StudsOffset = Vector3.new(0, 2, 0)
 	billboard.AlwaysOnTop = false
 	billboard.MaxDistance = 120
@@ -42,7 +42,7 @@ local function attachTag(player: Player, character: Model)
 
 	-- Cap the font so short names don't blow up huge when the box is close.
 	local sizeConstraint = Instance.new("UITextSizeConstraint")
-	sizeConstraint.MaxTextSize = 24
+	sizeConstraint.MaxTextSize = 17
 	sizeConstraint.Parent = label
 
 	local stroke = Instance.new("UIStroke")

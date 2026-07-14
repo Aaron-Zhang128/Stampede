@@ -3,7 +3,7 @@
 	playtested alone. Toggle via Config.AI_PLAYERS.
 
 	Bots are plain tables that duck-type the slice of Player the round
-	pipeline touches (.Name / .Character / .Parent / .Team / .Neutral).
+	pipeline touches (.Name / .Character / .Parent).
 	RoundService treats anything that is not a real Player instance as a
 	bot and skips DataHandler writes; everything else (alive set, kill
 	boxes, bounds watcher, team assignment) works on bots unchanged.
@@ -152,7 +152,6 @@ function AIService.prepareForRound(): { any }
 				Name = rig.Name,
 				Character = rig,
 				Parent = folder,
-				Neutral = true,
 				isBot = true,
 			}
 			table.insert(bots, proxy)
@@ -173,7 +172,7 @@ function AIService.findByCharacter(character: Model)
 	return nil
 end
 
--- Team Rush: bots have no Player.Team backing, so paint the rig instead.
+-- Team Rush: bots carry no RushTeam attribute, so paint the rig instead.
 function AIService.tintTeam(proxy, teamName: string)
 	local character = proxy.Character
 	if not character then

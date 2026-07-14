@@ -9,15 +9,24 @@
 	folder, and it fires no round remotes — main clients never hear about these
 	bulls. Reuses BullService.chargeAlong for the exact real-bull feel
 	(gallop / squash / dust / hooves / ragdoll kill box).
+
+	Every visit is timed: the clock starts when you step onto the grid and
+	stops at the first bull hit (or any other death, or stepping off). The
+	longest stint persists as the PracticeRecord profile stat and replicates
+	as the PracticeBest attribute for the HUD stopwatch (Main §16); beating
+	it earns a green "New best!" card.
 ]]
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local BullService = require(script.Parent.BullService)
+local NotifyService = require(script.Parent.NotifyService)
+local DataHandler = require(ServerScriptService.UserData.DataHandler)
 
 -- Geometry ------------------------------------------------------------------
 local N = 5
@@ -133,15 +142,86 @@ local function playersOnGrid()
 	return gridSnapshot
 end
 
+-- Survival record ------------------------------------------------------------
+-- Per-visit stopwatch: starts when the InPractice loop below sees the player
+-- arrive on the grid, stops at the bull hit itself (onKill — not the ragdoll
+-- ride out), at any other death, or when they step off. The longest stint
+-- persists as the PracticeRecord profile stat; the PracticeBest attribute
+-- (set on entry and on every improvement) feeds the HUD stopwatch (Main §16).
+local stintStart: { [Player]: number } = {}
+
+local function startStint(pl)
+	stintStart[pl] = os.clock()
+	-- set before InPractice flips below, so the HUD reads a fresh best on pop
+	pl:SetAttribute("PracticeBest", DataHandler.GetStat(pl, "PracticeRecord") or 0)
+end
+
+local function endStint(pl)
+	local t0 = stintStart[pl]
+	if not t0 then
+		return
+	end
+	stintStart[pl] = nil
+	local survived = math.floor((os.clock() - t0) * 10) / 10
+	local best = DataHandler.GetStat(pl, "PracticeRecord")
+	-- best == nil means the profile is gone (leaving) or never loaded; there
+	-- is nothing to compare against and nowhere durable to write.
+	if best ~= nil and survived > best then
+		DataHandler.SetStat(pl, "PracticeRecord", survived)
+		pl:SetAttribute("PracticeBest", survived)
+		NotifyService.send(pl, string.format("New best! %.1fs", survived), "green")
+	end
+end
+
 -- RagdollService.launch (inside chargeAlong) already flings + kills the victim,
 -- so respawn-at-lobby is automatic; this is a safety net if that no-oped.
 local function onKill(pl)
+	endStint(pl) -- freeze the survival clock at the hit itself
 	local ch = pl.Character
 	local hum = ch and ch:FindFirstChildWhichIsA("Humanoid")
 	if hum and hum.Health > 0 then
 		hum.Health = 0
 	end
 end
+
+-- Pushing works on the practice grid too: keep a replicated InPractice
+-- attribute current for every player (the practice-grid twin of the round's
+-- InRound attribute). PushClient lights its HUD/highlight off it and
+-- PushService accepts it as pusher/victim eligibility, so lobby-sitters stay
+-- unpushable but grid guests can brawl between bulls.
+task.spawn(function()
+	while true do
+		for _, pl in Players:GetPlayers() do
+			local ch = pl.Character
+			local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+			local on = false
+			if hrp then
+				local p = hrp.Position
+				on = math.abs(p.X - ORIGIN.X) <= GRID_HALF
+					and math.abs(p.Z - ORIGIN.Z) <= GRID_HALF
+					and math.abs(p.Y - TOP_Y) < 12
+			end
+			if (pl:GetAttribute("InPractice") == true) ~= on then
+				if on then
+					startStint(pl)
+				else
+					-- stepped/knocked off alive, or the corpse cleared the grid
+					endStint(pl)
+				end
+				pl:SetAttribute("InPractice", if on then true else nil)
+			elseif on and stintStart[pl] then
+				-- Still on the grid but dead without a bull hit (reset, misc):
+				-- onKill covers bull deaths; this stops the clock at the death
+				-- itself instead of when the corpse leaves the zone.
+				local hum = ch and ch:FindFirstChildWhichIsA("Humanoid")
+				if not (hum and hum.Health > 0) then
+					endStint(pl)
+				end
+			end
+		end
+		task.wait(0.2)
+	end
+end)
 
 -- Bull supervisor -----------------------------------------------------------
 -- Never two bulls on the same grid line at once, so a safe row and column
@@ -223,4 +303,9 @@ end
 
 practicePad.Touched:Connect(function(hit)
 	teleport(hit, ENTRY)
+end)
+
+Players.PlayerRemoving:Connect(function(pl)
+	endStint(pl) -- best effort; a no-op once the leave-save tears the profile down
+	cooldown[pl] = nil
 end)

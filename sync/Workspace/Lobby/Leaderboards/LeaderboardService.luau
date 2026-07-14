@@ -281,6 +281,12 @@ end
 local lastPushed: { [number]: { [string]: number } } = {}
 
 local function pushPlayer(player: Player)
+	-- Profile never loaded this session: their leaderstats are default zeros,
+	-- and writing those would clobber the real global record. Skip them — the
+	-- next clean session re-pushes the true values.
+	if player:GetAttribute("DataLoadFailed") then
+		return
+	end
 	local cache = lastPushed[player.UserId]
 	if not cache then
 		cache = {}

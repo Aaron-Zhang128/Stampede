@@ -34,12 +34,13 @@
 	  gridSize (active window side length, 3..11),
 	  bounds (current active window, ACTIVE updates only),
 	  modeName / modeId (current round's mode, see Config.MODES),
+	  starting (true during the post-teleport on-field countdown, INTERMISSION only),
 	  teamCounts ({ RED = n, BLUE = n }, Team Rush ACTIVE updates only),
 	  teamColor ("RED" | "BLUE", Team Rush WINNER only)
 	- ArenaShrink:FireAllClients(stage: number, bounds, removedCells: {{row, col}}, telegraphTime: number)
 	  Fired at the START of the shrink telegraph; tiles sink telegraphTime
 	  seconds later. The server recolors dropped tiles charcoal
-	  Color3.fromRGB(55, 48, 42) and restores position/color at round start.
+	  (Config.TILE_CHARCOAL) and restores position/color at round start.
 	- RoundSummary:FireClient(player, data: table) -- each REAL round
 	  participant at round end (EconomyService.settle). data: { winnerName:
 	  string?, winnerUserId: number?, teamColor: ("RED"|"BLUE")?, placement:
@@ -51,10 +52,12 @@
 	  thrower only: "THROW_OK" { cooldown, lane, bullId }, "HIT"
 	  { victimName, amount },
 	  "DENIED" { reason: "COOLDOWN" | "BOUNDS", remaining: number? }
-	- RevengeThrow:FireServer(lane) -- an eliminated participant sends a
-	  revenge bull down the lane it selected from the overhead bull-cam
-	  (arrow keys / HUD arrows cycle a ring of every lane entry point; see
-	  BullrushClient). RevengeService re-validates everything server-side,
+	- RevengeThrow:FireServer(lane) -- a round SPECTATOR (eliminated
+	  participant or anyone outside the round: late/first joiners, AFK
+	  sitters) sends a revenge bull down the lane it selected from the
+	  overhead bull-cam (arrow keys / HUD arrows cycle a ring of every lane
+	  entry point; see BullrushClient). RevengeService re-validates
+	  everything server-side (only players ALIVE in the round are barred),
 	  so spoofing it earns nothing. The bull launched is the thrower's
 	  EQUIPPED bull (see BullRoll below): catalog speed, not REVENGE.SPEED.
 

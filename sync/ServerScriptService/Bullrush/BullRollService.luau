@@ -9,7 +9,8 @@
 	earner, so it's granted RAW (no friend boost / mode multiplier).
 
 	Every pull is also a MUTATION lottery (box.mutationChance, then
-	BullCatalog.rollMutation by weight): a cosmetic particle aura that sticks
+	BullCatalog.rollMutation by weight) — currently OFF game-wide via
+	Config.BULLS.MUTATIONS_ENABLED = false: a cosmetic particle aura that sticks
 	to THAT bull forever ({bullId = {mutId = true}}), dupes included - so a
 	dupe pull can still upgrade the bull it duplicates. The equipped bull
 	wears its rarest owned mutation (BullCatalog.bestMutation) on revenge
@@ -21,7 +22,7 @@
 	- BullAck:FireClient(player, kind, data) answers the caller only:
 	    "ROLLED"   { results = {{bullId, rarity, isNew, refund,
 	                 mutation = mutId?, mutationIsNew = boolean?}}, boxId,
-	                 money = new balance, source = "MONEY" | "ROBUX" }
+	                 money = new balance, source = "MONEY" | "ROBUX" | "FREE" }
 	    "EQUIPPED" { bullId }
 	    "DENIED"   { reason = "NO_MONEY" (+ cost) | "DATA_NOT_LOADED"
 	                        | "NOT_OWNED" | "BAD_ID" | "BAD_BOX" }
@@ -49,13 +50,19 @@ local DataHandler = require(ServerScriptService.UserData.DataHandler)
 
 local NotifyService = require(script.Parent.NotifyService)
 local MonetizationService = require(script.Parent.MonetizationService)
+local TutorialService = require(script.Parent.TutorialService)
 
-local REQUEST_GAP = 0.5 -- silent spam guard shared by roll + equip
+-- Silent spam guard, one clock PER ACTION (roll and equip each get their own):
+-- a guard shared across both let an equip silently eat a roll fired within the
+-- gap after it - no ROLLED/DENIED ack ever came, stranding the client's
+-- `rolling` flag (and its Lucky Box UI) until rejoin.
+local REQUEST_GAP = 0.5
 
 local BullRollService = {}
 
 local rng = Random.new()
-local lastRequestAt: { [Player]: number } = {}
+local lastRollAt: { [Player]: number } = {}
+local lastEquipAt: { [Player]: number } = {}
 
 -- These remotes are the newest; the Remotes folder is built in edit mode, so
 -- ensure them here for places that predate the roll system (same pattern as
@@ -106,6 +113,20 @@ local function refreshInventoryAttribute(player)
 	end
 end
 
+-- Mirrors the banked free-box openings ({boxId = count}, set on join by
+-- Data.server) so the shop card / ROLL AGAIN button can read "FREE". Updated
+-- the moment a free roll is SPENT — not reveal-gated like the inventory: the
+-- label flipping back to the price mid-carousel spoils nothing.
+local function refreshFreeRollsAttribute(player)
+	if typeof(player) ~= "Instance" then
+		return
+	end
+	local ok, bank = pcall(DataHandler.GetStat, player, "FreeBoxRolls")
+	if ok and typeof(bank) == "table" then
+		player:SetAttribute("FreeBoxRolls", HttpService:JSONEncode(bank))
+	end
+end
+
 --==============================================================================
 -- Rolling
 --==============================================================================
@@ -123,12 +144,23 @@ end
 
 -- Grants `count` already-paid-for openings of `box` and acks the batch. Dupe
 -- refunds (box.cost basis) are summed and granted raw at the end (one profile
--- write, not one per dupe). Each pull also rolls the box's mutationChance;
--- a hit sticks a BullCatalog.Mutations aura to the pulled bull (dupes too,
--- so a dupe pull can still upgrade the bull it duplicates).
+-- write, not one per dupe). Each pull also rolls the box's mutationChance
+-- (skipped entirely while Config.BULLS.MUTATIONS_ENABLED is false); a hit
+-- sticks a BullCatalog.Mutations aura to the pulled bull (dupes too, so a
+-- dupe pull can still upgrade the bull it duplicates).
+-- The grant is REVEAL-GATED: the profile (the saved truth) is written right
+-- here — a leave/crash/receipt force-save can never lose a pull — but the
+-- visible half (dupe-refund Money tick, the Bulls/BullMutations attributes the
+-- Index rides, the server-wide pull broadcasts) is deferred until the client's
+-- carousel lands, so nothing on screen spoils a reveal that's still spinning.
+-- REVEAL_DELAY mirrors the client's reveal clock: up-front layout settle
+-- (a few frames, up to ~1s worst case) + the 4.6s carousel + latency.
+local REVEAL_DELAY = 5.5
+
 local function grantRolls(player, count: number, source: string, boxId: string, box)
 	local results = {}
 	local refundTotal = 0
+	local broadcasts = {}
 	for _ = 1, count do
 		-- luck (owned luck passes + active Server Luck) lifts Epic/Legendary odds
 		local bullId = BullCatalog.roll(rng, MonetizationService.boostedWeights(player, box.weights))
@@ -139,15 +171,17 @@ local function grantRolls(player, count: number, source: string, boxId: string, 
 		if isNew then
 			DataHandler.AddBull(player, bullId)
 			if bull.rarity == "EPIC" or bull.rarity == "LEGENDARY" then
-				NotifyService.broadcast(
-					("%s pulled %s!"):format(displayName, bull.name:upper()), "green", 5)
+				table.insert(broadcasts, {
+					text = ("%s rolled a %s!"):format(displayName, bull.name:upper()),
+					rarity = bull.rarity,
+				})
 			end
 		else
 			refund = math.floor(box.cost * BullCatalog.Rarities[bull.rarity].dupeRefund)
 			refundTotal += refund
 		end
 		local mutId, mutationIsNew
-		if rng:NextNumber() < (box.mutationChance or 0) then
+		if Config.BULLS.MUTATIONS_ENABLED and rng:NextNumber() < (box.mutationChance or 0) then
 			mutId = BullCatalog.rollMutation(rng)
 			local mut = BullCatalog.getMutation(mutId) :: BullCatalog.Mutation
 			mutationIsNew = not DataHandler.HasBullMutation(player, bullId, mutId)
@@ -155,8 +189,10 @@ local function grantRolls(player, count: number, source: string, boxId: string, 
 				DataHandler.AddBullMutation(player, bullId, mutId)
 			end
 			if mut.rarity == "EPIC" or mut.rarity == "LEGENDARY" then
-				NotifyService.broadcast(
-					("%s rolled a %s mutation on %s!"):format(displayName, mut.name:upper(), bull.name), "green", 5)
+				table.insert(broadcasts, {
+					text = ("%s rolled a %s mutation on %s!"):format(displayName, mut.name:upper(), bull.name),
+					rarity = mut.rarity,
+				})
 			end
 		end
 		table.insert(results, {
@@ -165,25 +201,50 @@ local function grantRolls(player, count: number, source: string, boxId: string, 
 		})
 	end
 	if refundTotal > 0 then
-		DataHandler.SetStat(player, "Money", (DataHandler.GetStat(player, "Money") or 0) + refundTotal)
+		DataHandler.AddStatQuiet(player, "Money", refundTotal)
 	end
-	refreshInventoryAttribute(player)
 	ack(player, "ROLLED", {
 		results = results,
 		boxId = boxId,
 		money = DataHandler.GetStat(player, "Money"),
 		source = source,
 	})
+
+	-- The visible half lands with the carousel. Safe if the player leaves
+	-- mid-reveal (attribute/stat mirrors no-op on a gone profile; the pull
+	-- itself was committed above). Stub players (smoke tests) get it
+	-- synchronously so asserts can read attributes right after the call.
+	local function commitReveal()
+		refreshInventoryAttribute(player)
+		if typeof(player) == "Instance" then
+			DataHandler.SyncStat(player, "Money")
+		end
+		-- Tutorial step 2 (open a box) completes here rather than at the
+		-- roll itself, so the overlay's next arrow (the Index) appears
+		-- exactly as the carousel lands instead of over a spinning reveal.
+		TutorialService.onRoll(player)
+		for _, b in broadcasts do
+			-- "chat" style: lands in the chat window as "[System]: ..." instead
+			-- of a notif card (Main.client's Notify handler routes it there);
+			-- the rarity tints the line in that rarity's text gradient
+			NotifyService.broadcast(b.text, "chat", nil, b.rarity)
+		end
+	end
+	if typeof(player) == "Instance" then
+		task.delay(REVEAL_DELAY, commitReveal)
+	else
+		commitReveal()
+	end
 	return results
 end
 
 -- Public (not just the remote's target) so smoke tests can call it directly.
 function BullRollService.requestRoll(player, requestedBoxId: any)
 	local now = os.clock()
-	if now - (lastRequestAt[player] or 0) < REQUEST_GAP then
+	if now - (lastRollAt[player] or 0) < REQUEST_GAP then
 		return
 	end
-	lastRequestAt[player] = now
+	lastRollAt[player] = now
 
 	local boxId, box = getBox(requestedBoxId)
 	if not (boxId and box) then
@@ -192,6 +253,16 @@ function BullRollService.requestRoll(player, requestedBoxId: any)
 	end
 	if not profileReady(player) then
 		ack(player, "DENIED", { reason = "DATA_NOT_LOADED" })
+		return
+	end
+	-- Banked free openings (FreeBoxRolls — new players start with one BASIC)
+	-- are spent BEFORE Money, so a brand-new player's $0 can't deny the gift.
+	local freeBank = DataHandler.GetStat(player, "FreeBoxRolls")
+	local banked = if typeof(freeBank) == "table" then tonumber(freeBank[boxId]) or 0 else 0
+	if banked > 0 then
+		freeBank[boxId] = if banked > 1 then banked - 1 else nil
+		refreshFreeRollsAttribute(player)
+		grantRolls(player, 1, "FREE", boxId, box)
 		return
 	end
 	local cost = box.cost
@@ -206,10 +277,10 @@ end
 
 function BullRollService.requestEquip(player, bullId: any)
 	local now = os.clock()
-	if now - (lastRequestAt[player] or 0) < REQUEST_GAP then
+	if now - (lastEquipAt[player] or 0) < REQUEST_GAP then
 		return
 	end
-	lastRequestAt[player] = now
+	lastEquipAt[player] = now
 
 	if typeof(bullId) ~= "string" or BullCatalog.get(bullId) == nil then
 		ack(player, "DENIED", { reason = "BAD_ID" })
@@ -225,6 +296,8 @@ function BullRollService.requestEquip(player, bullId: any)
 	end
 	DataHandler.SetEquippedBull(player, bullId) -- also mirrors the attribute
 	ack(player, "EQUIPPED", { bullId = bullId })
+	-- Tutorial step 3 (equip your bull) -> completion gift.
+	TutorialService.onEquip(player)
 end
 
 --==============================================================================
@@ -308,6 +381,26 @@ function BullRollService.init()
 			end
 		end
 	end
+
+	-- Store Lucky Blocks: ROBUX bull rolls from each tier's own rarity pool
+	-- (Config.LUCKY_BLOCKS - NOT wheel spins). A tier already reads as a box -
+	-- grantRolls only touches its weights, cost (dupe-refund basis; Robux-bought,
+	-- so no Money is charged) and mutationChance. tierId ("SECRET"/"ALIEN"/"GOD")
+	-- rides as the boxId, opaque to the client like "OP" above (its ROLLED
+	-- handler just won't retarget the ROLL AGAIN button), and the bull-carousel
+	-- reveal auto-opens off the ack.
+	for tierId, tier in Config.LUCKY_BLOCKS or {} do
+		local productId = tonumber(Config.PRODUCTS[tier.product]) or 0
+		if productId > 0 then
+			MonetizationService.registerProduct(productId, function(_receipt, player)
+				if not player or not profileReady(player) then
+					return Enum.ProductPurchaseDecision.NotProcessedYet
+				end
+				grantRolls(player, 1, "ROBUX", tierId, tier)
+				return Enum.ProductPurchaseDecision.PurchaseGranted
+			end)
+		end
+	end
 end
 
 rollRemote.OnServerEvent:Connect(function(player, boxId)
@@ -319,7 +412,8 @@ equipRemote.OnServerEvent:Connect(function(player, bullId)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-	lastRequestAt[player] = nil
+	lastRollAt[player] = nil
+	lastEquipAt[player] = nil
 end)
 
 return BullRollService

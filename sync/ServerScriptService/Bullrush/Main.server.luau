@@ -16,11 +16,12 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TeamsService = game:GetService("Teams")
+local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local GridUtil = require(ReplicatedStorage.Bullrush.GridUtil)
+local BullCatalog = require(ReplicatedStorage.Bullrush.BullCatalog)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
 
 -- Same ensure-on-require pattern as the other services: the Remotes folder is
@@ -51,6 +52,8 @@ local EconomyService = require(script.Parent.EconomyService)
 local BullRollService = require(script.Parent.BullRollService)
 local SpinService = require(script.Parent.SpinService)
 local DailyRewardService = require(script.Parent.DailyRewardService)
+local TutorialService = require(script.Parent.TutorialService)
+local DataHandler = require(ServerScriptService.UserData.DataHandler)
 
 -- Onboarding funnel logger (start/finish of a player's first game). Loaded
 -- defensively like in UserData/Data.server: a missing/broken Analytics module
@@ -70,25 +73,7 @@ EconomyService.init(RoundService.awardMoney) -- round ledger; registers "2x Rewa
 BullRollService.init() -- bull roll/equip backend; registers its Robux-roll receipts
 SpinService.init() -- fortune wheel: free-spin clock + Robux spin receipts
 DailyRewardService.init() -- daily login reward: 7-day loop + ready clock
-
---==============================================================================
--- Teams (created in edit mode; ensured here so a fresh place still works)
---==============================================================================
-
-local function ensureTeam(name: string, brickColor: string): Team
-	local team = TeamsService:FindFirstChild(name)
-	if not team or not team:IsA("Team") then
-		team = Instance.new("Team")
-		team.Name = name
-		team.TeamColor = BrickColor.new(brickColor)
-		team.AutoAssignable = false
-		team.Parent = TeamsService
-	end
-	return team
-end
-
-local RED_TEAM = ensureTeam("Red Team", "Really red")
-local BLUE_TEAM = ensureTeam("Blue Team", "Really blue")
+TutorialService.init() -- first-session tutorial: join trigger + resume (steps advance via service hooks)
 
 --==============================================================================
 -- Per-round gravity (Low Gravity mode). workspace.Gravity replicates to every
@@ -142,6 +127,21 @@ local currentInfo: { [string]: any } = {}
 local function setRoundState(state: string, info: { [string]: any })
 	currentState = state
 	currentInfo = info
+	-- Mirror the state (+ ACTIVE window) as attributes on the Bullrush folder
+	-- for cold-booting clients: the FireClient pushes below get missed by a
+	-- first join's long load (loading screen, streaming), but attributes ride
+	-- the initial replication snapshot, so BullrushClient can self-sync at
+	-- boot no matter when it wakes up. SetAttribute is change-detected, so
+	-- the per-wave ACTIVE re-fires cost nothing here.
+	local folder = Remotes.Parent
+	folder:SetAttribute("RoundState", state)
+	local bounds = info.bounds
+	folder:SetAttribute("RoundBounds", if typeof(bounds) == "table"
+		then ("%d,%d,%d,%d"):format(bounds.rowMin, bounds.rowMax, bounds.colMin, bounds.colMax)
+		else nil)
+	-- Tutorial join trigger reads this snapshot ("ACTIVE and wave <= 2" =
+	-- a fresh joiner can start learning to throw right away).
+	TutorialService.onRoundState(state, info)
 	Remotes.RoundState:FireAllClients(state, info)
 end
 
@@ -359,7 +359,9 @@ end)
 
 local teamOf: { [Player]: string } = {} -- "RED" | "BLUE", current round only
 
--- Shuffle then alternate, so team sizes differ by at most one.
+-- Shuffle then alternate, so team sizes differ by at most one. Membership is
+-- an attribute (not Player.Team) so the player list never grows Red/Blue
+-- groups; the HUD and SoundDirector read RushTeam instead.
 local function assignTeams(participants: { Player })
 	table.clear(teamOf)
 	local order = table.clone(participants)
@@ -370,9 +372,9 @@ local function assignTeams(participants: { Player })
 	for i, player in order do
 		local isRed = i % 2 == 1
 		teamOf[player] = if isRed then "RED" else "BLUE"
-		player.Neutral = false
-		player.Team = if isRed then RED_TEAM else BLUE_TEAM
-		if typeof(player) ~= "Instance" then
+		if typeof(player) == "Instance" then
+			player:SetAttribute("RushTeam", teamOf[player])
+		else
 			AIService.tintTeam(player, teamOf[player])
 		end
 	end
@@ -380,9 +382,8 @@ end
 
 local function clearTeams()
 	for player in teamOf do
-		if player.Parent then
-			player.Team = nil
-			player.Neutral = true
+		if typeof(player) == "Instance" and player.Parent then
+			player:SetAttribute("RushTeam", nil)
 		end
 	end
 	table.clear(teamOf)
@@ -446,7 +447,14 @@ local function destroyLeftoverBulls()
 	BullService.cancelAll()
 end
 
-local function teleportToLobby()
+-- Return the round's SURVIVORS to the lobby spawn. Only they are still standing
+-- on the arena grid - everyone eliminated already respawned at the lobby spawn
+-- naturally - so pivoting the whole server here would yank AFK sitters, shop
+-- browsers, and practice-arena players back to spawn every round. The list can
+-- still hold bot proxies (plain tables whose rig AIService.despawnAll just
+-- destroyed) and real players who left during the 5s banner, hence the
+-- Parent + Character guard on each entry.
+local function teleportToLobby(survivors: { Player })
 	local lobby = Workspace:FindFirstChild("Lobby")
 	local spawnLocation = lobby and lobby:FindFirstChild("LobbySpawn")
 	if not spawnLocation then
@@ -455,8 +463,55 @@ local function teleportToLobby()
 	-- Arena sits just south (+Z) of the lobby platform, so face players toward it.
 	local base = spawnLocation.Position + Vector3.new(0, 4, 0)
 	local facing = CFrame.lookAt(base, base + Vector3.new(0, 0, 1))
-	for _, player in playersWithCharacters() do
-		player.Character:PivotTo(facing)
+	for _, player in survivors do
+		if player.Parent and player.Character then
+			player.Character:PivotTo(facing)
+		end
+	end
+end
+
+-- Confetti for the champions: ReplicatedStorage.Confetti's emitters cloned
+-- into each winner's torso for the WINNER-banner window (matches the task.wait(5)
+-- before the lobby teleport), then disabled so the last particles fade out on
+-- their own lifetime before the clones are removed. Server-side clones, so
+-- everyone sees the shower; winners can be bot proxies (plain tables), but
+-- their .Character rig takes the emitters just as happily.
+local CONFETTI_SECONDS = 5
+local CONFETTI_TAIL = 2 -- the template emitters' max particle Lifetime
+
+local confettiTemplate = ReplicatedStorage:FindFirstChild("Confetti")
+
+local function celebrateWinners(winners)
+	if not confettiTemplate then
+		return
+	end
+	for _, w in winners do
+		local character = w.Character
+		local torso = character
+			and character.Parent
+			and (character:FindFirstChild("UpperTorso")
+				or character:FindFirstChild("Torso")
+				or character:FindFirstChild("HumanoidRootPart"))
+		if torso then
+			local clones = {}
+			for _, e in confettiTemplate:GetDescendants() do
+				if e:IsA("ParticleEmitter") then
+					local clone = e:Clone()
+					clone.Parent = torso
+					table.insert(clones, clone)
+				end
+			end
+			task.delay(CONFETTI_SECONDS, function()
+				for _, e in clones do
+					e.Enabled = false
+				end
+			end)
+			task.delay(CONFETTI_SECONDS + CONFETTI_TAIL, function()
+				for _, e in clones do
+					e:Destroy()
+				end
+			end)
+		end
 	end
 end
 
@@ -525,6 +580,50 @@ local function startBoundsWatcher(): () -> ()
 	end
 end
 
+-- Special bulls (Config.SPECIAL_BULLS): sometimes a wave bull charges as a
+-- NAMED catalog bull — rarity glow + name tag client-side —
+-- so players see the box prizes alive on the grid. Rolled per launched bull,
+-- gated by a server-wide interval so specials stay an event. Returns the
+-- charge style for the clients plus the rarity's speed multiplier (applied to
+-- the wave's CURRENT ramped speed, keeping specials relatively fast, never
+-- absolutely unfair), or nil + 1 for a plain bull.
+local specialRng = Random.new()
+local lastSpecialAt = -math.huge
+local function maybeSpecialBull()
+	local cfg = Config.SPECIAL_BULLS
+	if not (cfg and cfg.ENABLED) then
+		return nil, 1
+	end
+	if os.clock() - lastSpecialAt < cfg.MIN_INTERVAL or specialRng:NextNumber() >= cfg.CHANCE then
+		return nil, 1
+	end
+	local total = 0
+	for _, w in cfg.WEIGHTS do
+		total += w
+	end
+	local pick = specialRng:NextNumber() * total
+	local rarity
+	for r, w in cfg.WEIGHTS do
+		rarity = r
+		pick -= w
+		if pick <= 0 then
+			break
+		end
+	end
+	-- Single-rarity weight table -> BullCatalog.roll picks uniformly among that
+	-- rarity's ROLLABLE bulls, so a special is always a bull players can unlock.
+	local bullId = BullCatalog.roll(specialRng, { [rarity] = 1 })
+	local bull = BullCatalog.get(bullId)
+	if not bull then
+		return nil, 1
+	end
+	lastSpecialAt = os.clock()
+	if cfg.ANNOUNCE[bull.rarity] then
+		NotifyService.broadcast(bull.name .. "!", "red", 3)
+	end
+	return { bullId = bullId, special = bull.rarity }, cfg.SPEED_MULT[bull.rarity] or 1
+end
+
 local function runWaves(soloRound: boolean, roundStart: number, mode)
 	local isTeams = mode.teams == true
 	local difficulty = mode.difficulty or Config.DIFFICULTY
@@ -535,6 +634,29 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 	local airborne = 0
 	local MAX_AIRBORNE = 10 -- brake if short gaps outrun bull run time
 	local occupied: { [string]: number } = {} -- laneKey -> bulls in flight there
+
+	-- End the round the INSTANT it's decided. Every elimination (bull, fall,
+	-- push, quit) trips this hook; the moment one player (or one team) is left,
+	-- every in-flight bull is cancelled so a charge already crossing the grid
+	-- can't flatten the would-be winner during the telegraph/gap waits.
+	local decided = false
+	RoundService.onEliminated = function()
+		if not decided and roundDecided(soloRound, isTeams) then
+			decided = true
+			BullService.cancelAll()
+		end
+	end
+	-- Decided-aware sleep: waits `duration` in short slices, returning true as
+	-- soon as the round is decided so the wave loop stops within ~0.1s instead
+	-- of sitting out a full telegraph/gap with nothing left to settle.
+	local function waitUnlessDecided(duration: number): boolean
+		local deadline = os.clock() + duration
+		while not decided and os.clock() < deadline do
+			task.wait(math.min(0.1, deadline - os.clock()))
+		end
+		return decided
+	end
+
 	while true do
 		wave += 1
 		if roundDecided(soloRound, isTeams) then
@@ -560,13 +682,15 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 
 		local bounds = ShrinkService.getBounds()
 		local intensity = math.min((os.clock() - roundStart) / rampTime, 1)
-		-- Larger maps (startSize >= 9) feel empty opening with a lone pair, so
-		-- floor the count: 2 bulls on the first wave, then >= 3 from the second
-		-- on (the ramp/mode can still push higher, e.g. Stampede to 4). The Small
-		-- 7x7 grid keeps the gentle probabilistic ramp (no floor).
+		-- Larger maps (startSize >= 9) feel empty once the round is rolling, so
+		-- floor the count — but only after an opening grace: the first few waves
+		-- ride the gentle probabilistic ramp everywhere (a single slow bull to
+		-- learn on), then the floor steps in at 2 and reaches 3 as the ramp
+		-- passes a third (the ramp/mode can still push higher, e.g. Stampede
+		-- to 4). The Small 7x7 grid keeps the gentle ramp throughout (no floor).
 		local minBulls = nil
-		if mode.startSize >= 9 then
-			minBulls = if wave <= 1 then 2 else 3
+		if mode.startSize >= 9 and wave > 3 then
+			minBulls = if intensity < 0.35 then 2 else 3
 		end
 		local waveData = WaveDirector.getWave(intensity, bounds, difficulty, occupied, minBulls)
 
@@ -586,7 +710,9 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 		end
 		Remotes.Telegraph:FireAllClients(lanes, waveData.telegraph, bounds)
 		AIService.onTelegraph(lanes, waveData.telegraph, bounds)
-		task.wait(waveData.telegraph)
+		if waitUnlessDecided(waveData.telegraph) then
+			return
+		end
 
 		-- Each bull charges in its own thread (BullService.charge blocks).
 		-- No barrier: the gap starts while these bulls are still running,
@@ -600,12 +726,16 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 					task.wait(bull.delay)
 				end
 				-- Mid-wave short-circuit: bulls not yet launched are skipped
-				-- once the round is decided; charging bulls finish their run.
-				if not roundDecided(soloRound, isTeams) then
-					BullService.charge(bull.lane, waveData.speed, bounds,
+				-- once the round is decided; charging bulls are cancelled by
+				-- the onEliminated hook the moment the field is settled.
+				if not decided then
+					-- Rolled at launch (not wave build) so the Epic+ broadcast
+					-- lands exactly as the special leaves the gate.
+					local style, speedMult = maybeSpecialBull()
+					BullService.charge(bull.lane, waveData.speed * speedMult, bounds,
 						RoundService.getAliveCached, function(victim)
 							RoundService.eliminate(victim, "BULL")
-						end)
+						end, style)
 				end
 				airborne -= 1
 				-- nil (not 0) when the lane empties: WaveDirector's exclusion
@@ -615,7 +745,9 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 			end)
 		end
 
-		task.wait(waveData.gap)
+		if waitUnlessDecided(waveData.gap) then
+			return
+		end
 		while airborne >= MAX_AIRBORNE do
 			task.wait(0.05)
 		end
@@ -630,6 +762,10 @@ while true do
 	setRoundState("WAITING", {})
 	while #activePlayers() < Config.MIN_PLAYERS do
 		task.wait(0.5)
+		-- Keep resending while short-handed: clients that joined (or loaded
+		-- their UI) after the one-shot broadcast above still learn we're
+		-- waiting, and the client's "Waiting for players" card rides these.
+		setRoundState("WAITING", {})
 	end
 
 	local mode
@@ -688,7 +824,6 @@ while true do
 		-- Restore/configure the arena HERE (not at cleanup) so the sunken
 		-- tiles stay visible under the previous round's end banner.
 		ShrinkService.reset(mode.startSize, #mode.shrink.times)
-		local roundStart = os.clock()
 
 		local tiles = shuffledTiles(ShrinkService.getBounds())
 		for i, player in participants do
@@ -707,6 +842,22 @@ while true do
 		-- Zippy round if the mode asks for it (restored after the waves).
 		applyModeWalkSpeed(participants, mode)
 
+		-- Breather on the field: everyone stands on their tile for a short
+		-- countdown before bulls, shrink, and eliminations kick in. The
+		-- `starting` flag makes the client swap the sticky card for big
+		-- center-screen 5..1 digits (with per-second ticks in SoundDirector);
+		-- no voteOptions here, so the vote HUD closes.
+		for timeLeft = Config.START_DELAY, 1, -1 do
+			setRoundState("INTERMISSION", {
+				timeLeft = timeLeft,
+				modeName = mode.name,
+				modeId = mode.id,
+				starting = true,
+			})
+			task.wait(1)
+		end
+
+		local roundStart = os.clock()
 		RoundService.startRound(participants, isTeams)
 		EconomyService.roundStarted(participants, mode)
 		RevengeService.roundStarted()
@@ -731,8 +882,9 @@ while true do
 			teamCounts = if isTeams then teamCounts() else nil,
 		})
 
-		-- Kickoff announcement (replaces the old client center banner): everyone
-		-- learns the mode; in Team Rush each player is told which side they're on.
+		-- Kickoff: the on-field 5..1 countdown (big client digits + ticks) IS the
+		-- announcement now — no "<MODE> — GO!" broadcast. Team Rush still whispers
+		-- each player their side, since that isn't visible anywhere else.
 		if isTeams then
 			for _, player in participants do
 				if player.Parent then
@@ -741,13 +893,12 @@ while true do
 						"white", 3)
 				end
 			end
-		else
-			NotifyService.broadcast((mode.name:upper() .. " — GO!"), "white", 3)
 		end
 
 		local stopWatcher = startBoundsWatcher()
 		runWaves(soloRound, roundStart, mode)
 		stopWatcher()
+		RoundService.onEliminated = nil -- the waves' instant-end hook retires with them
 		RevengeService.roundEnded()
 		restoreGravity() -- back to normal for the end banner + lobby
 		restoreWalkSpeed(participants) -- reset any survivors' sprint
@@ -766,8 +917,6 @@ while true do
 							local won, paid = RoundService.awardWinner(player)
 							if won then
 								EconomyService.noteWin(player, paid)
-								-- Money lives in the Summary tab now, not this card.
-								NotifyService.send(player, "VICTORY! +1 Win", "green", 6)
 							end
 						else
 							RoundService.resetStreak(player)
@@ -802,6 +951,7 @@ while true do
 					modeName = mode.name,
 				})
 				NotifyService.broadcast((featured.Name .. " WINS THE STAMPEDE"):upper(), "green", 5)
+				celebrateWinners(aliveList) -- the whole surviving team showers
 			else
 				-- The herd got everyone: nobody won, everybody's streak breaks.
 				for _, player in participants do
@@ -817,8 +967,6 @@ while true do
 			local won, paid = RoundService.awardWinner(winner)
 			if won then
 				EconomyService.noteWin(winner, paid)
-				-- Money lives in the Summary tab now, not this card.
-				NotifyService.send(winner, "VICTORY! +1 Win", "green", 6)
 			end
 			summaryWinner = {
 				winnerName = winner.Name,
@@ -830,6 +978,7 @@ while true do
 			}
 			setRoundState("WINNER", { winnerName = winner.Name, modeName = mode.name })
 			NotifyService.broadcast((winner.Name .. " WINS THE STAMPEDE"):upper(), "green", 5)
+			celebrateWinners({ winner })
 		else
 			setRoundState("ROUNDOVER", { modeName = mode.name })
 			NotifyService.broadcast("The herd got everyone…", "red", 5)
@@ -848,6 +997,17 @@ while true do
 			end
 		end
 
+		-- First-timers who just finished their first-ever round graduate: clear
+		-- the FirstTimer attribute and persist the fact. Participants are
+		-- captured at round start, so eliminated players graduate too -- they
+		-- experienced a full round.
+		for _, player in participants do
+			if typeof(player) == "Instance" and player:GetAttribute("FirstTimer") == true then
+				player:SetAttribute("FirstTimer", nil)
+				DataHandler.SetStat(player, "HasPlayedBefore", true)
+			end
+		end
+
 		RoundService.cleanup()
 		if isTeams then
 			clearTeams()
@@ -855,6 +1015,6 @@ while true do
 		destroyLeftoverBulls()
 		task.wait(5) -- let the winner / round-over banner show
 		AIService.despawnAll()
-		teleportToLobby()
+		teleportToLobby(aliveList) -- only the survivors are still out on the grid
 	end
 end

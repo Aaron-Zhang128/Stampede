@@ -21,8 +21,8 @@ local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local UP_SPEED = 26 -- vertical boost so victims arc instead of skidding
-local SPIN_MAX = 10 -- rad/s of random tumble
+local UP_SPEED = 34 -- vertical boost so victims arc instead of skidding
+local SPIN_MAX = 13 -- rad/s of random tumble
 local IMPACT_COLOR = Color3.fromRGB(168, 138, 96) -- arena dust
 local IMPACT_SOUND_ID = 146163534 -- Slap Hit; same id the client uses for slams
 
@@ -157,32 +157,35 @@ function RagdollService.launch(character: Model?, direction: Vector3, speed: num
 
 	local velocity, spin = computeFling(direction, speed)
 	local player = Players:GetPlayerFromCharacter(character)
-	if player then
-		-- Player victim: their client ALREADY owns this character, and Roblox
-		-- keeps that ownership through death until respawn (default death flops
-		-- are client-simulated for exactly this reason). So we deliberately do
-		-- NOT touch network ownership here - calling SetNetworkOwner would yank
-		-- the assembly out from under the client's own simulation and, racing the
-		-- client's velocity write, leave a window where NEITHER side simulates:
-		-- the body freezes mid-pose and reads as "stiff, not ragdolling". We just
-		-- hand the launch vector to the owning client and let it drive the tumble;
-		-- the server runs no ragdoll physics and the motion replicates to everyone
-		-- because the victim owns the parts.
-		RagdollFling:FireClient(player, velocity, spin)
-	else
-		-- Bot rig has no client to own it: keep the server-authoritative fling.
-		-- Physics state stops any controller fighting the launch; ownership must
-		-- come last (the API allows it now that the humanoid is dead).
-		pcall(function()
-			humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-		end)
-		for _, part in character:GetDescendants() do
-			if part:IsA("BasePart") then
-				pcall(part.SetNetworkOwner, part, nil)
-				part.AssemblyLinearVelocity = velocity
-				part.AssemblyAngularVelocity = spin
-			end
+
+	-- Server-authoritative fling for EVERYONE (players and bots). The
+	-- client-simulated variant was tried and failed (2026-07-11): destroying
+	-- the Motor6Ds splits the character into ~15 fresh limb assemblies that do
+	-- NOT inherit the "player owns their character" special case, the victim's
+	-- velocity writes never replicated (body dropped in place), and even after
+	-- re-granting ownership the client sim zeroed the launch and let the corpse
+	-- fall through the floor (the dead humanoid fights limb collisions).
+	-- So: Physics state stops any controller fighting the launch, the server
+	-- takes ownership (legal now that the humanoid is dead) and writes the
+	-- velocities itself - no client write to get stomped, and collisions
+	-- resolve against the server's CanCollide values so the corpse can't fall
+	-- through the world. Ragdolls are transient (~3s to respawn), so the server
+	-- physics cost is a handful of small assemblies per kill.
+	pcall(function()
+		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+	end)
+	for _, part in character:GetDescendants() do
+		if part:IsA("BasePart") then
+			pcall(part.SetNetworkOwner, part, nil)
+			part.AssemblyLinearVelocity = velocity
+			part.AssemblyAngularVelocity = spin
 		end
+	end
+	if player then
+		-- The victim's client no longer simulates the tumble; the ping is just
+		-- "you were hit": PlatformStand + Physics state so the local control
+		-- script doesn't fight the replicated launch, plus hit FX.
+		RagdollFling:FireClient(player, velocity, spin)
 	end
 end
 

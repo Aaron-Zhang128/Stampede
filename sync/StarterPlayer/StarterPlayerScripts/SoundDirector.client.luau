@@ -3,7 +3,7 @@
 -- The "game-show" audio layer for Bullrush Grid. Crossfades background music
 -- between a calm lobby loop and a driving battle theme, and fires stingers on
 -- the beats that matter: mode reveal, final-countdown ticks, round kickoff,
--- your own elimination, victory, defeat, revenge money, and a final-two
+-- every player death, victory, defeat, revenge money, and a final-two
 -- heartbeat. Every sound is pulled from the curated library the user placed in
 -- SoundService (BackgroundMusic + GameSFX groups), so it all stays tweakable
 -- from the Explorer and the SoundGroup mixer -- nothing here is hardcoded.
@@ -195,8 +195,10 @@ local function localWon(info): boolean
 		return false
 	end
 	if typeof(info.teamColor) == "string" then
-		local team = player.Team
-		return team ~= nil and string.find(string.upper(team.Name), info.teamColor) ~= nil
+		-- Team Rush membership lives on a RushTeam attribute ("RED"|"BLUE"),
+		-- not Player.Team (kept off the player list on purpose).
+		local team = player:GetAttribute("RushTeam")
+		return typeof(team) == "string" and string.upper(team) == string.upper(info.teamColor)
 	end
 	if typeof(info.winnerName) == "string" then
 		return info.winnerName == player.Name
@@ -223,12 +225,22 @@ roundStateRemote.OnClientEvent:Connect(function(state, info)
 		if previousState ~= "INTERMISSION" then
 			playSfx("Reveal", 0.56)
 		end
-		-- Final three ticks, rising on the last one.
 		local t = tonumber(info.timeLeft)
-		if t == 3 or t == 2 then
-			playSfx("Ticker", 0.7, 1.0)
-		elseif t == 1 then
-			playSfx("Ticker", 0.7, 1.3)
+		if info.starting == true then
+			-- On-field kickoff countdown: a tick for every big center-screen
+			-- digit (5..1), rising on the last one.
+			if t and t >= 2 then
+				playSfx("Ticker", 0.7, 1.0)
+			elseif t == 1 then
+				playSfx("Ticker", 0.7, 1.3)
+			end
+		else
+			-- Lobby countdown: final three ticks only, rising on the last one.
+			if t == 3 or t == 2 then
+				playSfx("Ticker", 0.7, 1.0)
+			elseif t == 1 then
+				playSfx("Ticker", 0.7, 1.3)
+			end
 		end
 	elseif state == "ACTIVE" then
 		-- Kickoff whoosh, only on a real intermission->active handoff (never on
@@ -253,15 +265,38 @@ roundStateRemote.OnClientEvent:Connect(function(state, info)
 	previousState = state
 end)
 
--- Your own elimination: a short hit sting layered over BullrushClient's thud.
--- Also carries the reliable per-elimination alive count that drives the
--- heartbeat as the field narrows to a duel.
-eliminatedRemote.OnClientEvent:Connect(function(playerName, aliveCount)
-	if playerName == player.Name then
-		playSfx("C Hitsound", 0.595)
-	end
+-- Elimination events carry the reliable per-elimination alive count that
+-- drives the heartbeat as the field narrows to a duel. (The death sting itself
+-- rides Humanoid.Died below so it also covers practice/lava/fall deaths.)
+eliminatedRemote.OnClientEvent:Connect(function(_playerName, aliveCount)
 	setHeartbeat(tonumber(aliveCount))
 end)
+
+-- Any player's death, anywhere: the kill stinger. Hooked on Humanoid.Died
+-- rather than the Eliminated remote so practice-arena and lobby deaths count
+-- too, and so it lands on the actual death frame.
+local function watchCharacter(character: Model)
+	local humanoid = character:WaitForChild("Humanoid", 10)
+	if humanoid and humanoid:IsA("Humanoid") then
+		humanoid.Died:Once(function()
+			playSfx("Among Us (Kill)", 0.6)
+		end)
+	end
+end
+
+local function watchPlayer(pl: Player)
+	if pl.Character then
+		task.spawn(watchCharacter, pl.Character)
+	end
+	pl.CharacterAdded:Connect(function(character)
+		task.spawn(watchCharacter, character)
+	end)
+end
+
+for _, pl in Players:GetPlayers() do
+	watchPlayer(pl)
+end
+Players.PlayerAdded:Connect(watchPlayer)
 
 -- Revenge bull cashed in on an alive victim: kaching.
 if revengeAckRemote then

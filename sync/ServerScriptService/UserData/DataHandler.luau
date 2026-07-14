@@ -15,6 +15,26 @@ function DataHandler.GetDefaultProfile()
 		Rebirths = 0,
 		GroupRewardClaimed = false,  -- one-time $250 group-join reward (RewardService)
 
+		-- Longest single practice-grid survival stint, in seconds (0.1s steps).
+		-- Written by Bullrush/PracticeArena at stint end; replicated to the HUD
+		-- stopwatch (Main §16) as the PracticeBest attribute.
+		PracticeRecord = 0,
+
+		-- False until the player FINISHES their first-ever round (flipped in
+		-- Bullrush/Main.server). While false the player carries the replicated
+		-- FirstTimer attribute (no gameplay effect yet -- there for analytics
+		-- and future first-session features). Old saves predate this key;
+		-- Data.server infers true for them on load (an existing save means
+		-- they've been here before).
+		HasPlayedBefore = false,
+
+		-- First-session tutorial progress (Bullrush/TutorialService): 0 = not
+		-- started, 1 = launch a bull, 2 = free roll, 3 = equip, 4 = done.
+		-- Advanced ONLY server-side by TutorialService; replicates as the
+		-- same-named attribute the client overlay (Main §18) renders from.
+		-- Old saves predate this key; Data.server grandfathers them to 4.
+		TutorialStep = 0,
+
 		-- Daily-mission state (DailyMissionService). day=0 forces a re-roll on first load;
 		-- the load merge in Data.server.luau copies a saved table here wholesale, so old
 		-- saves with no key keep this default and are re-rolled to today on join.
@@ -29,6 +49,13 @@ function DataHandler.GetDefaultProfile()
 		-- existing players get the starter granted on their next join.
 		Bulls = {STARTER = true},   -- stored as {bullId = true}, like Chairs/Trails
 		EquippedBull = "STARTER",
+
+		-- Banked FREE lucky-box openings, {boxId = count} (BullRollService spends
+		-- them before Money in requestRoll). New players start with one free
+		-- BASIC box so their first roll costs nothing; Data.server's load
+		-- inference empties this for pre-feature saves (a new-player gift, not
+		-- a veteran grant). Replicates as the FreeBoxRolls JSON attribute.
+		FreeBoxRolls = {BASIC = 1},
 
 		-- Mutations rolled onto specific bulls (BullRollService): a nested
 		-- dictionary {bullId = {mutId = true}}. The equipped bull wears its
@@ -48,6 +75,14 @@ function DataHandler.GetDefaultProfile()
 		-- reward is ready immediately on join (new saves and old saves alike).
 		DailyStreak = 0,
 		LastDailyClaim = 0,
+
+		-- Player level progression (LevelService): Level 1..Config.LEVELS.MAX_LEVEL;
+		-- XP = progress INTO the current level (the per-level step is subtracted on
+		-- each level-up). Old saves keep these defaults via the load merge, so
+		-- veterans simply start climbing from level 1 like everyone else. Both
+		-- replicate as same-named player attributes for the HUD XP bar.
+		Level = 1,
+		XP = 0,
 
 		-- Processed dev-product receipts (MonetizationService). A ring of the most
 		-- recent PurchaseIds, recorded in the SAME durable write as the grant so a
@@ -122,6 +157,34 @@ function DataHandler.SetStat(player, statName, value)
 		local folder = player:FindFirstChild(folderName)
 		local stat = folder and folder:FindFirstChild(statName)
 		if stat then stat.Value = value end
+	end
+end
+
+-- Quiet write for reveal-gated rewards (SpinService/BullRollService): the
+-- profile (the saved truth) updates NOW, so leaves/crashes/receipt force-saves
+-- can never lose a granted prize — but the leaderstats/Stats mirror is skipped,
+-- so the HUD can't spoil a wheel or lucky-box reveal that is still spinning.
+-- Pair with SyncStat when the client's reveal animation lands.
+function DataHandler.AddStatQuiet(player, statName, delta)
+	local profile = DataHandler.Profiles[player.UserId]
+	if not profile then
+		warn("No profile found for " .. player.Name)
+		return
+	end
+	profile[statName] = (profile[statName] or 0) + delta
+end
+
+-- Re-mirrors a stat's current profile value to its value instance (the visible
+-- half of SetStat). No-op if the player already left (profile gone).
+function DataHandler.SyncStat(player, statName)
+	local profile = DataHandler.Profiles[player.UserId]
+	if not profile then
+		return
+	end
+	for _, folderName in {"leaderstats", "Stats"} do
+		local folder = player:FindFirstChild(folderName)
+		local stat = folder and folder:FindFirstChild(statName)
+		if stat then stat.Value = profile[statName] end
 	end
 end
 

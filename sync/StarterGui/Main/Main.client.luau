@@ -103,6 +103,9 @@ local function openFrame(frame)
 	tween(scale, POP_IN, { Scale = 1 })
 end
 
+-- The container itself must be visible or every window opens invisibly (its
+-- children toggle, it doesn't) — force it in case an Explorer click hid it.
+Frames.Visible = true
 -- start hidden + wire every Close button inside each window
 for _, frame in ipairs(Frames:GetChildren()) do
 	if frame:IsA("GuiObject") then
@@ -222,19 +225,41 @@ if quickButtons then
 	end)
 end
 
+-- The UI kit ships its "Off" state gradients grey; toggles that want a red
+-- stop-state retint them to this ramp (mirrors the green "On" ramp, light
+-- top -> deep bottom). Used by the bull cam button and the AFK toggle.
+local RED_OFF = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 120, 104)),
+	ColorSequenceKeypoint.new(0.1, Color3.fromRGB(255, 120, 104)),
+	ColorSequenceKeypoint.new(0.9, Color3.fromRGB(216, 12, 12)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(204, 8, 8)),
+})
+
 -- "Become a Bull" button (former "Slow" toggle): enters/exits the revenge
 -- bull-cam. BullrushClient owns the camera + eligibility rules and exposes a
 -- client-local bridge (ReplicatedStorage.RevengeViewBridge BindableEvent):
--- Fire() toggles the cam; its "Eligible"/"Viewing" attributes drive the
--- button's visibility and label. The kit's On/Off gradient pair doubles as
--- the state look (On = ready to enter, Off = currently viewing).
+-- Fire() toggles the cam; its "Eligible"/"CanThrow"/"Viewing" attributes
+-- drive the button's visibility and label. Since the 2026-07-13 widening
+-- EVERY round spectator may also throw, so CanThrow tracks Eligible and the
+-- label reads "Become a Bull"; the "Bull Cam" fallback stays for any future
+-- watch-only split.
+-- The kit's On/Off gradient pair doubles as the state look (On = ready to
+-- enter, Off = currently viewing, retinted red so "Exit Cam" reads as a
+-- stop control).
 local function wireBullCamButton(btn)
 	handled[btn] = true
-	btn.Visible = false -- only eliminated players of an ACTIVE round see it
-	local function apply(viewing)
+	btn.Visible = false -- only round spectators of an ACTIVE round see it
+	for _, d in ipairs(btn:GetDescendants()) do
+		if d:IsA("UIGradient") and d.Name == "Off" then
+			d.Color = RED_OFF
+		end
+	end
+	local function apply(viewing, canThrow)
 		local label = btn:FindFirstChild("Name")
 		if label and label:IsA("TextLabel") then
-			label.Text = viewing and "Exit Cam" or "Become a Bull"
+			label.Text = if viewing then "Exit Cam"
+				elseif canThrow then "Become a Bull"
+				else "Bull Cam"
 		end
 		for _, d in ipairs(btn:GetDescendants()) do
 			if d:IsA("UIGradient") or d:IsA("UIStroke") then
@@ -246,7 +271,7 @@ local function wireBullCamButton(btn)
 			end
 		end
 	end
-	apply(false)
+	apply(false, false)
 	task.spawn(function()
 		local bridge = ReplicatedStorage:WaitForChild("RevengeViewBridge", 30)
 		if not (bridge and bridge:IsA("BindableEvent")) then
@@ -254,13 +279,30 @@ local function wireBullCamButton(btn)
 		end
 		local function refresh()
 			btn.Visible = bridge:GetAttribute("Eligible") == true
-			apply(bridge:GetAttribute("Viewing") == true)
+			apply(bridge:GetAttribute("Viewing") == true, bridge:GetAttribute("CanThrow") == true)
 		end
 		bridge:GetAttributeChangedSignal("Eligible"):Connect(refresh)
+		bridge:GetAttributeChangedSignal("CanThrow"):Connect(refresh)
 		bridge:GetAttributeChangedSignal("Viewing"):Connect(refresh)
 		refresh()
 		btn.Activated:Connect(function()
 			bridge:Fire()
+		end)
+		-- Attention pulse: while the button is up and the player is NOT already
+		-- in the cam, it breathes ±6% so a freshly-eliminated player notices
+		-- their way into revenge. Manual RenderStepped math like every looped
+		-- animation here (Run-mode tween freeze); it drives Size, not the
+		-- UIScale, so section 3's hover/press tweens ride on top untouched.
+		local baseSize = btn.Size
+		RunService.RenderStepped:Connect(function()
+			if btn.Visible and bridge:GetAttribute("Viewing") ~= true then
+				local k = 1 + 0.06 * math.sin(os.clock() * 4)
+				btn.Size = UDim2.new(
+					baseSize.X.Scale * k, baseSize.X.Offset * k,
+					baseSize.Y.Scale * k, baseSize.Y.Offset * k)
+			elseif btn.Size ~= baseSize then
+				btn.Size = baseSize -- parked at rest while hidden / in the cam
+			end
 		end)
 	end)
 end
@@ -308,8 +350,9 @@ for _, d in ipairs(SideUI:GetDescendants()) do
 				end
 			end)
 		elseif d.Name == "Gifts" then
-			-- Daily rewards temporarily disabled: hide the HUD button so the
-			-- Daily frame can't be opened (auto-open is also gated off below).
+			-- No Daily HUD button (user request 2026-07-13): the daily reward
+			-- system stays live — the window still auto-opens on join when a
+			-- reward is ready (section 13) — but the left-side button is gone.
 			handled[d] = true
 			d.Visible = false
 		else
@@ -444,7 +487,7 @@ do
 		holder.Position = UDim2.fromScale(0.985, 0.5)
 		-- Both axes scaled: a zero-width Size collapses to 0x0 under the aspect
 		-- constraint. The constraint then squares it off the height.
-		holder.Size = UDim2.fromScale(0.11, 0.11)
+		holder.Size = UDim2.fromScale(0.15, 0.15)
 		holder.Visible = false
 		holder.Parent = pushGui
 
@@ -722,14 +765,7 @@ do
 		btn.Position = slotPos
 		btn.Size = UDim2.new(0.27, 0, 0.66, 0)
 
-		-- the shipped "Off" gradients are grey; retint them to a red ramp that
-		-- mirrors the green "On" ramp (light top -> deep bottom) so OFF reads red
-		local RED_OFF = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 120, 104)),
-			ColorSequenceKeypoint.new(0.1, Color3.fromRGB(255, 120, 104)),
-			ColorSequenceKeypoint.new(0.9, Color3.fromRGB(216, 12, 12)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(204, 8, 8)),
-		})
+		-- retint the shipped grey "Off" gradients to the shared red ramp
 		for _, d in ipairs(btn:GetDescendants()) do
 			if d:IsA("UIGradient") and d.Name == "Off" then
 				d.Color = RED_OFF
@@ -933,10 +969,11 @@ if boosts then
 end
 
 ---------------------------------------------------------------- 5) marquees
--- The Store lucky-block marquees show the ACTUAL prizes you can roll for
--- (Config.LUCKY_BLOCKS): each Secret/Alien/GOD card scrolls its own tier's
--- reward tiles, and the "[OP] LUCKY BLOCK" banner shows a static highlight reel
--- of the standout prizes. Each prize is a self-contained chip in the game's
+-- The lucky-block marquees show the ACTUAL prizes you can roll for: each
+-- Store Secret/Alien/GOD card (Config.LUCKY_BLOCKS) and each Shop1 Lucky Box
+-- card (Config.BULLS.BOXES) scrolls its own pool's reward tiles, and the
+-- "[OP] LUCKY BLOCK" banner shows a static highlight reel of the standout
+-- prizes. Each prize is a self-contained chip in the game's
 -- roll/index card style (dark plate + rarity-coloured border + GothamBlack
 -- white/INK-stroke labels): bull = real model preview + name, money = the amount,
 -- cards also show the odds. All labels sit INSIDE the clipped plate (the kit's
@@ -1200,6 +1237,96 @@ task.spawn(function()
 		end
 	end
 
+	-- Shop1 "Lucky Boxes" cards (Basic/Super/Mega) get the SAME possible-rolls
+	-- reel as the Store lucky blocks: every bull the box can roll scrolls
+	-- through the card's empty middle band as a prize chip with its true odds,
+	-- so the card shows what's inside instead of just naming its tier. The
+	-- cards are (re)built async by section 11's buildBoxShop (kit clones named
+	-- by boxId), so dress whatever already exists and watch ChildAdded for the
+	-- rebuild. Chips are sized square against the wide kit card (~4 visible).
+	local BOX_ITEM_W = 0.195
+	local BOX_PAD = 0.02
+	local shop1 = Frames:FindFirstChild("Shop1")
+	local shop1Container = shop1 and shop1:FindFirstChild("Container")
+	local BOXES = typeof(cfg.BULLS) == "table" and typeof(cfg.BULLS.BOXES) == "table"
+		and cfg.BULLS.BOXES or nil
+	if shop1Container and BOXES then
+		local boxCardIndex = 0
+		local function dressBoxCard(card)
+			local box = card:IsA("Frame") and BOXES[card.Name]
+			if not box or card:FindFirstChild("Outcomes") then
+				return
+			end
+			local prizes = prizesForWeights(box.weights)
+			if #prizes == 0 then
+				return
+			end
+			-- the tier tag ("Basic"/"Super"/"Mega") sits exactly in the reel's
+			-- band and just repeats the card name — the reel replaces it
+			local info = card:FindFirstChild("Info")
+			local tag = info and info:FindFirstChild("Rarity")
+			if tag and tag:IsA("GuiObject") then
+				tag.Visible = false
+			end
+			-- the free band between the Info row (top) and the odds row
+			-- (bottom), right of the box-art IconFrame — stopping short of the
+			-- kit buy button, which owns the card's right side from y~0.55 up
+			local outcomes = Instance.new("Frame")
+			outcomes.Name = "Outcomes"
+			outcomes.BackgroundTransparency = 1
+			outcomes.ClipsDescendants = true
+			outcomes.AnchorPoint = Vector2.new(0, 0.5)
+			outcomes.Position = UDim2.fromScale(0.22, 0.485)
+			outcomes.Size = UDim2.fromScale(0.475, 0.42)
+			local strip = Instance.new("Frame")
+			strip.Name = "Strip"
+			strip.BackgroundTransparency = 1
+			strip.AnchorPoint = Vector2.new(0.5, 0.5)
+			strip.Position = UDim2.fromScale(0.5, 0.5)
+			strip.Size = UDim2.fromScale(1, 1)
+			strip.Parent = outcomes
+			local layout = Instance.new("UIListLayout")
+			layout.FillDirection = Enum.FillDirection.Horizontal
+			layout.VerticalAlignment = Enum.VerticalAlignment.Center
+			layout.SortOrder = Enum.SortOrder.LayoutOrder
+			layout.Padding = UDim.new(BOX_PAD, 0)
+			layout.Parent = strip
+			fillStrip(strip, prizes, BOX_ITEM_W, true) -- chips carry their odds
+			outcomes.Parent = card
+
+			local n = #prizes
+			if n * (BOX_ITEM_W + BOX_PAD) <= 1 then
+				-- tiny pool fits the band: a static centred reel, like the OP banner
+				layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+				return
+			end
+			layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+			for i = 1, n do -- clone the row once so the scroll loops seamlessly
+				local orig = strip:FindFirstChild(tostring(i))
+				if orig then
+					local clone = orig:Clone()
+					clone.Name = "m" .. i
+					clone.LayoutOrder = i + n
+					clone.Parent = strip
+				end
+			end
+			boxCardIndex += 1
+			table.insert(marquees, {
+				frame = strip,
+				period = n * (BOX_ITEM_W + BOX_PAD),
+				-- a touch slower than the Store reels: this strip is slightly
+				-- wider on screen, so the same pixel pace needs less scale-speed
+				speed = (boxCardIndex % 2 == 0) and -0.07 or 0.08,
+				gate = gateOf(shop1),
+			})
+		end
+		for _, c in ipairs(shop1Container:GetChildren()) do
+			dressBoxCard(c)
+		end
+		shop1Container.ChildAdded:Connect(function(c)
+			task.defer(dressBoxCard, c) -- let buildBoxShop finish painting the clone
+		end)
+	end
 
 	-- banner Timer: a real weekly limited-offer countdown (pure client urgency).
 	-- Fixed 7-day cycle anchored to a Monday, driven off the server clock so
@@ -1231,12 +1358,13 @@ task.spawn(function()
 end)
 
 ---------------------------------------------------------------- 5b) lucky blocks
--- Store "LuckyBlocks" cards (Secret / Alien / GOD): premium Robux wheel spins.
+-- Store "LuckyBlocks" cards (Secret / Alien / GOD): premium Robux BULL rolls.
 -- Each card's BuyButtons.1 prompts its Config.PRODUCTS lucky-block product; the
--- receipt rolls the tier's richer table server-side (SpinService.spinLuckyBlock)
--- and pushes a private wheel spin that section 10 auto-reveals. Card name +
--- price are painted from Config.LUCKY_BLOCKS so the shop can't drift from config
--- (id 0 / not-yet-published -> red "coming soon" card, same idiom as the wheel).
+-- receipt opens one roll of the tier's own rarity pool server-side
+-- (BullRollService.grantRolls) and the bull-carousel reveal (section 11)
+-- auto-opens off the "ROLLED" ack. Card name + price are painted from
+-- Config.LUCKY_BLOCKS so the shop can't drift from config (id 0 /
+-- not-yet-published -> red "coming soon" card, same idiom as the wheel).
 task.spawn(function()
 	local luckyBlocksFrame = storeContainer:FindFirstChild("LuckyBlocks")
 	if not luckyBlocksFrame then
@@ -1286,6 +1414,18 @@ task.spawn(function()
 			local priceLabel = info and info:FindFirstChild("Price")
 			if priceLabel and priceLabel:IsA("TextLabel") then
 				priceLabel.Text = tostring(tier.price)
+				-- then the live Robux price async, so the card can't drift from the real product
+				local productId = tonumber(cfg.PRODUCTS[tier.product]) or 0
+				if productId > 0 then
+					task.spawn(function()
+						local ok, prod = pcall(function()
+							return Marketplace:GetProductInfo(productId, Enum.InfoType.Product)
+						end)
+						if ok and prod and prod.PriceInRobux then
+							priceLabel.Text = tostring(prod.PriceInRobux)
+						end
+					end)
+				end
 			end
 			wireBuyButton(btn, tier.product)
 		end
@@ -1710,8 +1850,9 @@ end)
 -- the style colours the TEXT itself: "red"/"green" run a vertical light-to-
 -- dark gradient down the glyphs (danger / good news), "white" stays plain.
 -- Cards clone SideUI.Top.Notif and stack under the top HUD, newest first.
--- The stack also hosts ONE sticky card: the intermission countdown
--- ("NEXT: <mode> — 12s"), repainted from the per-second RoundState resends.
+-- The stack also hosts two sticky cards: the intermission countdown
+-- ("NEXT: <mode> — 12s"), repainted from the per-second RoundState resends,
+-- and the dead-spectator alive counter (section 6b).
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local notifTemplate = SideUI:WaitForChild("Top"):WaitForChild("Notif")
@@ -1752,7 +1893,7 @@ notifGui.Parent = gui.Parent
 local notifStack = Instance.new("Frame")
 notifStack.Name = "NotifStack"
 notifStack.AnchorPoint = Vector2.new(0.5, 0)
-notifStack.Position = UDim2.new(0.5, 0, 0.19, 0)
+notifStack.Position = UDim2.new(0.5, 0, 0.08, 0)
 notifStack.Size = UDim2.new(0.4, 0, 0.3, 0)
 notifStack.BackgroundTransparency = 1
 notifStack.Parent = notifGui
@@ -1821,7 +1962,57 @@ local function fadeOutCard(card, label)
 	end)
 end
 
+-- Big on-field kickoff countdown: replaces the old "<MODE> — GO!" broadcast.
+-- During the post-teleport `starting` phase the sticky card stays hidden and
+-- each remaining second lands as a huge center-screen digit instead (5..1),
+-- with SoundDirector playing the matching Ticker on every one. Lives in
+-- notifGui so no panel can cover it.
+local startCountLabel = Instance.new("TextLabel")
+startCountLabel.Name = "StartCountdown"
+startCountLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+startCountLabel.Position = UDim2.new(0.5, 0, 0.35, 0)
+startCountLabel.Size = UDim2.new(0.3, 0, 0.22, 0)
+startCountLabel.BackgroundTransparency = 1
+startCountLabel.Font = Enum.Font.GothamBlack
+startCountLabel.TextScaled = true
+startCountLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+startCountLabel.TextTransparency = 1
+startCountLabel.Parent = notifGui
+
+local startCountStroke = Instance.new("UIStroke")
+startCountStroke.Color = Color3.fromRGB(0, 0, 0)
+startCountStroke.Thickness = 4
+startCountStroke.Transparency = 1
+startCountStroke.Parent = startCountLabel
+
+local startCountScale = ensureScale(startCountLabel)
+local lastStartSecond = nil -- dedupes the per-second resends; nil = hidden
+
+local function showStartCount(seconds)
+	if lastStartSecond == seconds then
+		return
+	end
+	lastStartSecond = seconds
+	startCountLabel.Text = tostring(seconds)
+	startCountLabel.TextTransparency = 0
+	startCountStroke.Transparency = 0
+	startCountScale.Scale = 1.5 -- each digit slams in from oversized
+	tween(startCountScale, POP_IN, { Scale = 1 })
+end
+
+local function hideStartCount()
+	if lastStartSecond == nil then
+		return
+	end
+	lastStartSecond = nil
+	tween(startCountLabel, TweenInfo.new(0.25), { TextTransparency = 1 })
+	tween(startCountStroke, TweenInfo.new(0.25), { Transparency = 1 })
+end
+
 local intermissionCard = nil -- the sticky countdown card; exempt from eviction
+local aliveCard = nil -- sticky "N PLAYERS ALIVE" card for dead spectators; also exempt
+local waitingCard = nil -- sticky "Waiting for players..." card (WAITING state); also exempt
+local waitingLabel = nil
 
 function pushNotif(text, style, duration) -- assigns the forward-declared local
 	local card, label = buildNotifCard(text, style)
@@ -1834,10 +2025,11 @@ function pushNotif(text, style, duration) -- assigns the forward-declared local
 	card.Parent = notifStack
 
 	-- Evict the oldest card once the stack is full (highest LayoutOrder).
-	-- The intermission countdown card neither counts nor gets evicted.
+	-- The sticky cards (intermission countdown, alive counter) neither count
+	-- nor get evicted.
 	local cards = {}
 	for _, c in ipairs(notifStack:GetChildren()) do
-		if c:IsA("Frame") and c ~= intermissionCard then
+		if c:IsA("Frame") and c ~= intermissionCard and c ~= aliveCard and c ~= waitingCard then
 			table.insert(cards, c)
 		end
 	end
@@ -1870,8 +2062,78 @@ task.spawn(function()
 		warn("[Main] Notify remote missing; notification cards disabled")
 		return
 	end
-	notifyRemote.OnClientEvent:Connect(function(text, style, duration)
+
+	-- Rare-roll chat lines wear their rarity's shared text gradient
+	-- (Config.rarityGradient). Chat labels can't take a UIGradient, so the
+	-- gradient is sampled left -> right into rich-text <font color> runs.
+	local okChatCat, chatCatalog = pcall(require, bullrush:FindFirstChild("BullCatalog"))
+	local okChatCfg, chatCfg = pcall(require, bullrush:FindFirstChild("Config"))
+	local function rarityRichText(text, rarity)
+		local rr = okChatCat and chatCatalog and chatCatalog.Rarities and chatCatalog.Rarities[rarity]
+		if not (rr and rr.color and okChatCfg and chatCfg and chatCfg.rarityGradient) then
+			return text
+		end
+		local keypoints = chatCfg.rarityGradient(rr.color).Keypoints
+		local function sample(t)
+			for i = 1, #keypoints - 1 do
+				local a, b = keypoints[i], keypoints[i + 1]
+				if t <= b.Time then
+					local span = b.Time - a.Time
+					return a.Value:Lerp(b.Value, if span > 0 then (t - a.Time) / span else 0)
+				end
+			end
+			return keypoints[#keypoints].Value
+		end
+		-- utf8-safe split (font tags mid-codepoint would corrupt the char),
+		-- escaping the rich-text metacharacters in the raw message
+		local chars = {}
+		for _, code in utf8.codes(text) do
+			local ch = utf8.char(code)
+			if ch == "&" then
+				ch = "&amp;"
+			elseif ch == "<" then
+				ch = "&lt;"
+			elseif ch == ">" then
+				ch = "&gt;"
+			end
+			table.insert(chars, ch)
+		end
+		local n = #chars
+		-- fixed number of colour runs (not per character) keeps markup small
+		local per = math.ceil(n / math.min(n, 16))
+		local runs = {}
+		for i = 1, n, per do
+			local last = math.min(i + per - 1, n)
+			local col = sample(if n > 1 then ((i + last) / 2 - 1) / (n - 1) else 0)
+			table.insert(runs, ('<font color="#%02X%02X%02X">%s</font>'):format(
+				math.round(col.R * 255), math.round(col.G * 255), math.round(col.B * 255),
+				table.concat(chars, "", i, last)))
+		end
+		return table.concat(runs)
+	end
+
+	notifyRemote.OnClientEvent:Connect(function(text, style, duration, rarity)
 		if typeof(text) ~= "string" or text == "" then
+			return
+		end
+		-- "chat" style (roll announcements) prints a system line in the chat
+		-- window instead of stacking a card. RBXGeneral is the default channel
+		-- TextChatService creates; if chat is disabled/absent, drop silently
+		-- (server-wide flavour text, never gameplay-critical).
+		if style == "chat" then
+			local TextChatService = game:GetService("TextChatService")
+			local channels = TextChatService:FindFirstChild("TextChannels")
+			local general = channels and channels:FindFirstChild("RBXGeneral")
+			if general and general:IsA("TextChannel") then
+				local body = text:sub(1, 120)
+				if typeof(rarity) == "string" then
+					local ok, rich = pcall(rarityRichText, body, rarity)
+					if ok then
+						body = rich
+					end
+				end
+				general:DisplaySystemMessage("[System]: " .. body)
+			end
 			return
 		end
 		pushNotif(
@@ -1928,11 +2190,62 @@ task.spawn(function()
 	local stateRemote = remotes:FindFirstChild("RoundState")
 	if stateRemote and stateRemote:IsA("RemoteEvent") then
 		local intermissionLabel = nil
+		local waitingToken = 0 -- bumped by non-WAITING states to cancel a pending show
+		local waitingPending = false -- a delayed show is already scheduled
 		if currentArea then
 			currentArea.Visible = false -- hidden until the first state that carries a mode
 		end
 		stateRemote.OnClientEvent:Connect(function(state, info)
 			info = if typeof(info) == "table" then info else {}
+
+			-- WAITING card: sticky "Waiting for players" with cycling dots while
+			-- the server sits below MIN_PLAYERS (the server resends WAITING every
+			-- 0.5s for as long as that holds). WAITING also blips past ONCE at
+			-- the top of every round loop on a busy server (straight into
+			-- INTERMISSION), so the card only appears after the state has stuck
+			-- around for a second; any other state cancels the pending show.
+			if state == "WAITING" then
+				if not (waitingCard and waitingCard.Parent) and not waitingPending then
+					waitingPending = true
+					local token = waitingToken
+					task.delay(1, function()
+						waitingPending = false
+						if token ~= waitingToken or (waitingCard and waitingCard.Parent) then
+							return
+						end
+						local card, label = buildNotifCard("Waiting for players.", "white")
+						if not card then
+							return
+						end
+						card.Name = "WaitingForPlayers"
+						card.LayoutOrder = -1e9 -- pinned above every transient card
+						card.Parent = notifStack
+						waitingCard, waitingLabel = card, label
+						local scale = ensureScale(card)
+						scale.Scale = 0.6
+						tween(scale, POP_IN, { Scale = 1 })
+						-- One loop per card: it dies with the card, so repeated
+						-- WAITING resends can't stack a second animator.
+						task.spawn(function()
+							local dots = 1
+							while card.Parent do
+								label.Text = "Waiting for players" .. string.rep(".", dots)
+								dots = dots % 3 + 1
+								task.wait(0.5)
+							end
+						end)
+					end)
+				end
+			else
+				waitingToken += 1 -- cancels a pending show scheduled above
+				if waitingCard then
+					local card, label = waitingCard, waitingLabel
+					waitingCard, waitingLabel = nil, nil
+					if card.Parent then
+						fadeOutCard(card, label)
+					end
+				end
+			end
 
 			-- GAME TYPE banner: show the mode whenever one is known, hide otherwise (WAITING)
 			local modeName = if typeof(info.modeName) == "string" then info.modeName else nil
@@ -1942,9 +2255,17 @@ task.spawn(function()
 				currentArea.Visible = false
 			end
 
-			-- COUNTDOWN card: just the timer, one sticky card, only during intermission
+			-- COUNTDOWN card: just the timer, one sticky card, only during the
+			-- lobby intermission. The post-teleport `starting` phase (Main.server)
+			-- skips the card entirely and lands as the big center-screen digits.
 			local timeLeft = tonumber(info.timeLeft)
-			if state == "INTERMISSION" and timeLeft then
+			local starting = state == "INTERMISSION" and timeLeft ~= nil and info.starting == true
+			if starting then
+				showStartCount(math.max(1, math.floor(timeLeft + 0.5)))
+			else
+				hideStartCount()
+			end
+			if state == "INTERMISSION" and timeLeft and not starting then
 				local seconds = math.max(0, math.floor(timeLeft + 0.5))
 				local text = ("NEXT ROUND IN %ds"):format(seconds)
 				if intermissionCard and intermissionCard.Parent then
@@ -2005,14 +2326,23 @@ elimLayout.Parent = elimStack
 -- The feed is fixed-pixel (340-wide stack, 40px rows, 22px lettering), so on
 -- a phone viewport it eats a big slice of the right edge. One UIScale on the
 -- stack shrinks the whole feed toward the viewport (same 1280x720 baseline
--- and 0.65 floor as the vote panel); desktop keeps scale 1. Scaling happens
--- about the stack's (1, 0.5) AnchorPoint, so it stays pinned to the right
--- edge, and each row's own pop-in UIScale composes on top.
+-- and 0.65 floor as the vote panel); touch-only devices (phone/tablet, same
+-- test as the push button's TAP hint) take a further ELIM_TOUCH_SCALE cut,
+-- because even the floored size crowds the right edge next to touch controls.
+-- Desktop keeps scale 1. Scaling happens about the stack's (1, 0.5)
+-- AnchorPoint, so it stays pinned to the right edge, and each row's own
+-- pop-in UIScale composes on top.
+local UserInputService = game:GetService("UserInputService")
+local ELIM_TOUCH_SCALE = 0.49
 local elimStackScale = ensureScale(elimStack)
 local function elimFitScale(): number
 	local cam = workspace.CurrentCamera
 	local vp = if cam then cam.ViewportSize else Vector2.new(1280, 720)
-	return math.clamp(math.min(vp.X / 1280, vp.Y / 720), 0.65, 1)
+	local fit = math.clamp(math.min(vp.X / 1280, vp.Y / 720), 0.65, 1)
+	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+		fit *= ELIM_TOUCH_SCALE
+	end
+	return fit
 end
 local function refitElim()
 	elimStackScale.Scale = elimFitScale()
@@ -2156,6 +2486,84 @@ task.spawn(function()
 	end)
 end)
 
+---------------------------------------------------------------- 6b) alive counter
+-- Spectators keep score: while an ACTIVE round is on and YOU are outside it
+-- (eliminated, joined mid-round, sat out in the lobby), a sticky card in the
+-- notif stack shows how many players are still in ("5 PLAYERS ALIVE").
+-- Visibility rides RevengeViewBridge's "Eligible" attribute (BullrushClient
+-- maintains it as ACTIVE + round spectator — the same gate as the bull-cam
+-- button); the count rides Remotes.Eliminated (fires per elimination with the
+-- remaining count) topped up by RoundState ACTIVE resends (per-wave
+-- aliveCount, catches leavers between eliminations — and seeds a fresh
+-- joiner via the PlayerAdded resend in Main.server).
+task.spawn(function()
+	local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+	local remotes = bullrush and bullrush:FindFirstChild("Remotes")
+	local bridge = ReplicatedStorage:WaitForChild("RevengeViewBridge", 30)
+	if not (remotes and bridge and bridge:IsA("BindableEvent")) then
+		return -- Bullrush systems absent from this place copy; no counter
+	end
+
+	local lastAlive = nil -- freshest server-reported alive count, tracked always
+	local aliveLabel = nil
+
+	local function aliveText()
+		return if lastAlive == 1 then "1 PLAYER ALIVE" else lastAlive .. " PLAYERS ALIVE"
+	end
+
+	local function refresh()
+		local show = bridge:GetAttribute("Eligible") == true and lastAlive ~= nil
+		if show then
+			if aliveCard and aliveCard.Parent then
+				if aliveLabel then
+					aliveLabel.Text = aliveText()
+				end
+			else
+				local card, label = buildNotifCard(aliveText(), "red")
+				if card then
+					card.Name = "AliveCounter"
+					card.LayoutOrder = -1e9 + 1 -- sticky, pinned like the countdown card
+					card.Parent = notifStack
+					aliveCard, aliveLabel = card, label
+					local scale = ensureScale(card)
+					scale.Scale = 0.6
+					tween(scale, POP_IN, { Scale = 1 })
+				end
+			end
+		elseif aliveCard then
+			local card, label = aliveCard, aliveLabel
+			aliveCard, aliveLabel = nil, nil
+			if card.Parent then
+				fadeOutCard(card, label)
+			end
+		end
+	end
+
+	bridge:GetAttributeChangedSignal("Eligible"):Connect(refresh)
+
+	local elimRemote = remotes:FindFirstChild("Eliminated")
+	if elimRemote and elimRemote:IsA("RemoteEvent") then
+		elimRemote.OnClientEvent:Connect(function(_playerName, aliveCount)
+			if tonumber(aliveCount) then
+				lastAlive = tonumber(aliveCount)
+				refresh()
+			end
+		end)
+	end
+
+	local stateRemote = remotes:FindFirstChild("RoundState")
+	if stateRemote and stateRemote:IsA("RemoteEvent") then
+		stateRemote.OnClientEvent:Connect(function(state, info)
+			if state == "ACTIVE" and typeof(info) == "table" and tonumber(info.aliveCount) then
+				lastAlive = tonumber(info.aliveCount)
+			end
+			refresh()
+		end)
+	end
+
+	refresh()
+end)
+
 ---------------------------------------------------------------- 7) HUD counters
 -- Live readouts for the SideUI.Counters row: Cash shows leaderstats.Money
 -- (DataHandler mirrors the profile there) and Speed shows the character's
@@ -2176,6 +2584,124 @@ local cashLabel = counters and counters:FindFirstChild("Cash")
 cashLabel = cashLabel and cashLabel:FindFirstChild("Amount")
 if cashLabel then
 	cashLabel.Text = "$0"
+
+	-- Floating "+$X"/"-$X" delta that pops to the RIGHT of the Cash counter
+	-- whenever Money changes. The label is a clone of the counter's Amount so it
+	-- wears the exact money-green gradient/stroke; spends disable the gradient
+	-- and go red. Changes landing while a popup is still holding fold into it
+	-- (one label, summed amount) instead of stacking. It lives in its own
+	-- max-DisplayOrder ScreenGui so it draws over every other panel; it can't
+	-- sit inside the Cash frame anyway — the UIListLayout there would lay it out.
+	local DELTA_HOLD = 0.9 -- seconds the popup lingers (restarts on fold-in)
+	local DELTA_FADE = 0.45
+	local activeDelta -- popup still in its hold window; nil once fading starts
+
+	local deltaGui = Instance.new("ScreenGui")
+	deltaGui.Name = "CashDeltaGui"
+	deltaGui.ResetOnSpawn = false
+	deltaGui.DisplayOrder = 1000
+	deltaGui.Parent = gui.Parent
+
+	-- The Cash frame itself is kit-sized far wider than its content, so anchor
+	-- off the right edge of its widest visible child (Amount text / Buy button).
+	local function contentRightEdge(frame)
+		local right = frame.AbsolutePosition.X
+		for _, child in frame:GetChildren() do
+			if child:IsA("GuiObject") and child.Visible then
+				right = math.max(right, child.AbsolutePosition.X + child.AbsoluteSize.X)
+			end
+		end
+		return right
+	end
+
+	-- Gains get the library ka-ching (GameSFX.Cash), same clone-and-reap idiom
+	-- as playUiSound so overlapping pops never cut each other off.
+	local function playKaching()
+		-- GameSFX.Kaching = full register cha-ching (the old "Cash" clip is a very
+		-- quiet 0.7s stub; still used by SoundDirector, kept as the fallback here)
+		local template = sfxGroup and (sfxGroup:FindFirstChild("Kaching") or sfxGroup:FindFirstChild("Cash"))
+		if not (template and template:IsA("Sound")) then
+			return
+		end
+		local ok, s = pcall(function()
+			return template:Clone()
+		end)
+		if not ok or not s then
+			return
+		end
+		s.SoundGroup = sfxGroup
+		s.Volume = 3 -- new recording runs quiet; tune here once heard in game
+		s.Parent = SoundService
+		pcall(function()
+			s:Play()
+		end)
+		Debris:AddItem(s, 4)
+	end
+
+	local function popDelta(delta)
+		local popup = activeDelta
+		if popup and popup.label.Parent then
+			popup.amount += delta
+			popup.epoch += 1
+		else
+			local cashFrame = cashLabel.Parent
+			local label = cashLabel:Clone()
+			label.Name = "CashDelta"
+			label.AnchorPoint = Vector2.new(0, 1)
+			label.TextXAlignment = Enum.TextXAlignment.Left
+			label.TextScaled = true
+			label.ZIndex = 10
+			label.Parent = deltaGui
+			local origin = cashLabel.AbsolutePosition - deltaGui.AbsolutePosition
+			label.Position = UDim2.fromOffset(
+				contentRightEdge(cashFrame) - deltaGui.AbsolutePosition.X + 12,
+				origin.Y - 2
+			)
+			label.Size = UDim2.fromOffset(200, math.max(18, math.floor(cashLabel.AbsoluteSize.Y * 0.9 + 0.5)))
+			popup = { label = label, amount = delta, epoch = 1 }
+			activeDelta = popup
+			if delta > 0 then -- ka-ching once per popup, not per fold-in
+				playKaching()
+			end
+		end
+
+		local amount = popup.amount
+		if amount == 0 then -- a gain and a spend cancelled out mid-hold
+			popup.label:Destroy()
+			if activeDelta == popup then
+				activeDelta = nil
+			end
+			return
+		end
+		local label = popup.label
+		label.Text = (amount > 0 and "+$" or "-$") .. comma(math.abs(amount))
+		local gradient = label:FindFirstChildOfClass("UIGradient")
+		if gradient then
+			gradient.Enabled = amount > 0
+		end
+		label.TextColor3 = amount > 0 and cashLabel.TextColor3 or Color3.fromRGB(235, 80, 80)
+
+		local myEpoch = popup.epoch
+		task.delay(DELTA_HOLD, function()
+			if popup.epoch ~= myEpoch or not label.Parent then
+				return -- a newer change restarted the clock (or we're gone)
+			end
+			if activeDelta == popup then
+				activeDelta = nil -- changes from here on get a fresh popup
+			end
+			local info = TweenInfo.new(DELTA_FADE, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+			TweenService:Create(label, info, {
+				Position = label.Position - UDim2.fromOffset(0, 26),
+				TextTransparency = 1,
+			}):Play()
+			local stroke = label:FindFirstChildOfClass("UIStroke")
+			if stroke then
+				TweenService:Create(stroke, info, { Transparency = 1 }):Play()
+			end
+			Debris:AddItem(label, DELTA_FADE + 0.1)
+		end)
+	end
+
 	task.spawn(function()
 		local leaderstats = player:WaitForChild("leaderstats", 30)
 		local money = leaderstats and leaderstats:WaitForChild("Money", 10)
@@ -2183,10 +2709,18 @@ if cashLabel then
 			warn("[Main] leaderstats.Money missing; Cash counter left at $0")
 			return
 		end
+		local lastMoney = money.Value -- no popup for the initial load
 		local function refresh()
 			cashLabel.Text = "$" .. comma(money.Value)
 		end
-		money.Changed:Connect(refresh)
+		money.Changed:Connect(function(value)
+			local delta = value - lastMoney
+			lastMoney = value
+			refresh()
+			if delta ~= 0 then
+				popDelta(delta)
+			end
+		end)
 		refresh()
 	end)
 end
@@ -2754,13 +3288,16 @@ end
 
 ---------------------------------------------------------------- 9) revenge lane controls
 -- Visible only while BullrushClient's overhead bull-cam is up (the
--- RevengeViewBridge "Viewing" attribute): ◀ ▶ mirror the Left/Right arrow
--- keys and walk the lane ring, the label reads the current pick ("ROW 3 →"),
--- and SEND BULL fires the throw — or counts down the server cooldown
--- ("ReadyIn" attribute). BullrushClient owns selection state, the lane tile
--- highlight, and the RevengeThrow remote; this section is pure chrome, per
--- the all-UI-in-this-script rule. Commands ride the same bridge the
--- "Become a Bull" button uses: Fire("left" | "right" | "send").
+-- RevengeViewBridge "Viewing" attribute) AND the viewer may actually throw
+-- ("CanThrow": since 2026-07-13 every round spectator — eliminated players
+-- AND late/first joiners watching from the lobby — the server bars only
+-- players still alive on the grid): ◀ ▶ mirror the Left/Right arrow keys and walk the lane ring, the
+-- label reads the current pick ("ROW 3 →"), and SEND BULL fires the throw —
+-- or counts down the server cooldown ("ReadyIn" attribute). BullrushClient
+-- owns selection state, the lane tile highlight, and the RevengeThrow
+-- remote; this section is pure chrome, per the all-UI-in-this-script rule.
+-- Commands ride the same bridge the "Become a Bull" button uses:
+-- Fire("left" | "right" | "send").
 do
 	local panel = Instance.new("Frame")
 	panel.Name = "RevengeControls"
@@ -2773,7 +3310,8 @@ do
 
 	-- The buttons are CLONES of the kit's Button1 (the "Become a Bull"
 	-- ImageButton): same body image, bevel decor, stroke, and the On/Off
-	-- gradient pair (On = green, Off = grey), which doubles as the SEND BULL
+	-- gradient pair (On = green, Off = red — wireBullCamButton retints the
+	-- template's grey before this clones it), which doubles as the SEND BULL
 	-- ready/cooldown look — exactly how wireBullCamButton restyles the
 	-- original. Clones carry no connections; feel is re-wired through
 	-- addButtonFeedback like every other button.
@@ -2830,7 +3368,8 @@ do
 		end
 	end
 
-	-- On = green gradient, Off = grey — the kit's own state pair.
+	-- On = green gradient, Off = red (inherited from the retinted template) —
+	-- the kit's own state pair.
 	local function setButtonState(btn, on)
 		for _, d in ipairs(btn:GetDescendants()) do
 			if d:IsA("UIGradient") or d:IsA("UIStroke") then
@@ -2904,10 +3443,11 @@ do
 		end
 		local function refresh()
 			panel.Visible = bridge:GetAttribute("Viewing") == true
+				and bridge:GetAttribute("CanThrow") == true
 			selLabel.Text = tostring(bridge:GetAttribute("SelectionText") or "")
 			applySendState(tonumber(bridge:GetAttribute("ReadyIn")) or 0)
 		end
-		for _, attr in ipairs({ "Viewing", "SelectionText", "ReadyIn" }) do
+		for _, attr in ipairs({ "Viewing", "CanThrow", "SelectionText", "ReadyIn" }) do
 			bridge:GetAttributeChangedSignal(attr):Connect(refresh)
 		end
 		refresh()
@@ -3154,26 +3694,6 @@ do
 			end)
 		end
 
-		-- Store Lucky Block spin: the server pushes a SPUN carrying the tier's
-		-- OWN 6-slice table (data.rewards) + luckyTier. Repaint the wheel to that
-		-- table for this one reveal, make sure the Spinner window is up, spin, then
-		-- restore the free-wheel slice labels so a later free spin reads true.
-		local function openLuckyReveal(data)
-			if currentFrame ~= spinnerFrame then
-				openFrame(spinnerFrame)
-			end
-			if typeof(data.rewards) == "table" then
-				local freeRewards = spinnerRewards
-				spinnerRewards = data.rewards
-				paintDial(spinDial)
-				spinnerRewards = freeRewards -- keep the module ref on the free table
-			end
-			spinning = true
-			animateSpin(data, function()
-				paintDial(spinDial) -- restore the free-wheel labels
-			end)
-		end
-
 		spinButton.Activated:Connect(function()
 			if spinning or not spinRemote then
 				return
@@ -3255,11 +3775,7 @@ do
 			ackRemote.OnClientEvent:Connect(function(kind, data)
 				data = typeof(data) == "table" and data or {}
 				if kind == "SPUN" then
-					if data.luckyTier and typeof(data.rewards) == "table" then
-						openLuckyReveal(data) -- Store Lucky Block: auto-open + tier odds
-					else
-						animateSpin(data)
-					end
+					animateSpin(data)
 				elseif kind == "GRANTED" then
 					pushNotif(("+%d spins!"):format(tonumber(data.granted) or 0), "green", 4)
 				elseif kind == "DENIED" then
@@ -4088,11 +4604,22 @@ do
 		resultsPanel.Visible = true
 	end
 
+	-- Banked free openings for a box (the FreeBoxRolls JSON attribute — new
+	-- players join with one free BASIC). The server spends these before Money,
+	-- so wherever a price shows, a banked roll must read FREE instead.
+	local function freeRollsFor(boxId)
+		local ok, bank = pcall(function()
+			return game:GetService("HttpService"):JSONDecode(player:GetAttribute("FreeBoxRolls") or "{}")
+		end)
+		return (ok and typeof(bank) == "table" and tonumber(bank[boxId])) or 0
+	end
+
 	local function setRolling(state)
 		rolling = state
 		local box = (BOXES and lastBoxId) and BOXES[lastBoxId] or nil
 		rollLabel.Text = state and "ROLLING…"
-			or (box and ("ROLL AGAIN  $%s"):format(comma(box.cost)) or "ROLL AGAIN")
+			or (box and (freeRollsFor(lastBoxId) > 0 and "ROLL AGAIN  FREE"
+				or ("ROLL AGAIN  $%s"):format(comma(box.cost))) or "ROLL AGAIN")
 		-- dim the plate while a roll is in flight so it reads as busy
 		rollButton.ImageTransparency = state and 0.35 or 0
 	end
@@ -4126,14 +4653,28 @@ do
 		-- carousel would land a FILLER card (wrong name) under the pointer even
 		-- though the right bull was popped + granted. Wait until the list has
 		-- actually sized itself (frame-count safety cap) before measuring.
+		--
+		-- The measure must also wait out openFrame's POP_IN: a roll that arrives
+		-- through a window transition (the FIRST roll of a session — Shop1 buy ->
+		-- openFrame(rollFrame)) measures while the UIScale is still tweening
+		-- 0.7 -> 1, and marker/winner AbsolutePositions read in SHRUNK pixels.
+		-- The winner sits ~47 cards out, so even a 0.95 scale shorts the travel
+		-- by whole cards and the wheel eases to rest on a filler (the landing
+		-- looks nothing like the rolled bull). Back easing overshoots and crosses
+		-- 1.0 mid-flight, so require Scale == 1 on two CONSECUTIVE frames — only
+		-- the tween's completion write holds it there. ROLL AGAIN rolls (window
+		-- already open, scale parked at 1) pass immediately.
 		local EXPECTED_W = STRIP_LEN * STEP - PAD -- N cards + (N-1) gaps
-		local settleFrames = 0
+		local rollScale = ensureScale(rollFrame)
+		local settleFrames, scaleSettled = 0, 0
 		repeat
 			RunService.Heartbeat:Wait()
 			settleFrames += 1
+			scaleSettled = if rollScale.Scale == 1 then scaleSettled + 1 else 0
 		until (winnerCard and winnerCard.AbsoluteSize.X > 0
-				and strip.AbsoluteSize.X >= EXPECTED_W * 0.9)
-			or settleFrames >= 30
+				and strip.AbsoluteSize.X >= EXPECTED_W * 0.9
+				and scaleSettled >= 2)
+			or settleFrames >= 60
 
 		local vpCenter = carousel.AbsoluteSize.X / 2
 		-- Land the ACTUAL winner card on the ACTUAL marker using measured geometry
@@ -4512,7 +5053,14 @@ do
 				buyBtn.Active = true
 				local costLabel = buyBtn:FindFirstChild("Cost/Equip/Equipped/Locked")
 				if costLabel and costLabel:IsA("TextLabel") then
-					costLabel.Text = "$" .. comma(box.cost or 0)
+					-- a banked free roll (new-player gift) shows FREE until spent;
+					-- the attribute flips the moment the server consumes it
+					local function paintCost()
+						costLabel.Text = freeRollsFor(boxId) > 0 and "FREE"
+							or ("$" .. comma(box.cost or 0))
+					end
+					paintCost()
+					player:GetAttributeChangedSignal("FreeBoxRolls"):Connect(paintCost)
 				end
 				-- force the green "Buy" look (the template may ship Equipped/Locked)
 				for _, d in ipairs(buyBtn:GetChildren()) do
@@ -5090,15 +5638,14 @@ do
 			local REWARDS = Config.DAILY.REWARDS
 			local COOLDOWN = Config.DAILY.CLAIM_COOLDOWN
 
-			-- Card colours read as a left-to-right traffic-light progression (user
-			-- request 2026-07-10): GREEN = yours (claimed days a dim green, the
-			-- claimable day the bright green), AMBER = the single next-up day (the
-			-- one with the live unlock countdown), RED = every later locked day.
-			-- Each card owns its own gradients, so we recolour per-card.
+			-- Card colours (user request 2026-07-13, replaces the 07-10 traffic
+			-- light): GREEN = the claimable day, RED = the single next-up day
+			-- (the one with the live unlock countdown), GREY = everything else
+			-- (claimed days and later locked days). Each card owns its own
+			-- gradients, so we recolour per-card.
 			local CLAIM_GREEN = ColorSequence.new(Color3.fromRGB(126, 217, 87), Color3.fromRGB(46, 160, 67))
-			local CLAIMED_GREEN = ColorSequence.new(Color3.fromRGB(88, 158, 73), Color3.fromRGB(48, 106, 52))
-			local NEXT_AMBER = ColorSequence.new(Color3.fromRGB(255, 189, 74), Color3.fromRGB(211, 132, 27))
-			local LOCKED_RED = ColorSequence.new(Color3.fromRGB(255, 96, 84), Color3.fromRGB(196, 40, 40))
+			local TIMER_RED = ColorSequence.new(Color3.fromRGB(255, 96, 84), Color3.fromRGB(196, 40, 40))
+			local INACTIVE_GREY = ColorSequence.new(Color3.fromRGB(150, 150, 150), Color3.fromRGB(88, 88, 88))
 
 			-- "5h 12m" / "8m 3s" / "12s" — shared by the card countdowns + NextReward
 			local function formatDuration(seconds: number): string
@@ -5216,32 +5763,45 @@ do
 				if not button then
 					return
 				end
-				local claimGrad = button:FindFirstChild("Claim")           -- bright, "claimable" look
-				local dimGrad = button:FindFirstChild("Claimed/Locked")    -- grey/red, inactive look
+				-- The pill colour players actually SEE belongs to Decor.Stud — an
+				-- ImageLabel with an OPAQUE white background at a higher ZIndex
+				-- that covers the whole button and carries its OWN Claim +
+				-- Claimed/Locked gradient pair. The button's identical pair sits
+				-- underneath it and never shows, so recolour BOTH surfaces.
+				local surfaces = { button }
+				local decor = button:FindFirstChild("Decor")
+				local stud = decor and decor:FindFirstChild("Stud")
+				if stud then
+					table.insert(surfaces, stud)
+				end
 				local btnLabel = button:FindFirstChild("Claim/Claimed/Locked") -- the TextLabel child
 				local currentDay = tonumber(player:GetAttribute("DailyDay")) or 1
 				local ready = player:GetAttribute("DailyReady") == true
 				local state = stateOf(day)
 				local isClaim = state == "CLAIM"
 				-- the single next-up locked day: today while it's still on cooldown,
-				-- or tomorrow once a reward is ready — the only amber card and the
+				-- or tomorrow once a reward is ready — the only red card and the
 				-- only one previewing a countdown
 				local nextLockedDay = if ready then currentDay + 1 else currentDay
 
-				if claimGrad and claimGrad:IsA("UIGradient") then
-					claimGrad.Enabled = isClaim
-					if isClaim then
-						claimGrad.Color = CLAIM_GREEN
+				for _, surface in surfaces do
+					local claimGrad = surface:FindFirstChild("Claim")          -- bright, "claimable" look
+					local dimGrad = surface:FindFirstChild("Claimed/Locked")   -- red/grey, inactive look
+					if claimGrad and claimGrad:IsA("UIGradient") then
+						claimGrad.Enabled = isClaim
+						if isClaim then
+							claimGrad.Color = CLAIM_GREEN
+						end
 					end
-				end
-				if dimGrad and dimGrad:IsA("UIGradient") then
-					dimGrad.Enabled = not isClaim
-					if state == "CLAIMED" then
-						dimGrad.Color = CLAIMED_GREEN
-					elseif day == nextLockedDay then
-						dimGrad.Color = NEXT_AMBER
-					else
-						dimGrad.Color = LOCKED_RED
+					if dimGrad and dimGrad:IsA("UIGradient") then
+						dimGrad.Enabled = not isClaim
+						-- claimed days can never be the next-up day (they're behind
+						-- currentDay), so this cleanly leaves them grey too
+						if day == nextLockedDay then
+							dimGrad.Color = TIMER_RED
+						else
+							dimGrad.Color = INACTIVE_GREY
+						end
 					end
 				end
 				if btnLabel and btnLabel:IsA("TextLabel") then
@@ -5289,10 +5849,9 @@ do
 					return -- attributes not seeded yet; wait for the server
 				end
 				autoOpenChecked = true
-				-- Daily rewards temporarily disabled: never auto-open the window.
-				-- if ready == true and currentFrame == nil then
-				-- 	openFrame(dailyFrame)
-				-- end
+				if ready == true and currentFrame == nil then
+					openFrame(dailyFrame)
+				end
 			end
 
 			-- NextReward = the countdown; mirrors the wheel's timer (section 10),
@@ -5425,10 +5984,10 @@ end
 -- previous version cloned the Daily day-card, which dragged its Starburst/
 -- Highlight decor + gold Claim gradient along and flashed a full-screen
 -- yellow box on click.
--- Each card's picture is an ACTUAL render of the game field (user requirement
--- 2026-07-10: real field images, NOT stylised diagram art): a ViewportFrame
--- of the real arena parts at that mode's round-start state. The flat
--- drawMiniMap diagram survives only as the fallback until the arena resolves.
+-- Cards are TEXT-ONLY: the mode name is the hero, in the house gold-ramp
+-- headline (user request 2026-07-13 — replaced the ViewportFrame arena
+-- renders; the whole field-picture rig went with it, and the cards/panel
+-- shrank to fit the shorter content).
 -- Self-contained on its own overlay so it shows over whatever frame is open.
 -- The panel holds off until the player has respawned back in the lobby, then
 -- waits a short beat, so it never pops up over the arena / winner banner.
@@ -5448,33 +6007,6 @@ do
 		["Low Gravity"] = Color3.fromRGB(120, 220, 255),
 		["High Speed"] = Color3.fromRGB(255, 221, 51),
 	}
-	-- Per-mode recipe for the field picture. `kind` picks the overlay/dressing
-	-- (bulls on the field, team tint, corner glyph chip); `window` is only the
-	-- FALLBACK start size for the diagram — the real render reads startSize
-	-- live from Config.MODES by mode id, so it can't go stale.
-	local MODE_SNAPSHOT = {
-		["Classic"] = { window = 9, kind = "plain" },
-		["Mega Grid"] = { window = 11, kind = "mega" }, -- fills the whole board
-		["Small Grid"] = { window = 7, kind = "plain" }, -- tight island reads as "small"
-		["Stampede"] = { window = 9, kind = "bulls" }, -- real bulls on the field
-		["Team Rush"] = { window = 9, kind = "teams" }, -- red/blue half tint
-		["Low Gravity"] = { window = 9, kind = "gravity" }, -- corner ▲ chip
-		["High Speed"] = { window = 9, kind = "speed" }, -- corner » chip
-	}
-	local TEAM_RED = Color3.fromRGB(255, 80, 70)
-	local TEAM_BLUE = Color3.fromRGB(95, 175, 255)
-	local BOARD_GRID = 11 -- Config.GRID_SIZE (re-read live once Config resolves)
-	-- the real in-game tile palette (mirrors ShrinkService's reset)
-	local CHECKER_LIGHT = Color3.fromRGB(214, 182, 133)
-	local CHECKER_DARK = Color3.fromRGB(188, 152, 102)
-
-	-- live handles resolved off-thread below; until they land drawMiniMap's
-	-- diagram is the graceful fallback (upgraded in place once they resolve)
-	local GridUtil = nil -- ReplicatedStorage.Bullrush.GridUtil (canonical tile math)
-	local ConfigMod = nil -- ReplicatedStorage.Bullrush.Config (live startSize per mode)
-	local arenaSource = nil -- Workspace.BullrushArena (Tiles + LavaFloor)
-	local bullsFolder = nil -- ReplicatedStorage.BullrushAssets.Bulls (real bull models)
-
 	-- house gold ramp for the card's mode-name headline (same family as the
 	-- shop/daily headers: warm cream down to deep gold)
 	local GOLD_RAMP = ColorSequence.new({
@@ -5482,255 +6014,6 @@ do
 		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 205, 110)),
 		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 170, 60)),
 	})
-
-	-- start-window side length for a mode: live Config first, fallback table second
-	local function windowFor(id, name)
-		if ConfigMod and typeof(ConfigMod.MODES) == "table" then
-			for _, m in ipairs(ConfigMod.MODES) do
-				if m.id == id and typeof(m.startSize) == "number" then
-					return m.startSize
-				end
-			end
-		end
-		local desc = MODE_SNAPSHOT[name]
-		return (desc and desc.window) or 9
-	end
-
-	local function clearArt(panel)
-		for _, nm in ipairs({ "ArenaShot", "MiniMap", "Chip" }) do
-			local old = panel:FindFirstChild(nm)
-			if old then
-				old:Destroy()
-			end
-		end
-	end
-
-	-- FALLBACK ONLY (pre-arena-resolve): flat top-down diagram — a dark board
-	-- footprint with the mode's starting window lit in its colour.
-	local function drawMiniMap(panel, name, col)
-		clearArt(panel)
-		local desc = MODE_SNAPSHOT[name] or { window = 9, kind = "plain" }
-		local w = math.clamp(desc.window, 1, BOARD_GRID)
-
-		-- keep the diagram square + centred no matter the panel's shape
-		local map = Instance.new("Frame")
-		map.Name = "MiniMap"
-		map.AnchorPoint = Vector2.new(0.5, 0.5)
-		map.Position = UDim2.new(0.5, 0, 0.5, 0)
-		map.Size = UDim2.new(1, 0, 1, 0)
-		map.BackgroundTransparency = 1
-		local ar = Instance.new("UIAspectRatioConstraint")
-		ar.AspectRatio = 1
-		ar.Parent = map
-		map.Parent = panel
-
-		local board = Instance.new("Frame")
-		board.Name = "Board"
-		board.AnchorPoint = Vector2.new(0.5, 0.5)
-		board.Position = UDim2.new(0.5, 0, 0.5, 0)
-		board.Size = UDim2.new(0.92, 0, 0.92, 0)
-		board.BackgroundColor3 = Color3.fromRGB(24, 22, 28)
-		board.BorderSizePixel = 0
-		local bc = Instance.new("UICorner")
-		bc.CornerRadius = UDim.new(0, 4)
-		bc.Parent = board
-		board.Parent = map
-
-		local frac = w / BOARD_GRID
-		local win = Instance.new("Frame")
-		win.Name = "Window"
-		win.AnchorPoint = Vector2.new(0.5, 0.5)
-		win.Position = UDim2.new(0.5, 0, 0.5, 0)
-		win.Size = UDim2.new(frac, 0, frac, 0)
-		win.BackgroundTransparency = 1
-		win.Parent = board
-
-		local mid = (w + 1) / 2
-		for r = 1, w do
-			for c = 1, w do
-				local cell = Instance.new("Frame")
-				cell.BorderSizePixel = 0
-				-- -1px gap bleeds the dark board through as tile grid lines
-				cell.Size = UDim2.new(1 / w, -1, 1 / w, -1)
-				cell.Position = UDim2.new((c - 1) / w, 0, (r - 1) / w, 0)
-				local cellCol = col:Lerp(PAPER, 0.28)
-				if desc.kind == "teams" then
-					if c < mid then
-						cellCol = TEAM_RED:Lerp(PAPER, 0.18)
-					elseif c > mid then
-						cellCol = TEAM_BLUE:Lerp(PAPER, 0.18)
-					else
-						cellCol = Color3.fromRGB(40, 40, 46)
-					end
-				end
-				cell.BackgroundColor3 = cellCol
-				cell.Parent = win
-			end
-		end
-	end
-
-	-- THE REAL PICTURE: a ViewportFrame rendering clones of the actual arena
-	-- parts — the checkerboard tile island at the mode's start size, sitting
-	-- in the real lava moat — exactly how the field looks at that mode's round
-	-- start (tiles outside the start window are invisible in-game, so they are
-	-- not rendered). The camera frames the full 11x11 footprint at a constant
-	-- scale, so the island SIZE is what changes between modes: Small Grid is a
-	-- tight island in a sea of lava, Mega Grid fills the frame. Stampede
-	-- scatters real bull models mid-charge on the field; Team Rush tints the
-	-- two halves; Low Gravity / High Speed wear a small corner glyph chip.
-	local function drawArenaShot(panel, id, name, col)
-		if not (arenaSource and GridUtil) then
-			drawMiniMap(panel, name, col)
-			return
-		end
-		local tilesFolder = arenaSource:FindFirstChild("Tiles")
-		local sampleTile = tilesFolder and tilesFolder:FindFirstChildWhichIsA("BasePart")
-		if not sampleTile then
-			drawMiniMap(panel, name, col)
-			return
-		end
-		clearArt(panel)
-
-		local desc = MODE_SNAPSHOT[name] or { window = 9, kind = "plain" }
-		local w = math.clamp(windowFor(id, name), 1, BOARD_GRID)
-		local margin = (BOARD_GRID - w) / 2
-		local lo, hi = 1 + margin, BOARD_GRID - margin
-		local mid = (BOARD_GRID + 1) / 2
-
-		local vp = Instance.new("ViewportFrame")
-		vp.Name = "ArenaShot"
-		vp.Size = UDim2.fromScale(1, 1)
-		-- backdrop tone matches the lava so any sliver past the moat's edge
-		-- reads as more lava, never a black hole (user complaint 2026-07-10)
-		vp.BackgroundColor3 = Color3.fromRGB(110, 38, 14)
-		vp.BackgroundTransparency = 0
-		vp.Ambient = Color3.fromRGB(160, 155, 150)
-		vp.LightColor = Color3.fromRGB(255, 248, 235)
-		vp.LightDirection = Vector3.new(-0.35, -1, -0.5)
-		local vc = Instance.new("UICorner")
-		vc.CornerRadius = UDim.new(0, 8)
-		vc.Parent = vp
-
-		local world = Instance.new("Model")
-		world.Name = "Arena"
-
-		-- the real lava moat the island sits in (clone as-is)
-		local lavaPart = arenaSource:FindFirstChild("LavaFloor")
-		if lavaPart and lavaPart:IsA("BasePart") then
-			local lava = lavaPart:Clone()
-			lava:ClearAllChildren()
-			lava.Anchored = true
-			lava.CanCollide = false
-			lava.CastShadow = false
-			-- oversize the moat so its far edge never enters the frame — the
-			-- lava must run to every corner of the shot, no backdrop showing
-			lava.Size = Vector3.new(lava.Size.X * 4, lava.Size.Y, lava.Size.Z * 4)
-			lava.Parent = world
-		end
-
-		-- the island: only the start window's tiles, at canonical positions
-		-- with the real checkerboard palette (ShrinkService's reset look)
-		local sp = GridUtil.tileCenter(1, 2).X - GridUtil.tileCenter(1, 1).X
-		for r = lo, hi do
-			for c = lo, hi do
-				local tile = sampleTile:Clone()
-				tile:ClearAllChildren()
-				tile.Anchored = true
-				tile.CanCollide = false
-				tile.CastShadow = false
-				local top = GridUtil.tileCenter(r, c) -- canonical TOP-surface centre
-				tile.CFrame = CFrame.new(top.X, top.Y - tile.Size.Y / 2, top.Z)
-				local base = if (r + c) % 2 == 0 then CHECKER_LIGHT else CHECKER_DARK
-				if desc.kind == "teams" then
-					-- light half-tint so the red/blue split reads on real tiles
-					if c < mid then
-						base = base:Lerp(TEAM_RED, 0.3)
-					elseif c > mid then
-						base = base:Lerp(TEAM_BLUE, 0.3)
-					end
-				end
-				tile.Color = base
-				tile.Transparency = 0
-				tile.Parent = world
-			end
-		end
-
-		-- Stampede: real bull models mid-charge on the field (stripped of
-		-- scripts/sounds/vfx — ViewportFrame clones must stay inert)
-		if desc.kind == "bulls" and bullsFolder then
-			local picks = { "Bull_COMMON_RED", "Bull_COMMON_YELLOW", "Bull_COMMON_STEEL" }
-			local lanes = {
-				{ axis = "row", index = math.floor(lo + (hi - lo) * 0.25 + 0.5), direction = 1, t = 0.3 },
-				{ axis = "row", index = math.floor(lo + (hi - lo) * 0.8 + 0.5), direction = -1, t = 0.55 },
-				{ axis = "col", index = math.floor(mid + 0.5), direction = 1, t = 0.72 },
-			}
-			local bounds = GridUtil.boundsForStage(0, w)
-			for i, lane in ipairs(lanes) do
-				local src = bullsFolder:FindFirstChild(picks[i]) or bullsFolder:FindFirstChildWhichIsA("Model")
-				if src then
-					pcall(function()
-						local bull = src:Clone()
-						for _, d in ipairs(bull:GetDescendants()) do
-							if
-								d:IsA("BaseScript")
-								or d:IsA("ModuleScript")
-								or d:IsA("Sound")
-								or d:IsA("ParticleEmitter")
-								or d:IsA("Beam")
-								or d:IsA("Trail")
-							then
-								d:Destroy()
-							elseif d:IsA("BasePart") then
-								d.Anchored = true
-								d.CanCollide = false
-								d.CastShadow = false
-							end
-						end
-						local startPos, endPos = GridUtil.lanePath(lane, bounds)
-						bull:PivotTo(CFrame.lookAt(startPos:Lerp(endPos, lane.t), endPos))
-						bull.Parent = world
-					end)
-				end
-			end
-		end
-
-		-- camera frames the FULL physical grid (constant scale across modes)
-		-- angled down at the island so tile depth + the lava moat both read;
-		-- pose eyeballed against the real arena in the editor 2026-07-10, then
-		-- zoomed twice on user feedback: 1.15 distance at a steeper 1.15
-		-- elevation = the board dominates the frame (Mega may kiss the frame
-		-- corners; smaller windows sit comfortably) with lava to every edge
-		local target = GridUtil.tileCenter(mid, mid)
-		local gridSpan = BOARD_GRID * sp
-		local camera = Instance.new("Camera")
-		camera.FieldOfView = 55
-		camera.CFrame = CFrame.lookAt(target + Vector3.new(-0.36, 1.15, -0.66).Unit * gridSpan * 1.15, target)
-		camera.Parent = vp
-		vp.CurrentCamera = camera
-		world.Parent = vp
-		vp.Parent = panel
-
-		-- trait chip for the modes whose difference isn't visible on the field
-		if desc.kind == "gravity" or desc.kind == "speed" then
-			local chip = Instance.new("TextLabel")
-			chip.Name = "Chip"
-			chip.AnchorPoint = Vector2.new(1, 0)
-			chip.Position = UDim2.new(1, -4, 0, 4)
-			chip.Size = UDim2.new(0, 22, 0, 22)
-			chip.BackgroundColor3 = INK
-			chip.BackgroundTransparency = 0.25
-			chip.BorderSizePixel = 0
-			chip.Font = Enum.Font.GothamBlack
-			chip.Text = if desc.kind == "gravity" then "▲" else "»"
-			chip.TextColor3 = col
-			chip.TextSize = 15
-			chip.ZIndex = 3
-			local chipCorner = Instance.new("UICorner")
-			chipCorner.CornerRadius = UDim.new(1, 0)
-			chipCorner.Parent = chip
-			chip.Parent = panel
-		end
-	end
 
 	local voteRemote = nil -- Remotes.VoteMode, resolved off-thread below
 
@@ -5748,13 +6031,15 @@ do
 	local panel = Instance.new("Frame")
 	panel.Name = "Panel"
 	panel.AnchorPoint = Vector2.new(0.5, 1)
-	panel.Position = UDim2.new(0.5, 0, 1, -18)
-	panel.Size = UDim2.new(0, 510, 0, 236)
+	-- bottom edge 48px up: floats clear of the XP bar instead of sitting flush
+	-- on it (raised from -18 on user request 2026-07-13)
+	panel.Position = UDim2.new(0.5, 0, 1, -48)
+	panel.Size = UDim2.new(0, 510, 0, 164)
 	panel.BackgroundTransparency = 1
 	panel.Parent = voteGui
 	ensureScale(panel)
 
-	-- The panel is fixed-pixel (510x236), so on a phone viewport it swallows
+	-- The panel is fixed-pixel (510x164), so on a phone viewport it swallows
 	-- most of the screen. Shrink the whole panel toward the viewport (min of the
 	-- width/height ratios vs a 1280x720 baseline, floored so the buttons stay
 	-- tappable); desktop keeps scale 1.
@@ -5768,7 +6053,7 @@ do
 	header.Name = "Header"
 	header.AnchorPoint = Vector2.new(0.5, 0)
 	header.Position = UDim2.new(0.5, 0, 0, 0)
-	header.Size = UDim2.new(1, 0, 0.127, 0) -- 30/236 of the panel height (scale)
+	header.Size = UDim2.new(1, 0, 0.183, 0) -- 30/164 of the panel height (scale)
 	header.BackgroundTransparency = 1
 	header.Font = Enum.Font.GothamBlack
 	header.TextColor3 = PAPER
@@ -5824,11 +6109,11 @@ do
 	end
 	closeBtn.Name = "Close"
 	closeBtn.AnchorPoint = Vector2.new(1, 0)
-	-- Scale-relative to the panel: 6/510 nudge right, -6/236 nudge up; size is
-	-- 34/510 x 34/236 of the panel. The panel is a fixed 510x236 that only ever
+	-- Scale-relative to the panel: 6/510 nudge right, -6/164 nudge up; size is
+	-- 34/510 x 34/164 of the panel. The panel is a fixed 510x164 that only ever
 	-- scales uniformly, so dual-axis scale stays square with no aspect constraint.
-	closeBtn.Position = UDim2.new(1.0118, 0, -0.0254, 0)
-	closeBtn.Size = UDim2.new(0.0667, 0, 0.144, 0)
+	closeBtn.Position = UDim2.new(1.0118, 0, -0.0366, 0)
+	closeBtn.Size = UDim2.new(0.0667, 0, 0.2073, 0)
 	closeBtn.Parent = panel
 	addButtonFeedback(closeBtn)
 
@@ -5836,7 +6121,7 @@ do
 	row.Name = "Row"
 	row.AnchorPoint = Vector2.new(0.5, 1)
 	row.Position = UDim2.new(0.5, 0, 1, 0)
-	row.Size = UDim2.new(1, 0, 0, 198)
+	row.Size = UDim2.new(1, 0, 0, 126)
 	row.BackgroundTransparency = 1
 	row.Parent = panel
 
@@ -5848,8 +6133,7 @@ do
 	rowLayout.Padding = UDim.new(0, 14)
 	rowLayout.Parent = row
 
-	-- id -> { card, stroke, count, btnLabel, panel/modeId/modeName/modeCol
-	-- (for the late-resolve re-render) } for the cards currently on the row
+	-- id -> { card, stroke, count, btnLabel } for the cards currently on the row
 	local cards = {}
 	local currentKey = nil -- concat of the ballot's ids; rebuild when it changes
 	local myVote = nil
@@ -5898,7 +6182,7 @@ do
 			local card = Instance.new("Frame")
 			card.Name = "Vote_" .. tostring(opt.id)
 			card.LayoutOrder = i
-			card.Size = UDim2.new(0, 150, 0, 190)
+			card.Size = UDim2.new(0, 150, 0, 118)
 			card.BackgroundColor3 = PAPER
 			card.BorderSizePixel = 0
 			local cardCorner = Instance.new("UICorner")
@@ -5935,39 +6219,21 @@ do
 
 			card.Parent = row
 
-			-- field-picture panel: dark inset window holding the arena render
-			local mini = Instance.new("Frame")
-			mini.Name = "MiniPanel"
-			mini.AnchorPoint = Vector2.new(0.5, 0)
-			mini.Position = UDim2.new(0.5, 0, 0, 10)
-			mini.Size = UDim2.new(1, -20, 0, 86)
-			mini.BackgroundColor3 = Color3.fromRGB(16, 14, 20)
-			mini.BorderSizePixel = 0
-			mini.ClipsDescendants = true
-			local miniCorner = Instance.new("UICorner")
-			miniCorner.CornerRadius = UDim.new(0, 8)
-			miniCorner.Parent = mini
-			local miniStroke = Instance.new("UIStroke")
-			miniStroke.Color = col
-			miniStroke.Thickness = 1.5
-			miniStroke.Transparency = 0.35
-			miniStroke.Parent = mini
-			mini.Parent = card
-			drawArenaShot(mini, opt.id, name, col)
-
-			-- mode name in the house gold-ramp headline style
+			-- the mode name IS the card art now: a big gold-ramp headline filling
+			-- the top half (two-word names wrap to two stacked lines via
+			-- TextScaled — that's the intended look, not a squeeze)
 			local nameLabel = Instance.new("TextLabel")
 			nameLabel.Name = "Name"
 			nameLabel.AnchorPoint = Vector2.new(0.5, 0)
-			nameLabel.Position = UDim2.new(0.5, 0, 0, 102)
-			nameLabel.Size = UDim2.new(1, -12, 0, 22)
+			nameLabel.Position = UDim2.new(0.5, 0, 0, 8)
+			nameLabel.Size = UDim2.new(1, -16, 0, 44)
 			nameLabel.BackgroundTransparency = 1
 			nameLabel.Font = Enum.Font.GothamBlack
 			nameLabel.Text = name
 			nameLabel.TextColor3 = PAPER
 			nameLabel.TextScaled = true
 			local nameFit = Instance.new("UITextSizeConstraint")
-			nameFit.MaxTextSize = 18
+			nameFit.MaxTextSize = 20
 			nameFit.Parent = nameLabel
 			local nameGrad = Instance.new("UIGradient")
 			nameGrad.Rotation = 90
@@ -5975,7 +6241,7 @@ do
 			nameGrad.Parent = nameLabel
 			local nameStroke = Instance.new("UIStroke")
 			nameStroke.Color = INK
-			nameStroke.Thickness = 1.6
+			nameStroke.Thickness = 2
 			nameStroke.Parent = nameLabel
 			nameLabel.Parent = card
 
@@ -5983,7 +6249,7 @@ do
 			local countLabel = Instance.new("TextLabel")
 			countLabel.Name = "Count"
 			countLabel.AnchorPoint = Vector2.new(0.5, 0)
-			countLabel.Position = UDim2.new(0.5, 0, 0, 126)
+			countLabel.Position = UDim2.new(0.5, 0, 0, 54)
 			countLabel.Size = UDim2.new(1, -12, 0, 16)
 			countLabel.BackgroundTransparency = 1
 			countLabel.Font = Enum.Font.GothamBold
@@ -6080,10 +6346,6 @@ do
 				strokeTransp = 0,
 				count = countLabel,
 				btnLabel = btnLabel,
-				panel = mini,
-				modeId = opt.id,
-				modeName = name,
-				modeCol = col,
 			}
 		end
 	end
@@ -6174,43 +6436,6 @@ do
 			end
 		end)
 	end
-
-	-- Resolve the live handles for the real field render off the main thread;
-	-- the UI must never stall if Bullrush / the arena is absent from a place
-	-- copy. Any cards built before this lands get upgraded in place.
-	task.spawn(function()
-		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
-		if bullrush then
-			local gu = bullrush:FindFirstChild("GridUtil")
-			if gu then
-				local ok, mod = pcall(require, gu)
-				if ok then
-					GridUtil = mod
-				end
-			end
-			local cf = bullrush:FindFirstChild("Config")
-			if cf then
-				local ok, mod = pcall(require, cf)
-				if ok then
-					ConfigMod = mod
-					if typeof(mod.GRID_SIZE) == "number" then
-						BOARD_GRID = mod.GRID_SIZE
-					end
-				end
-			end
-		end
-		local assets = ReplicatedStorage:FindFirstChild("BullrushAssets")
-		bullsFolder = assets and assets:FindFirstChild("Bulls")
-		local arena = workspace:WaitForChild("BullrushArena", 30)
-		if arena and arena:WaitForChild("Tiles", 10) then
-			arenaSource = arena
-		end
-		for _, c in cards do
-			if c.panel and c.panel.Parent then
-				drawArenaShot(c.panel, c.modeId, c.modeName, c.modeCol)
-			end
-		end
-	end)
 
 	-- Hook the remotes off the main thread; UI must never stall if Bullrush is
 	-- missing from a place copy.
@@ -6511,6 +6736,819 @@ do
 			elseif current then
 				whenL.Text = whenText(current) -- refresh the live countdown
 			end
+		end
+	end)
+end
+
+---------------------------------------------------------- 16) practice timer
+-- Survival stopwatch for the practice grid: while YOUR InPractice attribute
+-- is on (PracticeArena maintains it), a top-center pill — parked in the free
+-- band above the CurrentArea banner (which starts at ~13.5% screen height) —
+-- runs big live seconds over a BEST line fed by the PracticeBest attribute
+-- (the saved PracticeRecord). The clock freezes the instant you die (the
+-- server freezes its authoritative copy at the same moment) and the final
+-- time rides the ragdoll out until InPractice clears; outlast your best and
+-- the BEST line flips to a gold NEW BEST! live, with the server's green card
+-- confirming the save. Own non-resetting ScreenGui (same dance as PushGui)
+-- since Main resets on spawn.
+do
+	local GLASS = Color3.fromRGB(26, 22, 32)
+	local INK = Color3.fromRGB(15, 15, 15)
+	local GOLD = Color3.fromRGB(255, 205, 110)
+	local DIM = Color3.fromRGB(205, 200, 215)
+
+	local oldGui = gui.Parent:FindFirstChild("PracticeTimerGui")
+	if oldGui then
+		oldGui:Destroy()
+	end
+	local timerGui = Instance.new("ScreenGui")
+	timerGui.Name = "PracticeTimerGui"
+	timerGui.ResetOnSpawn = false
+	-- priority HUD: above everything including notif cards (10000) and cash
+	-- deltas (1000) so the stopwatch always reads at the top; only the
+	-- full-screen push flash (20000) still draws over it
+	timerGui.DisplayOrder = 15000
+	timerGui.Parent = gui.Parent
+
+	local panel = Instance.new("Frame")
+	panel.Name = "Panel"
+	panel.AnchorPoint = Vector2.new(0.5, 0)
+	panel.Position = UDim2.fromScale(0.5, 0.02)
+	panel.Size = UDim2.fromScale(1, 0.095) -- width comes from the aspect constraint
+	panel.BackgroundColor3 = GLASS
+	panel.BackgroundTransparency = 0.12
+	panel.BorderSizePixel = 0
+	panel.Visible = false
+	panel.Parent = timerGui
+
+	local aspect = Instance.new("UIAspectRatioConstraint")
+	aspect.AspectRatio = 2.6
+	aspect.DominantAxis = Enum.DominantAxis.Height
+	aspect.Parent = panel
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.16, 0)
+	corner.Parent = panel
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = INK
+	stroke.Thickness = 2.5
+	stroke.Parent = panel
+
+	local function makeLabel(name, y, h, color)
+		local l = Instance.new("TextLabel")
+		l.Name = name
+		l.BackgroundTransparency = 1
+		l.AnchorPoint = Vector2.new(0.5, 0)
+		l.Position = UDim2.fromScale(0.5, y)
+		l.Size = UDim2.fromScale(0.9, h)
+		l.Font = Enum.Font.GothamBlack
+		l.TextScaled = true
+		l.TextColor3 = color
+		local s = Instance.new("UIStroke")
+		s.Color = INK
+		s.Thickness = 2
+		s.Parent = l
+		l.Parent = panel
+		return l
+	end
+	local timeLabel = makeLabel("Time", 0.08, 0.54, Color3.fromRGB(255, 255, 255))
+	local bestLabel = makeLabel("Best", 0.66, 0.25, DIM)
+
+	local runningSince = nil -- os.clock() at stint start; nil = frozen/hidden
+
+	local function fmtSecs(t)
+		return string.format("%.1fs", t)
+	end
+
+	local function bestValue()
+		return tonumber(player:GetAttribute("PracticeBest")) or 0
+	end
+
+	local function refreshBest()
+		bestLabel.TextColor3 = DIM
+		bestLabel.Text = "BEST " .. fmtSecs(bestValue())
+	end
+
+	RunService.Heartbeat:Connect(function()
+		if not runningSince then
+			return
+		end
+		local elapsed = os.clock() - runningSince
+		timeLabel.Text = fmtSecs(elapsed)
+		local best = bestValue()
+		if best > 0 and elapsed > best then
+			bestLabel.TextColor3 = GOLD
+			bestLabel.Text = "NEW BEST!"
+		end
+	end)
+
+	local function show()
+		runningSince = os.clock()
+		timeLabel.Text = "0.0s"
+		refreshBest()
+		panel.Visible = true
+		local s = ensureScale(panel)
+		s.Scale = 0.6
+		tween(s, POP_IN, { Scale = 1 })
+	end
+
+	local function hide()
+		runningSince = nil
+		panel.Visible = false
+	end
+
+	-- freeze at the moment of death; the panel (and a NEW BEST! flip) stays
+	-- readable through the fling and drops when InPractice clears
+	local function watchHumanoid(ch)
+		local hum = ch:WaitForChild("Humanoid", 10)
+		if hum then
+			hum.Died:Connect(function()
+				runningSince = nil
+			end)
+		end
+	end
+	player.CharacterAdded:Connect(watchHumanoid)
+	if player.Character then
+		task.spawn(watchHumanoid, player.Character)
+	end
+
+	player:GetAttributeChangedSignal("InPractice"):Connect(function()
+		if player:GetAttribute("InPractice") == true then
+			show()
+		else
+			hide()
+		end
+	end)
+	-- the server rewrites PracticeBest on entry (just before InPractice flips)
+	-- and when a record commits at stint end. Only re-render mid-run — while
+	-- the frozen post-death panel is up, the gold NEW BEST! should stand.
+	player:GetAttributeChangedSignal("PracticeBest"):Connect(function()
+		if runningSince then
+			refreshBest()
+		end
+	end)
+	if player:GetAttribute("InPractice") == true then
+		show() -- gui (re)built while already on the grid
+	end
+end
+
+---------------------------------------------------------------- 17) level bar
+-- Bottom-center XP bar, always on: a green "LVL N" pill plus a fill that shows
+-- progress into the current level. Wears the HUD money look (the Cash
+-- counter's lime -> pure-green ramp + deep-green stroke) so "XP" visibly IS
+-- money earned. Renders straight off the replicated Level/XP attributes
+-- (Data.server seeds them on join; LevelService rewrites them as gameplay
+-- money lands) with Config.LEVELS.XP_TO_NEXT as the denominator, so the bar
+-- can never disagree with the server's curve. Level-up reward cards come from
+-- the server (LevelService -> Notify); here a level change pops the pill,
+-- flashes the bar white, and blips the UI click pitched up. Hugs the screen's
+-- bottom edge, below the vote panel's (section 14) footprint; at MAX_LEVEL the
+-- fill locks full and the text reads MAX.
+do
+	local INK = Color3.fromRGB(15, 15, 15)
+	local GLASS = Color3.fromRGB(26, 22, 32)
+	-- the Cash counter's money ramp (Counters.Cash.Amount gradient + stroke)
+	local MONEY_LIME = Color3.fromRGB(212, 251, 121)
+	local MONEY_GREEN = Color3.fromRGB(0, 249, 0)
+	local MONEY_DEEP = Color3.fromRGB(16, 60, 23)
+	local BAR_SCALE_W = 0.2 -- of screen width (~380px at 1920); height follows the aspect ratio
+
+	local levelsCfg = nil -- Config.LEVELS, resolved off-thread below
+
+	-- Own overlay so the bar survives whatever frame is open and never joins a
+	-- kit layout; modest DisplayOrder keeps notif cards / cash deltas above it.
+	local xpGui = Instance.new("ScreenGui")
+	xpGui.Name = "XPBarGui"
+	xpGui.ResetOnSpawn = false
+	xpGui.DisplayOrder = 2
+	xpGui.Enabled = false -- dark until Config.LEVELS resolves
+	xpGui.Parent = gui.Parent
+
+	local holder = Instance.new("Frame")
+	holder.Name = "XPBar"
+	holder.AnchorPoint = Vector2.new(0.5, 1)
+	holder.Position = UDim2.fromScale(0.5, 0.99)
+	holder.Size = UDim2.fromScale(BAR_SCALE_W, 0.02)
+	holder.BackgroundColor3 = GLASS
+	holder.BackgroundTransparency = 0.15
+	holder.Parent = xpGui
+	local holderRatio = Instance.new("UIAspectRatioConstraint")
+	holderRatio.AspectRatio = 23.75 -- the old 380x16 shape, width-dominant
+	holderRatio.Parent = holder
+	local holderCorner = Instance.new("UICorner")
+	holderCorner.CornerRadius = UDim.new(0.5, 0)
+	holderCorner.Parent = holder
+	local holderStroke = Instance.new("UIStroke")
+	holderStroke.Color = INK
+	holderStroke.Thickness = 2
+	holderStroke.Parent = holder
+
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.AnchorPoint = Vector2.new(0, 0.5)
+	fill.Position = UDim2.fromScale(0.005, 0.5)
+	fill.Size = UDim2.fromScale(0, 0.75)
+	fill.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- gradient below paints it
+	fill.BorderSizePixel = 0
+	fill.Parent = holder
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(0.5, 0)
+	fillCorner.Parent = fill
+	local fillGradient = Instance.new("UIGradient")
+	fillGradient.Rotation = 90
+	fillGradient.Color = ColorSequence.new(MONEY_LIME, MONEY_GREEN)
+	fillGradient.Parent = fill
+
+	-- Candy gloss: a soft white strip along the fill's top edge (scales with it).
+	local gloss = Instance.new("Frame")
+	gloss.Name = "Gloss"
+	gloss.AnchorPoint = Vector2.new(0.5, 0)
+	gloss.Position = UDim2.fromScale(0.5, 0.12)
+	gloss.Size = UDim2.fromScale(0.94, 0.33)
+	gloss.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	gloss.BackgroundTransparency = 0.65
+	gloss.BorderSizePixel = 0
+	gloss.ZIndex = 2
+	gloss.Parent = fill
+	local glossCorner = Instance.new("UICorner")
+	glossCorner.CornerRadius = UDim.new(0.5, 0)
+	glossCorner.Parent = gloss
+
+	local progressLabel = Instance.new("TextLabel")
+	progressLabel.Name = "Progress"
+	progressLabel.BackgroundTransparency = 1
+	progressLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	progressLabel.Position = UDim2.fromScale(0.5, 0.5)
+	progressLabel.Size = UDim2.fromScale(1, 0.7) -- the old 11px-on-16px text height
+	progressLabel.Font = Enum.Font.GothamBlack
+	progressLabel.TextScaled = true
+	progressLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	progressLabel.TextStrokeColor3 = MONEY_DEEP
+	progressLabel.TextStrokeTransparency = 0.1
+	progressLabel.Text = ""
+	progressLabel.ZIndex = 3
+	progressLabel.Parent = holder
+
+	-- Level pill hanging off the bar's left end, centered on the bar line:
+	-- money-green body, deep-green border, white text.
+	local pill = Instance.new("TextLabel")
+	pill.Name = "LevelPill"
+	pill.AnchorPoint = Vector2.new(1, 0.5)
+	pill.Position = UDim2.fromScale(-0.02, 0.5)
+	pill.Size = UDim2.fromScale(0.17, 1.4)
+	pill.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- gradient below paints it
+	pill.Font = Enum.Font.GothamBlack
+	pill.TextScaled = true
+	pill.TextColor3 = Color3.fromRGB(255, 255, 255)
+	pill.TextStrokeColor3 = MONEY_DEEP
+	pill.TextStrokeTransparency = 0.05
+	pill.Text = "LVL 1"
+	pill.ZIndex = 3
+	pill.Parent = holder
+	local pillCorner = Instance.new("UICorner")
+	pillCorner.CornerRadius = UDim.new(0.5, 0)
+	pillCorner.Parent = pill
+	local pillGradient = Instance.new("UIGradient")
+	pillGradient.Rotation = 90
+	pillGradient.Color = ColorSequence.new(MONEY_LIME, MONEY_GREEN)
+	pillGradient.Parent = pill
+	local pillStroke = Instance.new("UIStroke")
+	pillStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	pillStroke.Color = MONEY_DEEP
+	pillStroke.Thickness = 2
+	pillStroke.Parent = pill
+
+	-- Level-up flash: a white sheet over the whole bar, faded out by repaint.
+	local flash = Instance.new("Frame")
+	flash.Name = "Flash"
+	flash.Size = UDim2.fromScale(1, 1)
+	flash.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	flash.BackgroundTransparency = 1
+	flash.BorderSizePixel = 0
+	flash.ZIndex = 5
+	flash.Parent = holder
+	local flashCorner = Instance.new("UICorner")
+	flashCorner.CornerRadius = UDim.new(0.5, 0)
+	flashCorner.Parent = flash
+
+	local lastLevel = nil
+	local function repaint()
+		if not levelsCfg then
+			return
+		end
+		local level = tonumber(player:GetAttribute("Level")) or 1
+		local xp = tonumber(player:GetAttribute("XP")) or 0
+		local toNext = levelsCfg.XP_TO_NEXT[level]
+		pill.Text = ("LVL %d"):format(level)
+		local frac
+		if level >= (levelsCfg.MAX_LEVEL or 10) or not toNext then
+			progressLabel.Text = "MAX!"
+			frac = 1
+		else
+			progressLabel.Text = ("%s / %s XP"):format(comma(xp), comma(toNext))
+			frac = math.clamp(xp / toNext, 0, 1)
+		end
+		tween(fill, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Size = UDim2.fromScale(0.99 * frac, 0.75) })
+		if lastLevel and level > lastLevel then
+			local scale = ensureScale(pill)
+			scale.Scale = 1.7
+			tween(scale, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
+			flash.BackgroundTransparency = 0.35
+			tween(flash, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ BackgroundTransparency = 1 })
+			playUiSound(1.2, 1.3) -- the UI click pitched up = a light "ding"
+		end
+		lastLevel = level
+	end
+
+	player:GetAttributeChangedSignal("Level"):Connect(repaint)
+	player:GetAttributeChangedSignal("XP"):Connect(repaint)
+
+	task.spawn(function()
+		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 60)
+		local okCfg, cfg = pcall(require, bullrush and bullrush:WaitForChild("Config", 30))
+		if okCfg and typeof(cfg) == "table" and typeof(cfg.LEVELS) == "table"
+			and typeof(cfg.LEVELS.XP_TO_NEXT) == "table" then
+			levelsCfg = cfg.LEVELS
+			repaint()
+			xpGui.Enabled = true
+		end
+	end)
+end
+
+---------------------------------------------------------------- 18) tutorial
+-- First-session guided tour: purely REACTIVE chrome for the server-owned
+-- TutorialStep attribute (Bullrush/TutorialService — 0/4 = nothing, 1 = send
+-- a bull, 2 = open the free box, 3 = equip the roll). The server advances
+-- the step at each action's real source (RevengeService throw,
+-- BullRollService roll + equip), so this section never fires anything — it
+-- just keeps ONE pulsing gold stroke + ONE ~5-word hint parked on the next
+-- thing to press:
+--   1: the Become-a-Bull button, then the SEND BULL panel once viewing
+--   2: a billboard on the lobby shop stall (Shop1 has no HUD button — the
+--      stall's ShopPrompt is its only door), then the BASIC box's buy
+--      button once the window is open
+--   3: the Index HUD button, then the right rarity tab, then the new card
+-- Hard-hides whenever the player is ALIVE in a round (InRound — the tutorial
+-- never blocks play), while the roll carousel is up (never talk over a
+-- reveal), and while an unrelated window is open. Copy stays kid-simple:
+-- one clause, ~5 words, no popups, no skip (steps done independently
+-- auto-complete server-side).
+do
+	local HttpService = game:GetService("HttpService")
+
+	local GOLD = Color3.fromRGB(255, 210, 60)
+
+	-- §12's rarity tab pairing, needed to point at the right Index tab
+	local RARITY_TAB = {
+		COMMON = "Normal", UNCOMMON = "Gold", RARE = "Diamond",
+		EPIC = "Rainbow", LEGENDARY = "Clover",
+	}
+	local RARITY_RANK = { COMMON = 1, UNCOMMON = 2, RARE = 3, EPIC = 4, LEGENDARY = 5 }
+
+	local BullCatalog = nil -- resolved off-thread; tab targeting degrades without it
+	task.spawn(function()
+		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 60)
+		local ok, catalog = pcall(require, bullrush and bullrush:WaitForChild("BullCatalog", 30))
+		if ok and typeof(catalog) == "table" then
+			BullCatalog = catalog
+		end
+	end)
+
+	local bridge = nil -- RevengeViewBridge (Eligible/Viewing gates for step 1)
+	task.spawn(function()
+		local b = ReplicatedStorage:WaitForChild("RevengeViewBridge", 30)
+		if b and b:IsA("BindableEvent") then
+			bridge = b
+		end
+	end)
+
+	-- Own overlay, like the XP bar: the hint must draw over open frames (the
+	-- Shop1/Index targets live inside them).
+	local tutGui = Instance.new("ScreenGui")
+	tutGui.Name = "TutorialGui"
+	tutGui.ResetOnSpawn = false
+	tutGui.DisplayOrder = 3
+	tutGui.Parent = gui.Parent
+
+	local hint = Instance.new("TextLabel")
+	hint.Name = "TutorialHint"
+	hint.BackgroundTransparency = 1
+	hint.AutomaticSize = Enum.AutomaticSize.XY
+	hint.Size = UDim2.fromOffset(0, 0)
+	hint.Font = Enum.Font.GothamBlack
+	hint.TextSize = 22
+	hint.TextColor3 = GOLD
+	hint.Visible = false
+	-- crisp UIStroke outline (user request) instead of the soft legacy
+	-- TextStroke* fuzz; the stall billboard label clones this stroke along
+	local hintStroke = Instance.new("UIStroke")
+	hintStroke.Color = Color3.fromRGB(0, 0, 0)
+	hintStroke.Thickness = 3
+	hintStroke.LineJoinMode = Enum.LineJoinMode.Round
+	hintStroke.Parent = hint
+	hint.Parent = tutGui
+
+	-- One pulsing stroke, reparented onto whatever needs pressing. An Index
+	-- rebuild can destroy it along with its card, and a destroyed instance's
+	-- Parent is locked — so re-park through pcall and remake on failure.
+	local function makeGlow(): UIStroke
+		local s = Instance.new("UIStroke")
+		s.Name = "TutorialGlow"
+		s.Color = GOLD
+		s.Thickness = 4
+		s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		return s
+	end
+	local glow = makeGlow()
+	local function parkGlow(target: GuiObject?)
+		if glow.Parent == target then
+			return
+		end
+		local ok = pcall(function()
+			glow.Parent = target
+		end)
+		if not ok then
+			glow = makeGlow()
+			glow.Parent = target
+		end
+	end
+
+	-- World marker for step 2's "get to the stall" leg: a billboard over the
+	-- ShopPrompt part, found with the same streaming-proof scan as the shop
+	-- door (section 1b) so a stall reparent can't break it either.
+	local stallMarker: BillboardGui? = nil
+	local stallLabel: TextLabel? = nil
+	local stallPart: BasePart? = nil -- guide-arrow destination, set by the same scan
+	task.spawn(function()
+		local prompt
+		local deadline = os.clock() + 120
+		repeat
+			for _, d in ipairs(workspace:GetDescendants()) do
+				if d:IsA("ProximityPrompt") and d.Name == "ShopPrompt" then
+					prompt = d
+					break
+				end
+			end
+			if not prompt then
+				task.wait(0.5)
+			end
+		until prompt or os.clock() >= deadline
+		local part = prompt
+			and (if prompt.Parent and prompt.Parent:IsA("BasePart")
+				then prompt.Parent
+				else prompt:FindFirstAncestorWhichIsA("BasePart"))
+		if not part then
+			return -- no stall in this place; step 2 still works via the window
+		end
+		stallPart = part
+		local bb = Instance.new("BillboardGui")
+		bb.Name = "TutorialStallMarker"
+		bb.Adornee = part
+		bb.Size = UDim2.fromOffset(260, 56)
+		bb.StudsOffsetWorldSpace = Vector3.new(0, 7, 0)
+		bb.AlwaysOnTop = true
+		bb.MaxDistance = 250
+		bb.Enabled = false
+		local label = hint:Clone() -- same face/stroke as the screen hint
+		label.Name = "Text"
+		label.AutomaticSize = Enum.AutomaticSize.None
+		label.Size = UDim2.fromScale(1, 1)
+		label.Position = UDim2.fromOffset(0, 0)
+		label.AnchorPoint = Vector2.new(0, 0)
+		label.TextScaled = true
+		label.Visible = true
+		label.Parent = bb
+		bb.Parent = tutGui
+		stallMarker = bb
+		stallLabel = label
+	end)
+
+	-- Guide arrows for the same walk-there leg: the user's red Arrow union in
+	-- ReplicatedStorage (a flat plate — tip along local -X, thin along local
+	-- Z, probed 2026-07-13), cloned CLIENT-side into a marching trail laid
+	-- flat on the floor between the player and the destination. NOSE-TO-TAIL
+	-- (user request): the pitch equals the arrow's own length, so each arrow
+	-- starts where the one before it ends — one solid unbroken stream that
+	-- flows ARROW_MARCH studs/sec toward the target for as long as the leg
+	-- is up. Every spot raycasts down to sit on the real floor; a hole in
+	-- the ground just hides that arrow.
+	local arrowTemplate = ReplicatedStorage:FindFirstChild("Arrow")
+	local ARROW_PITCH = if arrowTemplate then arrowTemplate.Size.X else 7.5
+	local ARROW_MAX = 12
+	local ARROW_MARCH = 8 -- studs/second the trail flows toward the target
+	local arrowFolder: Folder? = nil
+	local arrows: { BasePart } = {}
+	local arrowParams = RaycastParams.new()
+	arrowParams.FilterType = Enum.RaycastFilterType.Exclude
+	local function setArrowTarget(part: BasePart?)
+		if not arrowTemplate then
+			return -- template removed; the billboard still marks the spot
+		end
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if not (part and root) then
+			if arrowFolder then
+				arrowFolder:Destroy()
+				arrowFolder = nil
+				arrows = {}
+			end
+			return
+		end
+		if not arrowFolder then
+			arrowFolder = Instance.new("Folder")
+			arrowFolder.Name = "TutorialArrows"
+			arrowFolder.Parent = workspace
+			for i = 1, ARROW_MAX do
+				local a = arrowTemplate:Clone()
+				a.Anchored = true
+				a.CanCollide = false
+				a.CanQuery = false
+				a.CanTouch = false
+				a.CastShadow = false
+				a.Parent = arrowFolder
+				arrows[i] = a
+			end
+		end
+		arrowParams.FilterDescendantsInstances = { character, arrowFolder }
+		local from = root.Position
+		local flat = (part.Position - from) * Vector3.new(1, 0, 1)
+		local dist = flat.Magnitude
+		local dir = if dist > 0.01 then flat.Unit else Vector3.zAxis
+		local phase = (os.clock() * ARROW_MARCH) % ARROW_PITCH
+		for i, arrow in arrows do
+			local along = 4 + phase + (i - 1) * ARROW_PITCH
+			local shown = false
+			if along < dist - 6 then -- stop short of the stall (billboard takes over)
+				local p = from + dir * along
+				local hit = workspace:Raycast(p + Vector3.new(0, 8, 0), Vector3.new(0, -40, 0), arrowParams)
+				if hit then
+					-- hug whatever it landed on (lobby hill included): the hit
+					-- normal is the plate's up, the travel direction projected
+					-- onto that surface aims the tip (local -X) at the target
+					local up = hit.Normal
+					local slopeDir = dir - up * dir:Dot(up)
+					if slopeDir.Magnitude > 0.05 then
+						local vx = -slopeDir.Unit
+						local vy = up:Cross(vx)
+						arrow.CFrame = CFrame.fromMatrix(
+							hit.Position + up * (arrow.Size.Z / 2 + 0.15), vx, vy)
+						shown = true
+					end
+				end
+			end
+			arrow.Transparency = if shown then 0 else 1
+		end
+	end
+
+	-- "Bull sent! Exit Cam!" holds off a beat (user request) so the thrower
+	-- actually gets to watch their bull's telegraph + charge before the
+	-- tutorial starts walking them out of the cam. Resumed sessions keep the
+	-- 0 default, so a rejoiner mid-step sees the exit hint immediately.
+	local BULL_SENT_DELAY = 5
+	local step2At = 0 -- os.clock() when TutorialStep last flipped to 2
+	player:GetAttributeChangedSignal("TutorialStep"):Connect(function()
+		if (tonumber(player:GetAttribute("TutorialStep")) or 0) == 2 then
+			step2At = os.clock()
+		end
+	end)
+
+	-- Inventory mirrors, decoded once per change instead of every frame.
+	local ownedBulls: { [string]: boolean } = {}
+	local freeBasicBanked = false
+	local function refreshOwned()
+		local ok, decoded = pcall(function()
+			return HttpService:JSONDecode(player:GetAttribute("Bulls") or "{}")
+		end)
+		ownedBulls = (ok and type(decoded) == "table") and decoded or {}
+	end
+	local function refreshFree()
+		local ok, bank = pcall(function()
+			return HttpService:JSONDecode(player:GetAttribute("FreeBoxRolls") or "{}")
+		end)
+		freeBasicBanked = ok and type(bank) == "table" and (tonumber(bank.BASIC) or 0) > 0
+	end
+	player:GetAttributeChangedSignal("Bulls"):Connect(refreshOwned)
+	player:GetAttributeChangedSignal("FreeBoxRolls"):Connect(refreshFree)
+	refreshOwned()
+	refreshFree()
+
+	-- The bull step 3 teaches: owned, not worn, non-STARTER first, rarest on
+	-- ties — the freshly rolled bull under every normal flow.
+	local function targetBullId(): string?
+		local equipped = player:GetAttribute("EquippedBull") or "STARTER"
+		local best, bestRank = nil, -1
+		for id in ownedBulls do
+			if id ~= equipped then
+				local rank = 0
+				if id ~= "STARTER" then
+					local bull = BullCatalog and BullCatalog.Bulls and BullCatalog.Bulls[id]
+					rank = 1 + ((bull and RARITY_RANK[bull.rarity]) or 0)
+				end
+				if rank > bestRank then
+					best, bestRank = id, rank
+				end
+			end
+		end
+		return best
+	end
+
+	-- SideUI ships several layout VARIANTS (Lef1/Left2/Left3, only one
+	-- visible), each with its own Button1/Index — and wireBullCamButton sets
+	-- Visible on every Button1, hidden variants included. Aligning to the
+	-- first name match can therefore pick a button whose CONTAINER is hidden,
+	-- parking the hint against a rect that isn't on screen (the user caught
+	-- exactly this on the bull cam). So: collect all namesakes once, then
+	-- always target the one whose whole ancestor chain actually renders.
+	local hudCandidates: { [string]: { GuiButton } } = {}
+	local function isRendered(obj: GuiObject): boolean
+		if not obj.Visible then
+			return false
+		end
+		local node = obj.Parent
+		while node and not node:IsA("LayerCollector") do
+			if node:IsA("GuiObject") and not node.Visible then
+				return false
+			end
+			node = node.Parent
+		end
+		return node ~= nil -- reached the ScreenGui: it's really on screen
+	end
+	local function hudButton(name: string): GuiButton?
+		local list = hudCandidates[name]
+		if list == nil then
+			list = {}
+			for _, d in ipairs(SideUI:GetDescendants()) do
+				if d:IsA("GuiButton") and d.Name == name then
+					table.insert(list, d)
+				end
+			end
+			hudCandidates[name] = list
+		end
+		for _, btn in list do
+			if isRendered(btn) then
+				return btn
+			end
+		end
+		return nil
+	end
+
+	-- Created synchronously by earlier sections, so plain lookups are safe here.
+	local revengePanel = gui:FindFirstChild("RevengeControls") -- §9
+	local sendBtn = revengePanel and revengePanel:FindFirstChild("Send")
+	local rollFrame = Frames:FindFirstChild("BullRoll") -- §11 carousel
+	local shop1Frame = Frames:FindFirstChild("Shop1")
+	local indexFrame = Frames:FindFirstChild("Index")
+
+	-- What deserves the glow right now: kind "ui" (GuiObject target + text,
+	-- plus an optional forced hint side), "stall" (world marker), or nil
+	-- (all chrome hidden).
+	local function resolve(): (string?, GuiObject?, string?, string?)
+		local step = tonumber(player:GetAttribute("TutorialStep")) or 0
+		if step < 1 or step > 3 then
+			return nil
+		end
+		if player:GetAttribute("InRound") == true then
+			return nil -- playing: the tutorial never blocks (or nags during) a round
+		end
+		if rollFrame and rollFrame.Visible then
+			return nil -- never talk over a spinning reveal
+		end
+
+		if step == 1 then
+			if bridge and bridge:GetAttribute("Viewing") == true then
+				if sendBtn and sendBtn:IsA("GuiObject") and revengePanel.Visible then
+					return "ui", sendBtn, "Pick a lane. Hit SEND!"
+				end
+				return nil
+			end
+			-- Wait out the death ragdoll (user request): the glow lands once
+			-- they're back on their feet in the lobby, not over their corpse.
+			local character = player.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if not (humanoid and humanoid.Health > 0) then
+				return nil
+			end
+			local btn = hudButton("Button1")
+			if btn and btn.Visible and bridge and bridge:GetAttribute("Eligible") == true then
+				return "ui", btn, "Send a bull!"
+			end
+			return nil -- no ACTIVE round to spectate right now: wait quietly
+		elseif step == 2 then
+			if bridge and bridge:GetAttribute("Viewing") == true then
+				if os.clock() - step2At < BULL_SENT_DELAY then
+					return nil -- let them watch their bull run first
+				end
+				-- Still parked in the overhead cam after the throw: the stall
+				-- arrows/billboard are lobby-side and invisible from up here,
+				-- so the handoff to the shop phase starts with walking them
+				-- out (Button1 reads "Exit Cam" while viewing).
+				local btn = hudButton("Button1")
+				if btn and btn.Visible then
+					return "ui", btn, "Bull sent! Exit Cam!"
+				end
+				return nil
+			end
+			if shop1Frame and shop1Frame.Visible then
+				local container = shop1Frame:FindFirstChild("Container")
+				local card = container and container:FindFirstChild("BASIC")
+				local buttons = card and card:FindFirstChild("BuyButtons")
+				local buy = buttons and buttons:FindFirstChild("Buy/Equip/Equipped/Locked")
+				if buy and buy:IsA("GuiButton") then
+					-- pinned to the button's RIGHT (user request): the default
+					-- half-screen rule would tuck it left, over the card art
+					return "ui", buy,
+						if freeBasicBanked then "Grab your first FREE box!" else "Open a lucky box!",
+						"right"
+				end
+				return nil -- cards still building
+			end
+			if currentFrame == nil then
+				return "stall" -- walk them to the stall
+			end
+			return nil -- some other window is up; don't point behind it
+		else -- step 3
+			if bridge and bridge:GetAttribute("Viewing") == true then
+				-- same overhead dead-end guard as step 2 (they wandered back
+				-- into the cam mid-tutorial): point at the exit first
+				local btn = hudButton("Button1")
+				if btn and btn.Visible then
+					return "ui", btn, "Exit Cam! Equip your bull!"
+				end
+				return nil
+			end
+			local bullId = targetBullId()
+			if indexFrame and indexFrame.Visible then
+				local container = indexFrame:FindFirstChild("Container")
+				local card = bullId and container and container:FindFirstChild(bullId)
+				if card then
+					local inner = card:FindFirstChild("Frame")
+					return "ui", (inner or card) :: GuiObject, "Tap your new bull!"
+				end
+				local bull = bullId and BullCatalog and BullCatalog.Bulls and BullCatalog.Bulls[bullId]
+				local tabName = bull and RARITY_TAB[bull.rarity]
+				local typeButtons = tabName and indexFrame:FindFirstChild("TypeButtons")
+				local tab = typeButtons and typeButtons:FindFirstChild(tabName)
+				if tab and tab:IsA("GuiButton") then
+					return "ui", tab, "Check this tab!"
+				end
+				return nil
+			end
+			if currentFrame == nil then
+				local btn = hudButton("Index")
+				if btn and btn.Visible then
+					return "ui", btn, "Equip your new bull!"
+				end
+			end
+			return nil
+		end
+	end
+
+	-- Manual RenderStepped math like every looped animation here (Run-mode
+	-- tween freeze): the stroke breathes, the hint bobs beside its target.
+	RunService.RenderStepped:Connect(function()
+		local kind, target, text, side = resolve()
+
+		if stallMarker then
+			stallMarker.Enabled = kind == "stall"
+			if kind == "stall" and stallLabel then
+				stallLabel.Text = "Grab your FREE box!"
+				stallLabel.TextTransparency = 0.15 - 0.15 * math.sin(os.clock() * 4)
+			end
+		end
+		setArrowTarget(if kind == "stall" then stallPart else nil)
+
+		if kind ~= "ui" or not target then
+			parkGlow(nil)
+			hint.Visible = false
+			return
+		end
+
+		parkGlow(target)
+		local wave = 0.5 + 0.5 * math.sin(os.clock() * 5)
+		glow.Thickness = 3 + 2 * wave
+		glow.Transparency = 0.3 - 0.3 * wave
+
+		hint.Text = text or ""
+		hint.Visible = true
+		local screen = tutGui.AbsoluteSize
+		local rel = target.AbsolutePosition - tutGui.AbsolutePosition
+		local size = target.AbsoluteSize
+		local cx = rel.X + size.X / 2
+		local cy = rel.Y + size.Y / 2
+		local bob = 4 * math.sin(os.clock() * 3)
+		if side ~= "right" and cy > screen.Y * 0.78 then
+			-- bottom strip (the SEND BULL panel): sit above the target
+			hint.AnchorPoint = Vector2.new(0.5, 1)
+			hint.Position = UDim2.fromOffset(cx, rel.Y - 10 + bob)
+		elseif side == "right" or cx <= screen.X / 2 then
+			hint.AnchorPoint = Vector2.new(0, 0.5)
+			hint.Position = UDim2.fromOffset(rel.X + size.X + 14 + bob, cy)
+		else
+			hint.AnchorPoint = Vector2.new(1, 0.5)
+			hint.Position = UDim2.fromOffset(rel.X - 14 - bob, cy)
 		end
 	end)
 end

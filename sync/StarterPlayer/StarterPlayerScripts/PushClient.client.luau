@@ -108,13 +108,19 @@ local function localRoot(): BasePart?
 	return nil
 end
 
--- True only when we're an ACTIVE-round participant standing in the arena — the
+-- True when we're an ACTIVE-round participant standing in the arena — the
 -- server sets the replicated InRound attribute at round start and clears it on
--- elimination / round end. Lobby-sitters, AFK players and late-joiners have
--- roundActive == true (RoundState fires to everyone) but InRound false, so this
--- keeps the whole push system dark in the lobby.
+-- elimination / round end — OR when we're on the practice grid (PracticeArena
+-- maintains the InPractice attribute the same way). Lobby-sitters, AFK players
+-- and late-joiners have neither, so the push system stays dark in the lobby.
 local function isParticipating(): boolean
-	return roundActive and player:GetAttribute("InRound") == true and localRoot() ~= nil
+	if localRoot() == nil then
+		return false
+	end
+	if player:GetAttribute("InPractice") == true then
+		return true
+	end
+	return roundActive and player:GetAttribute("InRound") == true
 end
 
 -- Alive, targetable character's root, or nil. Skips a character BullrushClient
@@ -341,6 +347,10 @@ end)
 -- own character (client-authoritative movement, like the dash).
 --==============================================================================
 
+-- One live knockback at a time: the constraint (and its attachment) wear this
+-- name so a newer shove can find and replace a burst still in flight.
+local KNOCKBACK_NAME = "PushKnockback"
+
 local function aliveRoot(): BasePart?
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -357,8 +367,8 @@ end
 -- overwritten by the camera update that runs after it). Re-binds cleanly if a
 -- second shove lands mid-shake.
 local SHAKE_BIND = "PushCamShake"
-local SHAKE_POS = 0.9 -- studs of positional jitter at peak
-local SHAKE_ROT = 5 -- degrees of rotational jitter at peak
+local SHAKE_POS = 0.2592 -- studs of positional jitter at peak
+local SHAKE_ROT = 1.44 -- degrees of rotational jitter at peak
 local SHAKE_TIME = 0.3 -- seconds to settle
 
 local function shakeCamera()
@@ -417,28 +427,71 @@ Remotes.Pushed.OnClientEvent:Connect(function(direction: Vector3)
 
 	-- Knockback: a hard spike at contact (full SPEED) that eases to a stop over
 	-- PUSH.TIME, so the body FEELS the deceleration instead of gliding at a
-	-- constant speed. Only a small footing-break hop up; stays grounded.
-	root.AssemblyLinearVelocity = Vector3.new(flat.X * PUSH.SPEED, PUSH.UP, flat.Z * PUSH.SPEED)
+	-- constant speed. Plus an upward pop with deliberate hang time (see
+	-- Config.PUSH.UP_TIME).
+	--
+	-- Driven through an unlimited-force LinearVelocity constraint rather than
+	-- raw AssemblyLinearVelocity writes. Heartbeat runs AFTER physics, so with
+	-- raw writes the grounded humanoid's own controller spent every step in
+	-- between pulling horizontal speed back toward its WalkSpeed — how much of
+	-- the burst survived depended on frame rate and the round's WalkSpeed, and
+	-- the same shove read weaker on a slow frame than a fast one. The solver
+	-- enforces a constraint at EVERY substep, so the scripted arc below is
+	-- exactly what the victim flies — every victim, every machine, every mode.
+
+	-- A second shove landing mid-burst restarts clean: destroying the stale
+	-- constraint ends its update loop too (the loop bails once its attachment
+	-- leaves the root).
+	local stale = root:FindFirstChild(KNOCKBACK_NAME)
+	if stale then
+		stale:Destroy()
+	end
+
+	local spike = Vector3.new(flat.X * PUSH.SPEED, PUSH.UP, flat.Z * PUSH.SPEED)
+	root.AssemblyLinearVelocity = spike -- cover the substeps before the constraint engages
+
+	local attachment = Instance.new("Attachment")
+	attachment.Name = KNOCKBACK_NAME
+	local velocity = Instance.new("LinearVelocity")
+	velocity.Name = KNOCKBACK_NAME
+	velocity.Attachment0 = attachment
+	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+	velocity.ForceLimitsEnabled = false
+	velocity.MaxForce = math.huge -- either way: nothing gets to fight the arc
+	velocity.VectorVelocity = spike
+	velocity.Parent = attachment
+	attachment.Parent = root
+
 	local startedAt = os.clock()
 	local connection
-	connection = RunService.Heartbeat:Connect(function()
-		local nowRoot = aliveRoot()
+	connection = RunService.Heartbeat:Connect(function(dt: number)
 		local t = os.clock() - startedAt
-		-- nowRoot ~= root catches death / respawn mid-knockback.
-		if nowRoot ~= root or t >= PUSH.TIME then
+		-- aliveRoot() ~= root catches death / respawn mid-knockback; a gone
+		-- attachment means a newer shove took over. At the cutoff the last
+		-- written velocity carries over and gravity takes the descent.
+		if aliveRoot() ~= root or attachment.Parent ~= root or t >= PUSH.TIME then
 			connection:Disconnect()
+			attachment:Destroy()
 			return
 		end
-		local falloff = 1 - t / PUSH.TIME
+		-- The constraint HOLDS each written velocity until the next write, so
+		-- sample the curve half a frame AHEAD — the staircase then covers the
+		-- same ground per second at 24 fps as at 144.
+		local ts = math.min(t + dt / 2, PUSH.TIME)
+		local falloff = 1 - ts / PUSH.TIME
 		falloff = falloff * falloff -- ease-out: hardest at contact, decays to nothing
-		-- Vertical pop: ramp Y from +UP to -UP over UP_TIME (constant, snappy accel
-		-- up AND down), so they leave the ground fast and get slammed back fast with
-		-- no hang time. Once the pop window is done, hand Y back to physics.
-		local vy = root.AssemblyLinearVelocity.Y
-		if t < PUSH.UP_TIME then
-			vy = PUSH.UP - (2 * PUSH.UP / PUSH.UP_TIME) * t
+		-- Vertical pop: ramp Y from +UP toward -UP over UP_TIME. UP_TIME is tuned
+		-- so the ramp's decel ~= gravity and TIME cuts the constraint just past
+		-- apex, so the victim rides a natural arc up and real gravity lands them —
+		-- deliberate hang time. Past the pop window (reachable only if TIME is
+		-- ever retuned past UP_TIME) Y keeps falling at workspace gravity.
+		local vy
+		if ts < PUSH.UP_TIME then
+			vy = PUSH.UP - (2 * PUSH.UP / PUSH.UP_TIME) * ts
+		else
+			vy = -PUSH.UP - Workspace.Gravity * (ts - PUSH.UP_TIME)
 		end
-		root.AssemblyLinearVelocity = Vector3.new(
+		velocity.VectorVelocity = Vector3.new(
 			flat.X * PUSH.SPEED * falloff,
 			vy,
 			flat.Z * PUSH.SPEED * falloff

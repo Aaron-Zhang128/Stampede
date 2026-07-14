@@ -78,6 +78,15 @@ Players.PlayerAdded:Connect(function(player)
 		return DataStore:GetAsync(player.UserId)
 	end)
 
+	-- The player can leave while GetAsync is still inside withRetry's backoff. By the
+	-- time we resume, PlayerRemoving's cleanup has already run (a no-op -- nothing was
+	-- committed yet), so committing now would leak this profile forever AND leave a
+	-- stale dataLoaded flag: if they rejoined this same server and their next load
+	-- failed every retry, that flag would defeat savePlayer's guard and their real
+	-- save would be overwritten with defaults on leave -- a permanent wipe. Nothing
+	-- below here yields, so this one check is enough.
+	if player.Parent == nil then return end
+
 	if ok then
 		-- Clean read. savedData == nil just means a brand-new player; that's still
 		-- a successful load, so it's safe to save them later.
@@ -86,6 +95,24 @@ Players.PlayerAdded:Connect(function(player)
 				if savedData[key] ~= nil then
 					profile[key] = savedData[key]
 				end
+			end
+			-- Old saves predate HasPlayedBefore, so the merge above kept the
+			-- default (false) for them -- but ANY existing save means the player
+			-- has been here before, so don't re-flag veterans as first-timers.
+			if savedData.HasPlayedBefore == nil then
+				profile.HasPlayedBefore = true
+			end
+			-- FreeBoxRolls postdates old saves too. The free BASIC box is a
+			-- NEW-player gift, so a veteran's missing key becomes an empty
+			-- bank instead of keeping the default grant.
+			if savedData.FreeBoxRolls == nil then
+				profile.FreeBoxRolls = {}
+			end
+			-- TutorialStep postdates old saves as well: anyone with an
+			-- existing save already knows the ropes, so grandfather them
+			-- straight to done rather than pointing arrows at veterans.
+			if savedData.TutorialStep == nil then
+				profile.TutorialStep = 4
 			end
 		end
 		dataLoaded[player.UserId] = true
@@ -107,7 +134,25 @@ Players.PlayerAdded:Connect(function(player)
 	player:SetAttribute("Bulls", HttpService:JSONEncode(profile.Bulls or {}))
 	player:SetAttribute("EquippedBull", profile.EquippedBull or "STARTER")
 	player:SetAttribute("BullMutations", HttpService:JSONEncode(profile.BullMutations or {}))
+	player:SetAttribute("FreeBoxRolls", HttpService:JSONEncode(profile.FreeBoxRolls or {}))
 	player:SetAttribute("GroupRewardClaimed", profile.GroupRewardClaimed or false)
+	-- Level progression (LevelService): the HUD XP bar binds to these before
+	-- any XP can land, so they must exist the moment the profile does.
+	player:SetAttribute("Level", profile.Level or 1)
+	player:SetAttribute("XP", profile.XP or 0)
+	-- Tutorial progress (TutorialService): the client overlay binds to this,
+	-- so it must exist the moment the profile does. Grandfathered saves land
+	-- here as 4 (done) and the overlay never shows.
+	player:SetAttribute("TutorialStep", profile.TutorialStep or 0)
+
+	-- FirstTimer replicates while HasPlayedBefore is false; Main.server clears
+	-- it (and flips HasPlayedBefore) when their first round finishes. No
+	-- gameplay effect yet -- there for analytics and future first-session
+	-- features. Clean loads only: a veteran whose load failed is playing on a
+	-- default profile and must not be re-flagged as new.
+	if ok and not profile.HasPlayedBefore then
+		player:SetAttribute("FirstTimer", true)
+	end
 
 	-- Leaderstats: only Money and Wins are shown in the player list (column order
 	-- follows creation order: Money first).
@@ -146,6 +191,13 @@ Players.PlayerAdded:Connect(function(player)
 	streak.Value = profile.Streak or 0
 	streak.Parent = stats
 
+	-- Release the ReplicatedFirst loading screen: everything the client's initial UI
+	-- reads (inventory/equip attributes + leaderstats) now exists on this Player, so
+	-- it's safe to reveal the game. Set in BOTH the clean-load and load-failed paths
+	-- (a failed load still lets them play on defaults), so the loading screen never
+	-- hangs -- the client also has its own timeout as a backstop.
+	player:SetAttribute("DataReady", true)
+
 	-- Funnel step 1: player entered (top of the activation funnel).
 	if Analytics then Analytics.onJoin(player) end
 end)
@@ -171,5 +223,23 @@ game:BindToClose(function()
 	local deadline = os.clock() + 25
 	while pending > 0 and os.clock() < deadline do
 		task.wait(0.1)
+	end
+end)
+
+-- Periodic autosave. PlayerRemoving and BindToClose never run on a server CRASH, so
+-- without this a crash costs every player their whole session -- Robux purchases
+-- survive (ProcessReceipt force-saves via DataHandler.SaveNow), but round earnings
+-- and box rolls would evaporate. savePlayer already self-guards (missing profile,
+-- never-loaded data, retries inside), so no extra checks are needed here. The 1s
+-- stagger between players keeps a full server from bursting the DataStore write
+-- budget in a single frame.
+local AUTOSAVE_INTERVAL = 120
+task.spawn(function()
+	while true do
+		task.wait(AUTOSAVE_INTERVAL)
+		for _, player in Players:GetPlayers() do
+			savePlayer(player)
+			task.wait(1)
+		end
 	end
 end)

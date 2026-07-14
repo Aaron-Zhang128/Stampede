@@ -9,11 +9,18 @@
 	motion that replicates to everyone.
 
 	Rules (all server-enforced):
-	  * target is a real Player, and not the pusher itself
-	  * both pusher and target are alive in the current round - this ALONE gates
-	    "only during an active round", since the alive set is empty between rounds
-	  * per-pusher cooldown (Config.PUSH.COOLDOWN)
-	  * a distance sanity check, so a tampered client can't shove from across the map
+	  * the pusher is alive in the current round - this ALONE gates "only during
+	    an active round", since the alive set is empty between rounds - and past
+	    the per-pusher cooldown (Config.PUSH.COOLDOWN); failing either returns
+	    silently, since the client gates the same things and only a stale or
+	    forged request trips them
+	  * the swing LANDS when the target resolves (a real Player that isn't the
+	    pusher, or a bot rig Model), the victim is alive, both roots exist, and
+	    a distance sanity check passes - so a tampered client can't shove from
+	    across the map
+	  * a swing that connects with nothing is a MISS: it spends the cooldown all
+	    the same and is answered with a red "You missed!" card, matching the
+	    client's optimistic swing + local cooldown
 
 	Bots (AIService) never fire remotes, so they can't push — but they CAN be
 	pushed (so the shove is testable solo): PushClient sends the bot's rig
@@ -28,6 +35,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
@@ -156,8 +164,13 @@ local function playImpactFx(root: BasePart?)
 end
 
 -- Server-side mirror of PushClient's knockback burst, for server-owned bot
--- rigs: a hard spike at contact easing to a stop over PUSH.TIME, with an upward
--- pop while gravity takes the vertical back over.
+-- rigs: a hard spike at contact easing to a stop over PUSH.TIME, with the
+-- same floaty vertical pop. Driven through an unlimited-force LinearVelocity
+-- constraint (see PushClient for the full why): the solver enforces it every
+-- substep, so the humanoid can't eat any of the burst and the arc no longer
+-- varies with frame time — bot shoves match player shoves exactly.
+local KNOCKBACK_NAME = "PushKnockback" -- same name PushClient uses on players
+
 local function shoveBot(proxy, direction: Vector3)
 	local character = proxy.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -186,29 +199,60 @@ local function shoveBot(proxy, direction: Vector3)
 		root.Anchored = false
 	end
 
-	root.AssemblyLinearVelocity = Vector3.new(
+	-- A second shove landing mid-burst restarts clean: destroying the stale
+	-- constraint ends its update loop too.
+	local stale = root:FindFirstChild(KNOCKBACK_NAME)
+	if stale then
+		stale:Destroy()
+	end
+
+	local spike = Vector3.new(
 		direction.X * Config.PUSH.SPEED,
 		Config.PUSH.UP,
 		direction.Z * Config.PUSH.SPEED
 	)
+	root.AssemblyLinearVelocity = spike -- cover the substeps before the constraint engages
+
+	local attachment = Instance.new("Attachment")
+	attachment.Name = KNOCKBACK_NAME
+	local velocity = Instance.new("LinearVelocity")
+	velocity.Name = KNOCKBACK_NAME
+	velocity.Attachment0 = attachment
+	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+	velocity.ForceLimitsEnabled = false
+	velocity.MaxForce = math.huge -- either way: nothing gets to fight the arc
+	velocity.VectorVelocity = spike
+	velocity.Parent = attachment
+	attachment.Parent = root
+
 	local startedAt = os.clock()
 	local connection
-	connection = RunService.Heartbeat:Connect(function()
+	connection = RunService.Heartbeat:Connect(function(dt: number)
 		local t = os.clock() - startedAt
-		if not root.Parent or humanoid.Health <= 0 or t >= Config.PUSH.TIME then
+		-- Dead/despawned bot or a newer shove's constraint: stand down. At the
+		-- cutoff the last written velocity carries over and gravity takes the
+		-- descent.
+		if not root.Parent or humanoid.Health <= 0 or attachment.Parent ~= root or t >= Config.PUSH.TIME then
 			connection:Disconnect()
+			attachment:Destroy()
 			return
 		end
 		-- Mirror PushClient: ease the horizontal velocity SPEED->0 so the shove
-		-- reads as an impact rather than a constant-speed glide, and drive a fast
-		-- symmetric vertical pop (+UP -> -UP over UP_TIME) with no hang time.
-		local falloff = 1 - t / Config.PUSH.TIME
+		-- reads as an impact rather than a constant-speed glide, and drive the
+		-- vertical pop (+UP toward -UP over UP_TIME; decel ~= gravity for
+		-- deliberate hang time — see Config.PUSH).
+		-- Sample half a frame ahead: the constraint holds each value until the
+		-- next write, and midpoint sampling keeps the arc frame-rate-proof.
+		local ts = math.min(t + dt / 2, Config.PUSH.TIME)
+		local falloff = 1 - ts / Config.PUSH.TIME
 		falloff = falloff * falloff
-		local vy = root.AssemblyLinearVelocity.Y
-		if t < Config.PUSH.UP_TIME then
-			vy = Config.PUSH.UP - (2 * Config.PUSH.UP / Config.PUSH.UP_TIME) * t
+		local vy
+		if ts < Config.PUSH.UP_TIME then
+			vy = Config.PUSH.UP - (2 * Config.PUSH.UP / Config.PUSH.UP_TIME) * ts
+		else
+			vy = -Config.PUSH.UP - Workspace.Gravity * (ts - Config.PUSH.UP_TIME)
 		end
-		root.AssemblyLinearVelocity = Vector3.new(
+		velocity.VectorVelocity = Vector3.new(
 			direction.X * Config.PUSH.SPEED * falloff,
 			vy,
 			direction.Z * Config.PUSH.SPEED * falloff
@@ -216,8 +260,33 @@ local function shoveBot(proxy, direction: Vector3)
 	end)
 end
 
+-- Push eligibility: alive in the active round, or a player standing on the
+-- practice grid (PracticeArena maintains the replicated InPractice attribute).
+-- Works on real Players and bot proxies alike; bots only ever qualify via the
+-- round's alive set.
+local function canPush(participant): boolean
+	if RoundService.isAlive(participant) then
+		return true
+	end
+	return typeof(participant) == "Instance"
+		and participant:IsA("Player")
+		and participant:GetAttribute("InPractice") == true
+end
+
 function PushService.init()
 	Remotes.Push.OnServerEvent:Connect(function(pusher: Player, target)
+		-- PUSHER gates first, and silently: the client checks the same things
+		-- before it swings (participating, off its local cooldown), so a
+		-- request that fails them is stale or forged and gets no feedback.
+		if not canPush(pusher) then
+			return
+		end
+		local now = os.clock()
+		local last = lastPushAt[pusher]
+		if last and now - last < Config.PUSH.COOLDOWN then
+			return
+		end
+
 		-- Resolve the target: a real Player, or a bot rig Model (PushClient
 		-- sends the Model since bot proxies never replicate).
 		local victim: any = nil
@@ -228,35 +297,31 @@ function PushService.init()
 				victim = AIService.findByCharacter(target)
 			end
 		end
-		if not victim then
-			return
-		end
 
-		-- Both in play => a round is ACTIVE and neither has been eliminated.
-		if not RoundService.isAlive(pusher) or not RoundService.isAlive(victim) then
-			return
-		end
-
-		-- Per-pusher cooldown.
-		local now = os.clock()
-		local last = lastPushAt[pusher]
-		if last and now - last < Config.PUSH.COOLDOWN then
-			return
-		end
-
+		-- Does the swing LAND? It needs a living victim, both roots, and a
+		-- planar distance no further than the prompt could legitimately have
+		-- been triggered from (so a tampered client can't shove across the map).
 		local pusherRoot = rootOf(pusher)
-		local targetRoot = rootOf(victim)
-		if not pusherRoot or not targetRoot then
+		local targetRoot = if victim and canPush(victim) then rootOf(victim) else nil
+		local flat = Vector3.zero
+		local lands = false
+		if pusherRoot and targetRoot then
+			-- Horizontal direction pusher -> target.
+			local offset = targetRoot.Position - pusherRoot.Position
+			flat = Vector3.new(offset.X, 0, offset.Z)
+			lands = flat.Magnitude <= Config.PUSH.RANGE + 6
+		end
+
+		if not lands then
+			-- MISS: the swing connected with nothing. The client already spent
+			-- its local cooldown the moment it swung, so charge ours too (keeps
+			-- the two clocks in step) and answer with the red card PushClient
+			-- promises on a whiff.
+			lastPushAt[pusher] = now
+			NotifyService.send(pusher, "You missed!", "red", 2)
 			return
 		end
 
-		-- Horizontal direction pusher -> target. Reject shoves from further than
-		-- the prompt could legitimately have been triggered from.
-		local offset = targetRoot.Position - pusherRoot.Position
-		local flat = Vector3.new(offset.X, 0, offset.Z)
-		if flat.Magnitude > Config.PUSH.RANGE + 6 then
-			return
-		end
 		-- Roots stacked exactly: fall back to the pusher's facing.
 		if flat.Magnitude < 0.1 then
 			local look = pusherRoot.CFrame.LookVector
@@ -267,7 +332,7 @@ function PushService.init()
 		end
 
 		lastPushAt[pusher] = now
-		-- Credit window: if the victim falls to their death within
+		-- Credit window: if the victim falls or dies to a bull within
 		-- PUSH.KILL_CREDIT seconds, the feed names this pusher.
 		RoundService.notePush(victim, pusher)
 

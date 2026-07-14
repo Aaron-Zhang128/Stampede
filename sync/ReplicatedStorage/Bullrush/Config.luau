@@ -10,13 +10,29 @@ Config.TILE_PART_SIZE = Config.TILE_SIZE -- tile width = center spacing, so tile
 Config.TILE_THICKNESS = 80       -- tiles are tall pillars; TOPS stay at ARENA_ORIGIN height
 Config.ARENA_ORIGIN = Vector3.new(200, 20, 200) -- grid center at tile TOP surface height
 
+-- Canonical tile palette, shared by ShrinkService (server repaints) and
+-- BullrushClient (danger pulse / restore tweens). The client must DERIVE a
+-- tile's at-rest color from the checkerboard formula — never sample part.Color
+-- at join time, because a mid-round joiner samples sunken tiles as charcoal
+-- and then every post-charge restore paints that charcoal back onto live tiles.
+Config.TILE_CHECKER_LIGHT = Color3.fromRGB(214, 182, 133) -- (row + col) even
+Config.TILE_CHECKER_DARK = Color3.fromRGB(188, 152, 102) -- (row + col) odd
+Config.TILE_CHARCOAL = Color3.fromRGB(55, 48, 42) -- dropped/sunken tiles
+
 Config.BULL_RIDE_HEIGHT = 2.5     -- bull Root center height above tile surface
 Config.BULL_OVERSHOOT = 12        -- studs beyond the active window edge where bulls spawn and exit
 Config.BULL_HIT_HALF_LENGTH = 3.5 -- kill box half-length along the travel axis
 Config.BULL_HIT_HALF_WIDTH = 3.9  -- kill box half-width across the lane
 
-Config.MIN_PLAYERS = 1            -- solo rounds run for practice; wins only awarded with 2+ starters
+Config.MIN_PLAYERS = 2            -- matches need 2+ players; a lone player waits in the lobby (practice arena is always open)
+-- Deliberately disabled so Studio matches live: a solo playtest sits in WAITING
+-- (with the waiting card) instead of starting a round alone. Drop the `false and`
+-- to restore instant solo rounds.
+if false and game:GetService("RunService"):IsStudio() then
+	Config.MIN_PLAYERS = 1
+end
 Config.INTERMISSION_TIME = 15
+Config.START_DELAY = 5            -- seconds players stand on the field after teleport before the round begins
 Config.MONEY_PER_WIN = 100
 
 -- Next-mode voting: during intermission, players vote among VOTE_OPTION_COUNT
@@ -57,9 +73,9 @@ Config.PRODUCTS = {
 	SPIN_1 = 3609137845,          -- "Spin 1" (32 R$): 1 fortune-wheel spin (SpinService)
 	SPIN_10 = 3609137877,         -- "Spin X10" (240 R$): 10 fortune-wheel spins
 	DAILY_CLAIM_ALL = 3609138406, -- "Daily Claim All" (104 R$): claim the whole 7-day daily loop (DailyRewardService)
-	-- Lucky Blocks (Store LuckyBlocks cards): premium one-shot wheel spins that
-	-- roll their OWN richer reward table (Config.LUCKY_BLOCKS) instead of the free
-	-- wheel's. Buying auto-opens the Spinner and spins. Handled by SpinService.
+	-- Lucky Blocks (Store LuckyBlocks cards): ROBUX BULL ROLLS - each buy rolls
+	-- one bull from its tier's own rarity pool (Config.LUCKY_BLOCKS), revealed
+	-- on the bull carousel - NOT a wheel spin. Handled by BullRollService.
 	-- Mapped by PRICE (the product names on Roblox differ from our tier names).
 	LUCKY_SECRET = 3609137453,    -- "Lucky Block" (20 R$)  -> Secret tier
 	LUCKY_ALIEN = 3609137528,     -- "Lucky Secret" (80 R$) -> Alien tier
@@ -198,7 +214,12 @@ Config.LUCKY_BLOCKS = {
 -- aura, BullCatalog.Mutations - rarity weighted there) on the rolled bull.
 -- Mutations stick to that bull forever, dupes included, so every dupe pull
 -- is still a mutation lottery ticket.
+-- MUTATIONS_ENABLED (2026-07-13): mutations are OUT of the game for now.
+-- false = every roll skips the mutation lottery (BullRollService gates on
+-- this; the per-box mutationChance values below are kept as tuning for the
+-- re-enable). Already-owned auras still render (Index tags, worn-bull VFX).
 Config.BULLS = {
+	MUTATIONS_ENABLED = false,
 	BOXES = {
 		BASIC = {
 			name = "Lucky Box", tag = "Basic", order = 1,
@@ -260,7 +281,7 @@ Config.BULLS = {
 --   box    opens one Config.BULLS.BOXES[boxId] (a free bull roll); a duplicate
 --          pull refunds box.cost * rarity.dupeRefund Money, same as a bought box
 Config.DAILY = {
-	CLAIM_COOLDOWN = 20 * 3600,   -- a reward is ready 20h after the last claim
+	CLAIM_COOLDOWN = 24 * 3600,   -- a reward is ready 24h after the last claim
 	RESET_WINDOW = 48 * 3600,     -- claim within 48h of the last claim to keep the streak
 	REWARDS = {                   -- day 1-7, then loops back to day 1
 		{ day = 1, kind = "money", amount = 100,          label = "$100" },
@@ -273,10 +294,39 @@ Config.DAILY = {
 	},
 }
 
+-- Player levels (LevelService): 10 levels fed by GAMEPLAY money - every grant
+-- through RoundService.awardMoney adds its PRE-multiplier amount as XP
+-- (XP_PER_MONEY per $1), so boosts/passes scale the money but never the curve,
+-- and purchases/gifts (money packs, wheel, daily, dupe refunds) give no XP.
+-- XP_TO_NEXT[n] = XP to climb from level n to n+1 (XP resets each level-up; a
+-- win banks ~250 XP, a mid-round loss ~30-60, so level 2 lands in the first
+-- session and level 10 is a long grind). REWARDS[n] lands the moment level n
+-- is reached: money is a RAW gift (no boosts, no XP back); a box BANKS a free
+-- opening in FreeBoxRolls (the shop card flips to FREE, same bank as the
+-- new-player BASIC gift). label doubles as the level-up card text. The client
+-- XP bar (Main section 17) renders level/progress off the Level/XP attributes
+-- plus this table.
+Config.LEVELS = {
+	MAX_LEVEL = 10,
+	XP_PER_MONEY = 1,             -- XP per $1 of pre-multiplier gameplay money
+	XP_TO_NEXT = { 100, 250, 500, 900, 1400, 2000, 2800, 3800, 5000 },
+	REWARDS = {
+		[2] = { kind = "money", amount = 150, label = "+$150" },
+		[3] = { kind = "box", boxId = "BASIC", label = "Free Lucky Box!" },
+		[4] = { kind = "money", amount = 300, label = "+$300" },
+		[5] = { kind = "box", boxId = "SUPER", label = "Free Super Box!" },
+		[6] = { kind = "money", amount = 500, label = "+$500" },
+		[7] = { kind = "box", boxId = "SUPER", label = "Free Super Box!" },
+		[8] = { kind = "money", amount = 800, label = "+$800" },
+		[9] = { kind = "box", boxId = "MEGA", label = "Free Mega Box!" },
+		[10] = { kind = "box", boxId = "MEGA", label = "Free Mega Box!" },
+	},
+}
+
 -- Revenge bulls: eliminated participants may send a bull down a lane of the
 -- CURRENT window while the round is ACTIVE. Cooldown is server-enforced.
 Config.REVENGE = {
-	COOLDOWN = 15,                -- seconds between throws, per player
+	COOLDOWN = 10,                -- seconds between throws, per player
 	MONEY_PER_HIT = 25,           -- paid to the thrower per alive player trampled
 	TELEGRAPH = 1.2,              -- lane warning before the revenge bull launches
 	SPEED = 50,                   -- studs/s, fixed (independent of the difficulty ramp)
@@ -288,8 +338,8 @@ Config.REVENGE = {
 Config.PUSH = {
 	RANGE = 9,                    -- prompt reach in studs (server allows +6 slack)
 	SPEED = 120,                  -- PEAK horizontal knockback at contact, studs/s; eases to 0 over TIME (dash is 56)
-	UP = 40,                      -- initial upward pop velocity, studs/s; driven as a fast symmetric hop (see UP_TIME)
-	UP_TIME = 0.24,               -- pop duration: Y ramps +UP -> -UP over this, so up AND down accel are snappy — no hang time
+	UP = 40,                      -- initial upward pop velocity, studs/s; ramps toward -UP over UP_TIME
+	UP_TIME = 0.4,                -- pop duration: Y ramps +UP -> -UP over this. At 0.4 the decel (2*UP/UP_TIME = 200) ~= gravity, and TIME cuts the drive just past apex, so victims float a real arc (~4 studs, ~0.4s air) instead of the old 0.24 snap-down
 	TIME = 0.22,                  -- horizontal knockback window; short + sharp so it hits and ends, no drift tail
 	HITSTOP = 0,                  -- freeze-frame at contact (0 = off); >0 anchors the victim briefly before the launch
 	COOLDOWN = 4,                 -- seconds between shoves, per pusher
@@ -320,13 +370,36 @@ Config.SHRINK = {
 -- parameter lerps START -> FINAL. Modes may override rampTime and/or the
 -- whole START/FINAL pair (see MODES below).
 Config.DIFFICULTY = {
-	RAMP_TIME = 90,
-	-- speed starts 30% below FINAL and ramps up over RAMP_TIME (was 44).
+	RAMP_TIME = 157, -- 2026-07-12: ramps stretched another ~40% (25% pass was 112; original 90)
+
+	-- Gentle opening, eased ~40% further 2026-07-12 (was telegraph 1.7 / gap 1.4 /
+	-- speed 24; original pre-easing: 1.4 / 1.0 / 31 / bulls 2): rounds start with a
+	-- single slow, well-telegraphed bull so new players can learn the dodge before
+	-- pressure builds; FINAL keeps the same late-round bite.
 	-- Smaller peak waves + shorter gaps than the old 4-bull/0.55s pulse, so bulls
 	-- arrive as a steadier stream (WaveDirector also trickles each wave's bulls
 	-- out over a launch window) rather than in distinct bursts.
-	START = { telegraph = 1.4, gap = 1.0, speed = 31, bulls = 2 },
+	START = { telegraph = 2.4, gap = 2.0, speed = 17, bulls = 1 },
 	FINAL = { telegraph = 0.9, gap = 0.35, speed = 62, bulls = 3 },
+}
+
+-- Special bulls: rare cameo charges by NAMED catalog bulls inside normal waves
+-- (Main.maybeSpecialBull). Sometimes a wave bull launches as a RARE/EPIC/
+-- LEGENDARY bull from BullCatalog — rarity glow + name tag on the model, a
+-- live tease of what the lucky boxes can drop (no broadcast card; ANNOUNCE
+-- lists any rarities that should still get one).
+-- Speed stays RELATIVE to the round: the special multiplies the wave's CURRENT
+-- ramped speed by its rarity's SPEED_MULT, so an early-round legendary reads
+-- fast-for-now instead of endgame-fast. Multipliers are deliberately big -
+-- a special has to VISIBLY outrun the plain bulls beside it or the cameo
+-- doesn't register (x1.15-1.45 didn't read in play).
+Config.SPECIAL_BULLS = {
+	ENABLED = true,
+	CHANCE = 0.08,            -- odds per launched wave bull (after the interval gate)
+	MIN_INTERVAL = 20,        -- server-wide seconds between specials, so they stay an event
+	WEIGHTS = { RARE = 60, EPIC = 30, LEGENDARY = 10 }, -- rarity split among specials
+	SPEED_MULT = { RARE = 1.3, EPIC = 1.5, LEGENDARY = 1.7 }, -- x the wave's current speed
+	ANNOUNCE = {}, -- no broadcast cards; specials read via glow + name tag alone
 }
 
 -- Game modes. Main picks one per round: weighted random among modes whose
@@ -350,23 +423,23 @@ Config.MODES = {
 		id = "CLASSIC", name = "Classic", weight = 3, minPlayers = 1,
 		startSize = 9,
 		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
-		rampTime = 90,
+		rampTime = 157,
 	},
 	{
 		id = "MEGA", name = "Mega Grid", weight = 2, minPlayers = 1,
 		startSize = 11,
 		shrink = { times = { 30, 65, 100 }, aliveFractions = { 0.75, 0.5, 0.25 } },
-		rampTime = 105,
+		rampTime = 182,
 		moneyMult = 1.1,
 	},
 	{
 		id = "SMALL", name = "Small Grid", weight = 2, minPlayers = 1,
 		startSize = 7,
 		shrink = { times = { 35 }, aliveFractions = { 0.45 } },
-		rampTime = 60,
+		rampTime = 105,
 		moneyMult = 1.15,
 		difficulty = {
-			START = { telegraph = 1.4, gap = 1.0, speed = 28, bulls = 2 },
+			START = { telegraph = 2.4, gap = 2.0, speed = 16, bulls = 1 },
 			FINAL = { telegraph = 0.9, gap = 0.4, speed = 56, bulls = 3 },
 		},
 	},
@@ -374,25 +447,26 @@ Config.MODES = {
 		id = "STAMPEDE", name = "Stampede", weight = 2, minPlayers = 1,
 		startSize = 9,
 		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
-		rampTime = 75,
+		rampTime = 132,
 		moneyMult = 1.25,
 		difficulty = {
-			START = { telegraph = 1.4, gap = 1.1, speed = 31, bulls = 2 },
+			START = { telegraph = 2.4, gap = 2.0, speed = 17, bulls = 1 },
 			FINAL = { telegraph = 0.85, gap = 0.3, speed = 62, bulls = 4 },
 		},
 	},
-	{
-		id = "TEAMS", name = "Team Rush", weight = 2, minPlayers = 2,
-		teams = true,
-		startSize = 9,
-		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
-		rampTime = 90,
-	},
+	-- Team Rush disabled for now; uncomment to restore.
+	-- {
+	-- 	id = "TEAMS", name = "Team Rush", weight = 2, minPlayers = 2,
+	-- 	teams = true,
+	-- 	startSize = 9,
+	-- 	shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
+	-- 	rampTime = 90,
+	-- },
 	{
 		id = "LOWGRAV", name = "Low Gravity", weight = 2, minPlayers = 1,
 		startSize = 9,
 		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
-		rampTime = 90,
+		rampTime = 157,
 		gravity = 45,                 -- floaty moon-jumps; default is ~196
 		moneyMult = 1.15,
 	},
@@ -400,11 +474,11 @@ Config.MODES = {
 		id = "HIGHSPEED", name = "High Speed", weight = 2, minPlayers = 1,
 		startSize = 9,
 		shrink = { times = { 40, 80 }, aliveFractions = { 0.6, 0.3 } },
-		rampTime = 90,
+		rampTime = 157,
 		walkSpeed = 32,               -- players sprint at 2x (default 16)
 		moneyMult = 1.2,
 		difficulty = {                -- bulls charge faster too, to keep the twitch
-			START = { telegraph = 1.15, gap = 0.85, speed = 40, bulls = 2 },
+			START = { telegraph = 2.0, gap = 1.7, speed = 23, bulls = 1 },
 			FINAL = { telegraph = 0.75, gap = 0.3, speed = 80, bulls = 3 },
 		},
 	},

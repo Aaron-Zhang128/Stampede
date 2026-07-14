@@ -9,9 +9,9 @@
 	    BULL_ROLL_10     10 Robux bull rolls      -> BullRollService handler
 	    SPIN_1           1 Robux fortune spin     -> SpinService handler
 	    SPIN_10          10 Robux fortune spins   -> SpinService handler
-	    LUCKY_SECRET     Secret Block wheel spin  -> SpinService handler
-	    LUCKY_ALIEN      Alien Block wheel spin   -> SpinService handler
-	    LUCKY_GOD        GOD Block wheel spin     -> SpinService handler
+	    LUCKY_SECRET     Secret Block bull roll   -> BullRollService handler
+	    LUCKY_ALIEN      Alien Block bull roll    -> BullRollService handler
+	    LUCKY_GOD        GOD Block bull roll      -> BullRollService handler
 	    DAILY_CLAIM_ALL  whole 7-day daily loop   -> DailyRewardService handler
 	    SERVER_LUCK      server-wide roll luck    -> handled here (init)
 	    MONEY_PACK_1..5  buy Robux -> Money        -> handled here (init, Config.MONEY_PACKS)
@@ -47,8 +47,8 @@
 	Wiring (Main.server): init FIRST, before the services that register into it.
 	  MonetizationService.init()
 	  EconomyService.init(...)   -- registers DOUBLE_ROUND
-	  BullRollService.init()     -- registers BULL_ROLL / BULL_ROLL_10
-	  SpinService.init()         -- registers SPIN_1 / SPIN_10 + LUCKY_SECRET/ALIEN/GOD
+	  BullRollService.init()     -- registers BULL_ROLL / BULL_ROLL_10 + LUCKY_SECRET/ALIEN/GOD
+	  SpinService.init()         -- registers SPIN_1 / SPIN_10
 	  DailyRewardService.init()  -- registers DAILY_CLAIM_ALL
 ]]
 
