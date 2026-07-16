@@ -33,6 +33,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local BullCatalog = require(ReplicatedStorage.Bullrush.BullCatalog)
+local GridUtil = require(ReplicatedStorage.Bullrush.GridUtil)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
 
 local BullService = require(script.Parent.BullService)
@@ -41,7 +42,6 @@ local RoundService = require(script.Parent.RoundService)
 local ShrinkService = require(script.Parent.ShrinkService)
 local EconomyService = require(script.Parent.EconomyService)
 local BullRollService = require(script.Parent.BullRollService)
-local TutorialService = require(script.Parent.TutorialService)
 
 local REQUEST_GAP = 0.3 -- silent spam guard, well inside the real cooldown
 local DENIED_ACK_GAP = 4 -- send-mashers on cooldown get one red card per card-lifetime
@@ -158,6 +158,16 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 	-- Rebuild the lane clean; never forward tables from outside this module.
 	local lane = { axis = axis, index = index, direction = direction }
 
+	-- Reject a lane that runs over holes (Hashtag trench / Reverse-# pit): the
+	-- bull would fly the whole lane above the void and trample nobody. The client
+	-- ring already hides these, so this only catches a stale/spoofed send — and
+	-- rejecting BEFORE the cooldown is set means an honest miss costs nothing.
+	if GridUtil.isLaneBlocked(lane, ShrinkService.getHoleLines()) then
+		NotifyService.send(thrower, "That lane is a pit!", "red")
+		ack(thrower, "DENIED", { reason = "BOUNDS" })
+		return
+	end
+
 	-- The equipped bull (roll system) sets the throw's speed; STARTER matches
 	-- the old flat Config.REVENGE.SPEED, so unequipped players lose nothing.
 	local bull = BullRollService.getEquippedBull(thrower)
@@ -170,9 +180,6 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 		("%s charging down %s %d!"):format(
 			throwName, if axis == "row" then "row" else "column", index), "green")
 	ack(thrower, "THROW_OK", { cooldown = Config.REVENGE.COOLDOWN, lane = lane, bullId = bull.id })
-
-	-- Tutorial step 1 (send a bull) completes on any accepted throw.
-	TutorialService.onThrow(thrower)
 
 	task.spawn(function()
 		Remotes.Telegraph:FireAllClients({ lane }, Config.REVENGE.TELEGRAPH, bounds)

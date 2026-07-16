@@ -41,6 +41,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
+local GridUtil = require(ReplicatedStorage.Bullrush.GridUtil)
 
 local WaveDirector = {}
 
@@ -68,9 +69,22 @@ local function axisRange(axis: string, bounds): (number, number)
 	end
 end
 
-local function randomLane(axis: string, bounds)
+-- Pick a random OPEN lane on the axis. holeLines (Hashtag mode) marks full
+-- trench rows/cols that never carry a bull; those indices are skipped. With no
+-- holeLines every index is open, so this stays a uniform pick over the range.
+-- Returns nil only if the whole axis is trench (never for the # -- 9 of 11 open).
+local function randomLane(axis: string, bounds, holeLines)
 	local minIdx, maxIdx = axisRange(axis, bounds)
-	return { axis = axis, index = math.random(minIdx, maxIdx), direction = randomDirection() }
+	local choices = {}
+	for i = minIdx, maxIdx do
+		if not GridUtil.isLaneBlocked({ axis = axis, index = i, direction = 1 }, holeLines) then
+			table.insert(choices, i)
+		end
+	end
+	if #choices == 0 then
+		return nil
+	end
+	return { axis = axis, index = choices[math.random(#choices)], direction = randomDirection() }
 end
 
 -- Safety net for the hard rules (see header comment).
@@ -93,7 +107,7 @@ local function validate(bulls, bounds)
 		"WaveDirector: wave covers an entire axis")
 end
 
-function WaveDirector.getWave(intensity: number, bounds, difficulty, excluded, minBulls)
+function WaveDirector.getWave(intensity: number, bounds, difficulty, excluded, minBulls, holeLines)
 	assert(type(intensity) == "number",
 		"WaveDirector.getWave: intensity must be a number")
 	intensity = math.clamp(intensity, 0, 1)
@@ -128,14 +142,16 @@ function WaveDirector.getWave(intensity: number, bounds, difficulty, excluded, m
 				break -- both saturated; settle for fewer bulls
 			end
 		end
-		local lane = randomLane(axis, bounds)
-		local key = lane.axis .. lane.index
-		-- Occupied lanes are avoided only while picks are plentiful; past 25
-		-- attempts the exclusion is dropped so a wave always materializes.
-		if not used[key] and not (excluded[key] and attempts <= 25) then
-			used[key] = true
-			perAxis[axis] += 1
-			table.insert(bulls, { lane = lane })
+		local lane = randomLane(axis, bounds, holeLines)
+		if lane then
+			local key = lane.axis .. lane.index
+			-- Occupied lanes are avoided only while picks are plentiful; past 25
+			-- attempts the exclusion is dropped so a wave always materializes.
+			if not used[key] and not (excluded[key] and attempts <= 25) then
+				used[key] = true
+				perAxis[axis] += 1
+				table.insert(bulls, { lane = lane })
+			end
 		end
 	end
 

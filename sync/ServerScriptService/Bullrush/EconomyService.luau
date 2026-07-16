@@ -8,8 +8,8 @@
 	  Arena stages  alive through each shrink stage
 	  Win streak    STREAK_BONUS x current streak (capped), on top of the
 	                flat win pay that awardWinner already grants
-	Nothing is paid mid-round except revenge hits (RevengeService pays those
-	live and reports them here for display). settle() pays each category
+	Nothing is paid mid-round except revenge hits and shoves (RevengeService /
+	PushService pay those live and report them here for display). settle() pays each category
 	through the injected awardMoney - one choke point, so the friend boost
 	applies and the Summary tab's lines add up to what actually landed -
 	scaled by the mode's moneyMult, then fires RoundSummary per participant.
@@ -19,6 +19,7 @@
 	                  noteStageSurvived(), settle()
 	  RoundService    noteElimination() from eliminate()
 	  RevengeService  noteRevenge() after paying a hit
+	  PushService     noteShove() after paying a landed shove
 
 	"2x Rewards?" (Summary tab button) prompts Config.PRODUCTS.DOUBLE_ROUND;
 	ProcessReceipt re-grants the buyer's LAST settled round total once, raw -
@@ -60,6 +61,7 @@ type Entry = {
 	streakBonus: number,
 	winPaid: number,
 	revengePaid: number,
+	shovePaid: number,
 }
 local ledger: { [Player]: Entry } = {}
 
@@ -100,6 +102,7 @@ function EconomyService.roundStarted(participants: { Player }, mode)
 				streakBonus = 0,
 				winPaid = 0,
 				revengePaid = 0,
+				shovePaid = 0,
 			}
 		end
 	end
@@ -166,6 +169,15 @@ function EconomyService.noteRevenge(player: Player, paid: number)
 	end
 end
 
+-- RoundService.eliminate paid this when a player's ABILITY caused an elimination;
+-- recorded so the Summary can itemize it (reuses the shovePaid ledger slot).
+function EconomyService.noteKill(player: Player, paid: number)
+	local entry = ledger[player]
+	if entry then
+		entry.shovePaid += paid
+	end
+end
+
 -- Pays every ledger and mails each participant their Summary-tab payload.
 -- winnerInfo: { winnerName: string?, winnerUserId: number?, teamColor: ("RED"|"BLUE")?,
 --   winnerBull: BullRollService.EquippedBull? -- champion's mount for the Summary TinyBox }
@@ -211,6 +223,10 @@ function EconomyService.settle(winnerInfo: { [string]: any })
 		if entry.revengePaid > 0 then -- already paid live by RevengeService
 			table.insert(lines, { label = "Revenge bulls", amount = entry.revengePaid })
 			total += entry.revengePaid
+		end
+		if entry.shovePaid > 0 then -- ability kills, paid live by RoundService.eliminate
+			table.insert(lines, { label = "Eliminations", amount = entry.shovePaid })
+			total += entry.shovePaid
 		end
 
 		if player.Parent then

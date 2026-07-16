@@ -35,6 +35,13 @@ Config.INTERMISSION_TIME = 15
 Config.START_DELAY = 5            -- seconds players stand on the field after teleport before the round begins
 Config.MONEY_PER_WIN = 100
 
+-- Money paid when your ABILITY causes an elimination (its hit is credited with the
+-- victim's death within Config.PUSH.KILL_CREDIT seconds). This is the ONLY money
+-- abilities earn now — simply LANDING a hit (push/bomb/freeze/shock/mine) pays
+-- nothing. Applies to every ability; paid in RoundService.eliminate (face value,
+-- friend/pass boosts apply on top).
+Config.ABILITY_KILL_REWARD = 30
+
 -- Next-mode voting: during intermission, players vote among VOTE_OPTION_COUNT
 -- random eligible modes for the round to play; most votes wins (ties broken
 -- randomly). Disable to fall back to the plain weighted-random pickMode.
@@ -233,7 +240,7 @@ Config.BULLS = {
 	MUTATIONS_ENABLED = false,
 	BOXES = {
 		BASIC = {
-			name = "Lucky Box", tag = "Basic", order = 1,
+			name = "Common Egg", tag = "Basic", order = 1,
 			cost = 300,           -- ~1 win of earnings
 			color = Color3.fromRGB(205, 127, 50), -- bronze
 			image = "rbxassetid://91683630954327", -- shop card art (fallback: BOX glyph)
@@ -241,7 +248,7 @@ Config.BULLS = {
 			mutationChance = 0.08,
 		},
 		SUPER = {
-			name = "Super Lucky Box", tag = "Super", order = 2,
+			name = "Lava Egg", tag = "Super", order = 2,
 			cost = 1000,          -- ~3-4 wins of earnings
 			color = Color3.fromRGB(150, 190, 230), -- silver-blue
 			image = "rbxassetid://112914675470468", -- shop card art (fallback: SUPER glyph)
@@ -249,7 +256,7 @@ Config.BULLS = {
 			mutationChance = 0.14,
 		},
 		MEGA = {
-			name = "Mega Lucky Box", tag = "Mega", order = 3,
+			name = "Galaxy Egg", tag = "Mega", order = 3,
 			cost = 2500,          -- ~9 wins of earnings; the grind-target crate
 			color = Color3.fromRGB(255, 190, 40), -- gold
 			image = "rbxassetid://91208663021116", -- shop card art (fallback: MEGA glyph)
@@ -278,6 +285,17 @@ Config.BULLS = {
 			{ product = "OP_LUCKY_X10", count = 10 },
 		},
 	},
+}
+
+-- Community reward: a ONE-TIME free roll for liking + joining the Roblox group.
+-- The "Like and Join the community" panel (Main.client) claims it; the server
+-- (BullRollService) verifies group membership via Player:IsInGroup before it
+-- grants one free roll of REWARD_BOX (a Config.LUCKY_BLOCKS tier) and flips the
+-- persisted GroupRewardClaimed flag. In Studio the membership check is bypassed
+-- and the claim is NOT persisted, so the flow stays re-testable (never leaks live).
+Config.COMMUNITY = {
+	GROUP_ID = 111761595,      -- the Roblox community group players must join to claim
+	REWARD_BOX = "SECRET",     -- one free roll of this Config.LUCKY_BLOCKS tier on claim
 }
 
 -- Daily reward (Frames.Daily UI + the "Gifts" HUD button): a 7-day escalating
@@ -355,6 +373,125 @@ Config.PUSH = {
 	HITSTOP = 0,                  -- freeze-frame at contact (0 = off); >0 anchors the victim briefly before the launch
 	COOLDOWN = 4,                 -- seconds between shoves, per pusher
 	KILL_CREDIT = 6,              -- a fall this soon after a shove credits the pusher
+	MONEY_PER_HIT = 10,           -- Money paid to the pusher for every landed shove (PushService; face value + friend/pass boosts, shown on the Summary tab). The COOLDOWN caps the earn rate.
+}
+
+--==============================================================================
+-- New abilities (2026-07-14). Each is self-contained (its own service + client
+-- + this config block), modelled on Push. They're BUILT but not yet wired into
+-- an equip / HUD-button system — see each service's header for the hooks.
+--==============================================================================
+
+-- Extra Lives: a PASSIVE buff. While it's granted, a player carries HEARTS lives
+-- shown as a heart row over their head; a lethal hit spends a heart and revives
+-- them, and only the last heart is their final life. ExtraLivesService owns the
+-- hearts + the consume() hook you call from the elimination path.
+Config.EXTRA_LIVES = {
+	HEARTS = 2,                   -- total lives shown (survive HEARTS-1 lethal hits before you're out)
+	HEART_IMAGE = "rbxassetid://71758683165076", -- overhead heart icon (the uploaded 2-Lives art); lit for a life in hand, dimmed when spent
+	HEART_EMOJI = "❤️",           -- (legacy) a life still in hand
+	LOST_EMOJI = "🤍",            -- (legacy) a spent life
+	REVIVE_IFRAMES = 1.5,         -- seconds of forcefield shimmer after a heart is spent
+	FLING_RECOVER = 1.3,          -- seconds a survivor stays ragdolled after a bull hit before standing up
+}
+
+-- Bomb: THROW a lobbed bomb that arcs where you're aiming and, on its fuse,
+-- blasts everyone nearby AWAY from the blast. Real players get the burst applied
+-- on their own client (client-authoritative, like Push); bots are server-driven.
+-- SPEED/UP/UP_TIME/TIME mirror the Push knockback curve (see Config.PUSH).
+Config.BOMB = {
+	COOLDOWN = 8,                 -- seconds between throws, per player
+	THROW_SPEED = 60,             -- initial forward speed of the lobbed bomb, studs/s
+	THROW_UP = 24,                -- initial upward speed: a slight arc, not a high lob
+	STICK_FUSE = 0.5,             -- seconds from STICKING to a target to the blast (semtex)
+	FUSE = 1.4,                   -- last-resort cap: blow it if it never sticks (lobbed into the void)
+	RADIUS = 22,                  -- blast reach in studs
+	SPEED = 130,                  -- PEAK outward knockback at the blast, studs/s; eases to 0 over TIME
+	UP = 55,                      -- upward pop velocity at the blast, studs/s
+	UP_TIME = 0.45,               -- pop duration (Y ramps +UP -> -UP; decel ~ gravity for hang time)
+	TIME = 0.28,                  -- horizontal knockback window, seconds
+}
+
+-- Speed Boost: a burst of extra WalkSpeed for a few seconds with speed-line
+-- trails. Server-owned (it drives WalkSpeed) so the buff is real for physics and
+-- everyone sees the trails. Restores to the WalkSpeed captured at activation.
+Config.SPEED_BOOST = {
+	COOLDOWN = 10,                -- seconds between activations, per player
+	MULT = 1.8,                   -- WalkSpeed multiplier while active
+	DURATION = 4,                 -- seconds the boost lasts
+}
+
+-- Shockwave: SLAM the ground and RAGDOLL every OTHER player within RADIUS for
+-- RAGDOLL_TIME seconds, then they get back up on their own — a NON-lethal
+-- knockdown (unlike the bull's lethal fling). Self-centered AoE, no aim. Real
+-- players ragdoll on their own client (RagdollUtil keeps the assembly intact so
+-- network ownership holds); bots are server-driven.
+Config.SHOCKWAVE = {
+	COOLDOWN = 20,                -- seconds between slams, per player (wind-down doubled 2026-07-15)
+	RADIUS = 13,                  -- knockdown reach in studs (halved 2026-07-15)
+	RAGDOLL_TIME = 2.5,           -- seconds a caught player stays down before standing up (halved 2026-07-15)
+	UP = 26,                      -- small upward pop at the slam so the knockdown reads
+}
+
+-- Freeze Punch: a melee punch (Push's nearest-target reach) that FREEZES the
+-- victim solid for FREEZE_TIME seconds instead of launching them — locked in
+-- place inside an ice block, then released. Server-authoritative (WalkSpeed +
+-- anchored root, like SpeedBoost owns WalkSpeed).
+Config.FREEZE_PUNCH = {
+	RANGE = 9,                    -- punch reach in studs (matches Push's prompt range)
+	FREEZE_TIME = 2,              -- seconds the victim is frozen in place
+	COOLDOWN = 4,                 -- seconds between punches, per puncher
+}
+
+-- Fast Punch: a Push VARIANT — the exact same shove, but the cooldown is HALVED so
+-- you punch twice as often. Reuses PushService / PushClient / Config.PUSH; this block
+-- only carries the cooldown multiplier those two apply when Fast Punch is equipped.
+Config.FAST_PUNCH = {
+	MULT = 0.5,                   -- punch cooldown multiplier vs PUSH.COOLDOWN (0.5 = twice as fast)
+}
+
+-- Mine: DROP a stationary mine at your feet. When another living player steps on it
+-- (after a short arm delay) it EXPLODES and RAGDOLLS everyone within RADIUS for
+-- RAGDOLL_TIME — a NON-lethal knockdown (they get back up; they stay ALIVE). Folded
+-- into BombService / BombClient (spawn-a-part + explosion); ragdoll via RagdollUtil.
+Config.MINE = {
+	COOLDOWN = 6,                 -- seconds between drops, per player
+	ARM_DELAY = 0.6,              -- seconds before a fresh mine can trigger (so you don't pop it walking off)
+	LIFETIME = 30,                -- seconds a mine sits armed before it fizzles
+	RADIUS = 12,                  -- blast reach in studs (everyone within is ragdolled)
+	RAGDOLL_TIME = 2.5,           -- seconds a caught player stays down before standing back up
+	KNOCK = 22,                   -- outward launch speed at the blast, studs/s
+	UP = 45,                      -- upward pop at the blast so the ragdoll launches
+}
+
+-- Ability shop: the lobby shop sells ABILITIES for in-game Money (not bull rolls).
+-- Purchases are PERMANENT (saved to OwnedAbilities). Every ROTATION_SECONDS the
+-- shop features a fresh SERVER-WIDE set of FEATURED_COUNT abilities from the roster
+-- below — you can only buy what's currently featured (AbilityShopService owns the
+-- rotation + purchase). Push and Speed aren't sold; they're the free defaults
+-- everyone starts with (so the round picker always has a choice).
+Config.ABILITY_SHOP = {
+	ROTATION_SECONDS = 300,       -- featured set rotates every 5 minutes, server-wide
+	FEATURED_COUNT = 3,           -- abilities on sale each rotation
+	-- First-timers get this ability FREE from a pinned slot-1 card in the shop (the
+	-- tutorial's step-2 claim). Badged STARTER_RARITY on that free card only; its
+	-- normal rotation entry keeps its own price. Kept in step with AbilityShopService
+	-- (grant + eligibility) and Main.client (the free card + the tutorial arrow).
+	STARTER_FREE = "FastPunch",
+	STARTER_RARITY = "UNCOMMON",
+	-- Money price per ability (roster = the keys here; tune freely).
+	-- Prices roughly halved 2026-07-15 (user "make the abilities more affordable"):
+	-- a solid round nets ~$100-200, so these land at ~3-6 rounds each instead of 5-20.
+	PRICES = {
+		FreezePunch = 500,
+		FastPunch = 600,
+		Bomb = 650,
+		ExtraLives = 800,
+		Mine = 850,
+		Shockwave = 1000,
+	},
+	-- Card order in the shop / rotation roster (also the display order).
+	ORDER = { "Bomb", "Shockwave", "FreezePunch", "FastPunch", "Mine", "ExtraLives" },
 }
 
 -- TESTING: fake players so multiplayer modes can be playtested alone. When
@@ -443,6 +580,14 @@ Config.SPECIAL_BULLS = {
 --                  standing wins as a group (every member gets the win)
 --   gravity        workspace gravity for the round (default ~196; lower = floaty)
 --   walkSpeed      participant WalkSpeed for the round (default 16; higher = zippy)
+--   holeLines      { rows = {..}?, cols = {..}?, invert = boolean? } of absolute
+--                  grid indices. Normal (Hashtag's #): the listed rows/cols are
+--                  permanent lethal TRENCHES, the rest is solid. invert = true
+--                  (Reverse Hashtag): the pattern flips — the listed rows/cols
+--                  are the ONLY solid ground (thin # walkways) and every other
+--                  tile is a pit. Either way bulls never run a lane over holes;
+--                  falling into a hole eliminates like the arena edge (see
+--                  GridUtil.isHole / isLaneBlocked)
 -- 2026-07-13 easing pass: shrink times pushed ~5-10s later (more room mid-round)
 -- and the outlier rampTimes pulled toward the base 157 so every mode's FINAL
 -- lands near the ~2.5-minute round target.
@@ -459,6 +604,13 @@ Config.MODES = {
 		shrink = { times = { 35, 72, 110 }, aliveFractions = { 0.75, 0.5, 0.25 } },
 		rampTime = 170,
 		moneyMult = 1.1,
+		-- The big 11x11 grid gets MORE bulls than the default (1->3) so the extra
+		-- room plays HARDER, not emptier (2026-07-15, user request). telegraph/gap/
+		-- speed match the default curve — only the bull COUNT is raised (2 -> 6).
+		difficulty = {
+			START = { telegraph = 2.4, gap = 2.0, speed = 17, bulls = 2 },
+			FINAL = { telegraph = 0.9, gap = 0.35, speed = 62, bulls = 6 },
+		},
 	},
 	{
 		id = "SMALL", name = "Small Grid", weight = 2, minPlayers = 1,
@@ -504,10 +656,48 @@ Config.MODES = {
 		shrink = { times = { 45, 90 }, aliveFractions = { 0.6, 0.3 } },
 		rampTime = 157,
 		walkSpeed = 32,               -- players sprint at 2x (default 16)
+		speedBoostMult = 2.5,         -- Speed ABILITY boosts harder here (vs default SPEED_BOOST.MULT 1.8)
 		moneyMult = 1.2,
 		difficulty = {                -- bulls charge faster too, to keep the twitch
 			START = { telegraph = 2.0, gap = 1.7, speed = 23, bulls = 1 },
 			FINAL = { telegraph = 0.75, gap = 0.3, speed = 80, bulls = 3 },
+		},
+	},
+	{
+		-- Hashtag (#): the full 11x11 window with two trench ROWS and two trench
+		-- COLS carved out (holeLines 4 & 8), splitting the arena into nine 3x3
+		-- rooms like a tic-tac-toe board. The trenches are lethal — fall in and
+		-- you're out of bounds. Bulls only charge the SOLID lanes (never a full
+		-- trench), so each room's 3 rows/3 cols give just enough dodge room; the
+		-- 1-tile gaps between rooms are a risky running-jump apart. Shrink eats
+		-- the outer rooms from the outside in.
+		id = "HASHTAG", name = "Hashtag", weight = 2, minPlayers = 1,
+		startSize = 11,
+		holeLines = { rows = { 4, 8 }, cols = { 4, 8 } },
+		shrink = { times = { 55, 100 }, aliveFractions = { 0.55, 0.3 } },
+		rampTime = 157,
+		moneyMult = 1.2,
+	},
+	{
+		-- Reverse Hashtag: the Hashtag map turned inside out. The two lines that
+		-- were trenches (rows/cols 4 & 8) are now the ONLY solid ground — a # of
+		-- 1-tile-wide walkways — and the rooms between them are pits. Players
+		-- tightrope the corridors; step off and you fall. startSize 9 makes each
+		-- corridor 9 tiles long, keeping the # centered/symmetric (rooms 2-3-2)
+		-- inside the 2..10 window. Bulls charge only the four # lanes, so with the
+		-- 2-bull cap at least one whole corridor axis is always bull-free to flee
+		-- onto. Scarce dodge room, so bulls stay a hair slower/roomier than base
+		-- and it pays the most. One gentle shrink (to 7x7) keeps the # readable
+		-- rather than collapsing to a degenerate 5x5 ring.
+		id = "REVHASH", name = "Reverse Hashtag", weight = 2, minPlayers = 1,
+		startSize = 9,
+		holeLines = { rows = { 4, 8 }, cols = { 4, 8 }, invert = true },
+		shrink = { times = { 60 }, aliveFractions = { 0.4 } },
+		rampTime = 157,
+		moneyMult = 1.3,
+		difficulty = {
+			START = { telegraph = 2.4, gap = 2.0, speed = 17, bulls = 1 },
+			FINAL = { telegraph = 1.0, gap = 0.5, speed = 55, bulls = 2 },
 		},
 	},
 }

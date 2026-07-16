@@ -50,6 +50,11 @@ function DataHandler.GetDefaultProfile()
 		Bulls = {STARTER = true},   -- stored as {bullId = true}, like Chairs/Trails
 		EquippedBull = "STARTER",
 
+		-- Ability shop (AbilityShopService): abilities the player has BOUGHT,
+		-- {abilityKey = true}. Push is free/implicit and never stored. Mirrored to
+		-- Owns_<key> attributes on join so AbilityService.owns + the picker read it.
+		OwnedAbilities = {},
+
 		-- Banked FREE lucky-box openings, {boxId = count} (BullRollService spends
 		-- them before Money in requestRoll). New players start with one free
 		-- BASIC box so their first roll costs nothing; Data.server's load
@@ -266,6 +271,21 @@ function DataHandler.HasBull(player, bullId)
 	local profile = DataHandler.Profiles[player.UserId]
 	if not profile then return false end
 	return profile.Bulls[bullId] == true
+end
+
+-- Ability ownership helpers (AbilityShopService) -- OwnedAbilities is a dictionary
+-- {abilityKey = true}, same shape as Bulls. Push is free and never stored here.
+function DataHandler.AddAbility(player, abilityKey)
+	local profile = DataHandler.Profiles[player.UserId]
+	if not profile then return end
+	profile.OwnedAbilities = profile.OwnedAbilities or {}
+	profile.OwnedAbilities[abilityKey] = true
+end
+
+function DataHandler.HasAbility(player, abilityKey)
+	local profile = DataHandler.Profiles[player.UserId]
+	if not profile or not profile.OwnedAbilities then return false end
+	return profile.OwnedAbilities[abilityKey] == true
 end
 
 function DataHandler.GetEquippedBull(player)

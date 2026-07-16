@@ -93,6 +93,7 @@ end
 local bullrushFolder = waitFor(ReplicatedStorage, "Bullrush")
 local configModule = waitFor(bullrushFolder, "Config")
 local gridUtilModule = waitFor(bullrushFolder, "GridUtil")
+local ragdollUtilModule = waitFor(bullrushFolder, "RagdollUtil")
 local remotes = waitFor(bullrushFolder, "Remotes")
 local telegraphRemote = waitFor(remotes, "Telegraph")
 local chargeStartRemote = waitFor(remotes, "ChargeStart")
@@ -120,6 +121,10 @@ local bullVisualEndRemote = waitFor(remotes, "BullVisualEnd")
 -- OPTIONAL like the others: without it a bull hit still ragdolls us limp, just
 -- without the launch arc.
 local ragdollFlingRemote = waitFor(remotes, "RagdollFling")
+-- BullHitSurvive is server -> us when a bull connects but an Extra Lives heart
+-- absorbs it: we're NOT eliminated, so we get the hit feedback + a non-lethal fling
+-- and get back up. OPTIONAL like the others (created by RagdollService at boot).
+local bullHitSurviveRemote = waitFor(remotes, "BullHitSurvive")
 local bullCatalogModule = waitFor(bullrushFolder, "BullCatalog")
 local assetsFolder = waitFor(ReplicatedStorage, "BullrushAssets")
 local bullTemplate = waitFor(assetsFolder, "BullTemplate")
@@ -136,6 +141,7 @@ end
 
 local Config = require(configModule)
 local GridUtil = require(gridUtilModule)
+local RagdollUtil = ragdollUtilModule and require(ragdollUtilModule)
 
 --==============================================================================
 -- Tuning constants
@@ -664,7 +670,9 @@ local function getHumanoid(): Humanoid?
 end
 
 local function addTrauma(amount: number)
-	trauma = math.min(trauma + amount, MAX_TRAUMA)
+	-- Uncapped (MAX_TRAUMA clamp removed 2026-07-15, user request) so near-misses can
+	-- shake past the old 1.25 ceiling. Decay still pulls trauma back down every frame.
+	trauma = trauma + amount
 end
 
 -- strength 0..1: how hard the freeze displaces the camera and how much rattle
@@ -806,12 +814,21 @@ hitPopup.BackgroundTransparency = 1
 hitPopup.Font = Enum.Font.GothamBlack
 hitPopup.TextSize = 46
 hitPopup.TextColor3 = Color3.fromRGB(120, 255, 150)
-hitPopup.TextStrokeColor3 = Color3.fromRGB(0, 25, 0)
-hitPopup.TextStrokeTransparency = 0.3
+hitPopup.TextStrokeTransparency = 1 -- legacy stroke off; the UIStroke below is the outline
 hitPopup.TextTransparency = 1
 hitPopup.Visible = false
 hitPopup.ZIndex = 12
 hitPopup.Parent = hud
+
+-- Crisp outline on the "TRAMPLED X!" text (user request): a UIStroke reads far
+-- sharper than the legacy TextStroke (switched off above so the two don't muddy
+-- each other). UIStroke.Transparency doesn't follow TextTransparency, so
+-- showHitPopup drives it in lockstep with the text's fade in/out.
+local hitPopupStroke = Instance.new("UIStroke")
+hitPopupStroke.Thickness = 3
+hitPopupStroke.Color = Color3.fromRGB(0, 30, 8)
+hitPopupStroke.Transparency = 0.1
+hitPopupStroke.Parent = hitPopup
 
 local hitPopupToken = 0
 local function showHitPopup(text: string)
@@ -820,6 +837,7 @@ local function showHitPopup(text: string)
 	hitPopup.Text = text
 	hitPopup.Visible = true
 	hitPopup.TextTransparency = 0
+	hitPopupStroke.Transparency = 0.1
 	hitPopup.TextSize = 24
 	TweenService:Create(hitPopup,
 		TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
@@ -829,6 +847,7 @@ local function showHitPopup(text: string)
 			return
 		end
 		TweenService:Create(hitPopup, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+		TweenService:Create(hitPopupStroke, TweenInfo.new(0.4), { Transparency = 1 }):Play()
 		task.delay(0.45, function()
 			if hitPopupToken == token then
 				hitPopup.Visible = false
@@ -888,6 +907,25 @@ local selectionRing: { GridUtil.Lane } = {} -- clockwise entry points, screen or
 local selectionIndex = 0 -- 0 = nothing selected yet this session
 -- selectionTinted is declared up by tilePulse — the danger loop reads it
 
+-- The active round's hole layout (Hashtag's # / Reverse Hashtag's inverted #),
+-- or nil for normal modes. Looked up from Config.MODES by the modeId every
+-- RoundState carries (see applyRoundState); the revenge ring reads it to hide
+-- lanes that run over holes — a bull down one flies the whole lane above the
+-- void and hits nobody, so it should never be selectable.
+local currentHoleLines: any = nil
+
+local function holeLinesForMode(modeId): any
+	if typeof(modeId) ~= "string" then
+		return nil
+	end
+	for _, mode in Config.MODES do
+		if mode.id == modeId then
+			return mode.holeLines
+		end
+	end
+	return nil
+end
+
 -- Clockwise ring in SCREEN order under the bull-cam (screen-up = north = row
 -- rowMin): top edge left->right, right edge top->bottom, bottom edge
 -- right->left, left edge bottom->top. direction points the bull INTO the
@@ -895,17 +933,25 @@ local selectionIndex = 0 -- 0 = nothing selected yet this session
 -- lane set the old clickable marker ring offered.
 local function buildSelectionRing(window: GridUtil.Bounds): { GridUtil.Lane }
 	local ring = {}
+	-- Skip any lane that runs over holes (Hashtag trench / Reverse-# pit): a bull
+	-- down it hits nobody, so it isn't worth a selection slot. nil holeLines
+	-- (normal modes) blocks nothing, so the ring stays the full edge set.
+	local function add(lane)
+		if not GridUtil.isLaneBlocked(lane, currentHoleLines) then
+			table.insert(ring, lane)
+		end
+	end
 	for col = window.colMin, window.colMax do
-		table.insert(ring, { axis = "col", index = col, direction = 1 }) -- north edge, heading south
+		add({ axis = "col", index = col, direction = 1 }) -- north edge, heading south
 	end
 	for row = window.rowMin, window.rowMax do
-		table.insert(ring, { axis = "row", index = row, direction = -1 }) -- east edge, heading west
+		add({ axis = "row", index = row, direction = -1 }) -- east edge, heading west
 	end
 	for col = window.colMax, window.colMin, -1 do
-		table.insert(ring, { axis = "col", index = col, direction = -1 }) -- south edge, heading north
+		add({ axis = "col", index = col, direction = -1 }) -- south edge, heading north
 	end
 	for row = window.rowMax, window.rowMin, -1 do
-		table.insert(ring, { axis = "row", index = row, direction = 1 }) -- west edge, heading east
+		add({ axis = "row", index = row, direction = 1 }) -- west edge, heading east
 	end
 	return ring
 end
@@ -1543,7 +1589,7 @@ local function updateNearMisses()
 				if currentState == "ACTIVE" and not locallyEliminated then
 					local closeness = 1
 						- math.clamp((track.minDist - GRAZE_DEADLY) / (GRAZE_RANGE - GRAZE_DEADLY), 0, 1)
-					addTrauma((0.35 + 0.45 * closeness) * 2) -- 2x shake on a near miss
+					addTrauma(1.4 + 0.6 * closeness) -- near-miss shake ramps 1.4 (glancing) -> 2 (deadly-close); uncapped since the MAX_TRAUMA clamps were removed 2026-07-15
 					playOneShot("chargeWhoosh", { Volume = 0.14 + 0.245 * closeness, PlaybackSpeed = 1.25 })
 					local popDir = track.dir or (root.Position - here)
 					nearMissPop(here, Vector3.new(popDir.X, 0, popDir.Z).Unit, closeness)
@@ -1621,20 +1667,25 @@ end
 -- so the near-miss tracker and own-revenge-bull boost work unchanged.
 --==============================================================================
 
-local BULL_BOB_AMPLITUDE = 0.35 -- studs of gallop bounce
-local BULL_BOB_FREQ_PER_SPEED = 0.38 -- rad/s per stud/s: faster bulls gallop faster
-local BULL_PITCH_AMPLITUDE = 0.07 -- rad: nose dips with each stride
-local BULL_ROLL_AMPLITUDE = 0.06 -- rad: alternating shoulder lean
-
--- Squash & stretch (the "bouncy but grounded" juice). The bull coils out of the
--- gate STRETCHED along its travel axis (a lunge), eases back to normal, then
--- SQUASHES as it slams through the far edge. Body faces -Z, so its local Z is
--- the travel axis (scaled by `along`); X/Y are the cross-section (`cross`).
-local BULL_LUNGE_TIME = 0.16    -- seconds the launch stretch takes to settle
-local BULL_LUNGE_STRETCH = 0.30 -- +30% along travel at the very start of the charge
-local BULL_LUNGE_SQUASH = 0.14  -- -14% cross-section while stretched (fake volume)
-local BULL_IMPACT_TIME = 0.12   -- squash window as it barrels through the far edge
-local BULL_IMPACT_SQUASH = 0.20 -- -20% along / +cross as it slams flat
+-- Gallop + squash-and-stretch tuning, grouped into ONE table so the script's
+-- top-level local count stays under Luau's 200-per-function cap (this file sits
+-- right at the limit — adding loose top-level locals here breaks compilation of
+-- the WHOLE script, which silently kills all bull rendering). Squash & stretch =
+-- the "bouncy but grounded" juice: the bull coils out of the gate STRETCHED along
+-- its travel axis (a lunge), eases back to normal, then SQUASHES as it slams
+-- through the far edge. Body faces -Z, so its local Z is the travel axis (scaled
+-- by `along`); X/Y are the cross-section (`cross`).
+local BULL_ANIM = {
+	BOB_AMPLITUDE = 0.35,      -- studs of gallop bounce
+	BOB_FREQ_PER_SPEED = 0.38, -- rad/s per stud/s: faster bulls gallop faster
+	PITCH_AMPLITUDE = 0.07,    -- rad: nose dips with each stride
+	ROLL_AMPLITUDE = 0.06,     -- rad: alternating shoulder lean
+	LUNGE_TIME = 0.16,         -- seconds the launch stretch takes to settle
+	LUNGE_STRETCH = 0.30,      -- +30% along travel at the very start of the charge
+	LUNGE_SQUASH = 0.14,       -- -14% cross-section while stretched (fake volume)
+	IMPACT_TIME = 0.12,        -- squash window as it barrels through the far edge
+	IMPACT_SQUASH = 0.20,      -- -20% along / +cross as it slams flat
+}
 
 local bullCatalog = nil -- optional: model + mutation lookups degrade to the template
 if bullCatalogModule then
@@ -1912,28 +1963,28 @@ local function updateBullVisuals()
 		local elapsed = math.clamp(raw, 0, visual.duration)
 
 		local position = visual.startPos:Lerp(visual.endPos, elapsed / visual.duration)
-		local phase = elapsed * visual.speed * BULL_BOB_FREQ_PER_SPEED
-		local bob = BULL_BOB_AMPLITUDE * math.abs(math.sin(phase))
-		local nod = BULL_PITCH_AMPLITUDE * math.sin(2 * phase)
-		local sway = BULL_ROLL_AMPLITUDE * math.sin(phase)
+		local phase = elapsed * visual.speed * BULL_ANIM.BOB_FREQ_PER_SPEED
+		local bob = BULL_ANIM.BOB_AMPLITUDE * math.abs(math.sin(phase))
+		local nod = BULL_ANIM.PITCH_AMPLITUDE * math.sin(2 * phase)
+		local sway = BULL_ANIM.ROLL_AMPLITUDE * math.sin(phase)
 		visual.model:PivotTo(CFrame.new(position + Vector3.new(0, bob, 0)) * visual.rotation * CFrame.Angles(nod, 0, sway))
 
 		-- Coil-release lunge on the way out, slam-squash on arrival.
 		local body = visual.body
 		if body and visual.baseBodySize and body.Parent then
 			local along, cross = 1, 1
-			if elapsed < BULL_LUNGE_TIME then
-				local k = 1 - elapsed / BULL_LUNGE_TIME -- 1 -> 0
-				k = k * k                               -- quad ease-out of the stretch
-				along += BULL_LUNGE_STRETCH * k
-				cross -= BULL_LUNGE_SQUASH * k
+			if elapsed < BULL_ANIM.LUNGE_TIME then
+				local k = 1 - elapsed / BULL_ANIM.LUNGE_TIME -- 1 -> 0
+				k = k * k                                    -- quad ease-out of the stretch
+				along += BULL_ANIM.LUNGE_STRETCH * k
+				cross -= BULL_ANIM.LUNGE_SQUASH * k
 			end
 			local remain = visual.duration - elapsed
-			if remain < BULL_IMPACT_TIME then
-				local k = 1 - remain / BULL_IMPACT_TIME -- 0 -> 1 as it hits the far edge
+			if remain < BULL_ANIM.IMPACT_TIME then
+				local k = 1 - remain / BULL_ANIM.IMPACT_TIME -- 0 -> 1 as it hits the far edge
 				k = k * k
-				along -= BULL_IMPACT_SQUASH * k
-				cross += BULL_IMPACT_SQUASH * 0.6 * k
+				along -= BULL_ANIM.IMPACT_SQUASH * k
+				cross += BULL_ANIM.IMPACT_SQUASH * 0.6 * k
 			end
 			body.Size = Vector3.new(
 				visual.baseBodySize.X * cross,
@@ -2269,7 +2320,7 @@ eliminatedRemote.OnClientEvent:Connect(function(playerName, aliveCount, cause)
 		locallyEliminated = true
 		refreshArenaBase() -- the ring appears the instant you fall
 		triggerHitstop(1) -- freeze-frame the trample before the ragdoll launch
-		addTrauma(MAX_TRAUMA) -- trampled: the hardest hit the shake system allows
+		addTrauma(MAX_TRAUMA) -- trampled: a hard 1.25 kick (near-misses now ramp higher, 1.4-2, since the cap was removed)
 		playHapticPulse("GameplayExplosion") -- phones etc; gamepads peak via the trauma-driven motors
 		playOneShot("thud", { Volume = 0.42, PlaybackSpeed = 0.5 })
 		updateBridgeAttributes() -- the HUD "Become a Bull" button appears now
@@ -2305,6 +2356,32 @@ if ragdollFlingRemote then
 		-- replicated motion - this handler only stops the local control script
 		-- resisting the launch (PlatformStand + Physics state above) and hosts
 		-- the victim-side hit FX.
+	end)
+end
+
+-- Bull hit but SURVIVED (an Extra Lives heart absorbed it): we're NOT eliminated,
+-- so we get the full hit feedback (camera shake + haptics + thud) AND get flung the
+-- same way a kill would throw us — but non-lethally. We flop our OWN character
+-- (client-owned, so network ownership holds; see RagdollUtil) with the server's
+-- launch vector, then stand back up after EXTRA_LIVES.FLING_RECOVER. Play continues.
+if bullHitSurviveRemote and RagdollUtil then
+	bullHitSurviveRemote.OnClientEvent:Connect(function(velocity: Vector3)
+		local character = player.Character
+		if not character then
+			return
+		end
+		triggerHitstop(1) -- same freeze-frame punch as a lethal trample
+		addTrauma(MAX_TRAUMA)
+		playHapticPulse("GameplayExplosion")
+		playOneShot("thud", { Volume = 0.42, PlaybackSpeed = 0.5 })
+
+		RagdollUtil.ragdoll(character, if typeof(velocity) == "Vector3" then velocity else nil)
+		local recover = (typeof(Config.EXTRA_LIVES) == "table" and tonumber(Config.EXTRA_LIVES.FLING_RECOVER)) or 1.3
+		task.delay(recover, function()
+			if player.Character == character then
+				RagdollUtil.recover(character)
+			end
+		end)
 	end)
 end
 
@@ -2357,6 +2434,22 @@ local function applyRoundState(state, info)
 		lastBounds = info.bounds
 	elseif state ~= "ACTIVE" then
 		lastBounds = nil
+	end
+
+	-- Mirror the round's hole layout for the revenge ring. modeId rides the
+	-- first ACTIVE fire; forcing selectionBoundsKey blank rebuilds the ring with
+	-- it even when back-to-back rounds share a window size. Cleared off ACTIVE.
+	if state == "ACTIVE" then
+		if info.modeId ~= nil then
+			local holeLines = holeLinesForMode(info.modeId)
+			if holeLines ~= currentHoleLines then
+				currentHoleLines = holeLines
+				selectionBoundsKey = ""
+			end
+		end
+	elseif currentHoleLines ~= nil then
+		currentHoleLines = nil
+		selectionBoundsKey = ""
 	end
 
 	if state ~= "ACTIVE" then
@@ -2473,7 +2566,7 @@ RunService.RenderStepped:Connect(function(dt)
 	-- overlapping sources can never fight over CameraOffset. Gamepad motors
 	-- follow the same level and are zeroed by the same dirty-flag reset (which
 	-- must run even with no character, so shakeDirty is set unconditionally).
-	local shakeLevel = math.min(trauma + tremor, MAX_TRAUMA)
+	local shakeLevel = trauma + tremor -- uncapped (MAX_TRAUMA clamp removed 2026-07-15, user request)
 	if shakeLevel > 0 then
 		trauma = math.max(0, trauma - dt / SHAKE_DECAY_TIME)
 		shakeDirty = true

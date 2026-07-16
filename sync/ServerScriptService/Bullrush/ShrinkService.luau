@@ -37,6 +37,7 @@ local stage = 0
 local startSize = Config.GRID_SIZE -- window side length at stage 0 (set by reset)
 local maxStage = 0 -- how many shrink stages this round allows (set by reset)
 local bounds = GridUtil.boundsForStage(0)
+local roundHoleLines: any = nil -- carved trenches for the round (Hashtag), or nil
 local sinkGeneration = 0 -- bumped by reset() to cancel in-flight sinks
 
 local function getTile(row: number, col: number): BasePart?
@@ -102,14 +103,24 @@ function ShrinkService.getBounds(): GridUtil.Bounds
 	return bounds
 end
 
+-- The round's carved trench spec (Hashtag mode's #), or nil for normal modes.
+-- Consumers (AIService bot movement) read it to steer clear of the trenches.
+function ShrinkService.getHoleLines(): any
+	return roundHoleLines
+end
+
 -- Configure the arena for a round: cancel in-flight sinks, restore every
 -- window tile to canonical position / checkerboard color / visible, snap
 -- every tile OUTSIDE the window straight to gone (invisible, no collision,
 -- parked in the pit), stage back to 0.
 -- newStartSize defaults to the full grid; stages defaults to 0 (no shrinking).
-function ShrinkService.reset(newStartSize: number?, stages: number?)
+-- holeLines (optional, Hashtag mode) additionally sinks the listed trench
+-- rows/cols INSIDE the window straight to gone, exactly like out-of-bounds
+-- tiles, so the # pattern is present from second zero.
+function ShrinkService.reset(newStartSize: number?, stages: number?, holeLines: any?)
 	sinkGeneration += 1 -- any in-flight sink loop bails on its next frame
 
+	roundHoleLines = holeLines
 	startSize = newStartSize or Config.GRID_SIZE
 	-- Each stage peels a full outer ring (side length -2); never let the
 	-- window shrink below 3x3, whatever the mode's schedule says.
@@ -124,13 +135,13 @@ function ShrinkService.reset(newStartSize: number?, stages: number?)
 			if tile then
 				-- Size enforced from Config so a thickness tweak needs no manual rebuild.
 				tile.Size = Vector3.new(Config.TILE_PART_SIZE, Config.TILE_THICKNESS, Config.TILE_PART_SIZE)
-				if GridUtil.inBounds(row, col, bounds) then
+				if GridUtil.inBounds(row, col, bounds) and not GridUtil.isHole(row, col, holeLines) then
 					tile.Position = tilePartPosition(row, col)
 					tile.Color = if (row + col) % 2 == 0 then CHECKER_LIGHT else CHECKER_DARK
 					tile.Transparency = 0
 					tile.CanCollide = true
 				else
-					-- Outside the mode's window: already gone from second zero.
+					-- Outside the window, or a carved Hashtag trench: gone from second zero.
 					tile.Position = tilePartPosition(row, col) - Vector3.new(0, Config.SHRINK.SINK_DEPTH, 0)
 					tile.Color = CHARCOAL
 					tile.Transparency = 1

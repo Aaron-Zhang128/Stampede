@@ -202,7 +202,13 @@ RunService.Heartbeat:Connect(function()
 	-- The whole push system (HUD button + red target highlight) only lights up
 	-- while you're an ACTIVE-round participant in the arena. In the lobby you're
 	-- not participating, so the button hides and no target is ever painted.
-	if not isParticipating() then
+	-- Push is the DEFAULT ability; the button + red target highlight only light up
+	-- when it's the one equipped in the Ability Box (another ability hides them).
+	-- Fast Punch reuses this whole system (same shove) with a HALVED cooldown, so it
+	-- lights the button + target the same way Push does.
+	local equipped = player:GetAttribute("EquippedAbility") or "Push"
+	local punchEquipped = equipped == "Push" or equipped == "FastPunch"
+	if not isParticipating() or not punchEquipped then
 		pushBridge:SetAttribute("Enabled", false)
 		if currentTarget then
 			setTarget(nil, nil)
@@ -210,6 +216,10 @@ RunService.Heartbeat:Connect(function()
 		return
 	end
 	pushBridge:SetAttribute("Enabled", true)
+	-- Keep the HUD cooldown sweep in step with whichever punch is equipped.
+	pushBridge:SetAttribute("CooldownDuration", equipped == "FastPunch"
+		and PUSH.COOLDOWN * ((Config.FAST_PUNCH and Config.FAST_PUNCH.MULT) or 0.5)
+		or PUSH.COOLDOWN)
 
 	local root = localRoot() :: BasePart
 	local participant, character = findNearest(root.Position)
@@ -311,6 +321,10 @@ end
 --==============================================================================
 
 local function attemptPush()
+	local equipped = player:GetAttribute("EquippedAbility") or "Push"
+	if equipped ~= "Push" and equipped ~= "FastPunch" then
+		return -- some other ability is equipped in the Ability Box
+	end
 	if not isParticipating() then
 		return -- not an active-round participant (e.g. in the lobby)
 	end
@@ -325,7 +339,10 @@ local function attemptPush()
 	local target = currentTarget
 	Remotes.Push:FireServer(target) -- Player / bot rig Model, or nil on a miss
 	playShoveFeedback()
-	readyAt = os.clock() + PUSH.COOLDOWN
+	-- Fast Punch: same swing, half the cooldown.
+	readyAt = os.clock() + (equipped == "FastPunch"
+		and PUSH.COOLDOWN * ((Config.FAST_PUNCH and Config.FAST_PUNCH.MULT) or 0.5)
+		or PUSH.COOLDOWN)
 	pushBridge:SetAttribute("ReadyAt", readyAt)
 end
 

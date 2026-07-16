@@ -44,6 +44,10 @@ local function ensureRemote(name: string): RemoteEvent
 	return remote
 end
 local RagdollFling = ensureRemote("RagdollFling")
+-- server -> victim client: "you were hit but SURVIVED (a heart absorbed it)" —
+-- flop + camera shake, then stand back up. Carries the same launch vector as a
+-- lethal fling so a survived hit still throws you the way a kill would.
+local BullHitSurvive = ensureRemote("BullHitSurvive")
 
 local RagdollService = {}
 
@@ -187,6 +191,31 @@ function RagdollService.launch(character: Model?, direction: Vector3, speed: num
 		-- script doesn't fight the replicated launch, plus hit FX.
 		RagdollFling:FireClient(player, velocity, spin)
 	end
+end
+
+-- Non-lethal cousin of launch(): the victim SURVIVED the hit (an Extra Lives heart
+-- absorbed it), so we do NOT kill them or tear their rig apart. We still sell the
+-- hit — the same dust/thwack burst and the same launch vector as a lethal fling —
+-- but hand it to the victim's OWN client (BullHitSurvive), which flops them with
+-- RagdollUtil and stands them back up. Client-owned so network ownership holds (see
+-- RagdollUtil); players-only (bots don't carry Extra Lives). No-op on a missing or
+-- already-dead character.
+function RagdollService.flingSurvivor(character: Model?, direction: Vector3, speed: number)
+	if not character or not character.Parent then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root then
+		return
+	end
+	local player = Players:GetPlayerFromCharacter(character)
+	if not player then
+		return -- only real players survive hits; bots go through launch()
+	end
+	impactBurst(root.Position) -- everyone sees/hears the same connect
+	local velocity = computeFling(direction, speed)
+	BullHitSurvive:FireClient(player, velocity)
 end
 
 return RagdollService

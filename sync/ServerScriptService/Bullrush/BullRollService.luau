@@ -42,6 +42,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local BullCatalog = require(ReplicatedStorage.Bullrush.BullCatalog)
@@ -50,7 +51,6 @@ local DataHandler = require(ServerScriptService.UserData.DataHandler)
 
 local NotifyService = require(script.Parent.NotifyService)
 local MonetizationService = require(script.Parent.MonetizationService)
-local TutorialService = require(script.Parent.TutorialService)
 
 -- Silent spam guard, one clock PER ACTION (roll and equip each get their own):
 -- a guard shared across both let an equip silently eat a roll fired within the
@@ -79,6 +79,7 @@ end
 local rollRemote = ensureRemote("BullRoll")
 local equipRemote = ensureRemote("BullEquip")
 local ackRemote = ensureRemote("BullAck")
+local communityRemote = ensureRemote("ClaimCommunityReward")
 
 -- Smoke tests may drive this with duck-typed stub players; only real
 -- Players can receive remote acks (same idiom as RevengeService.ack).
@@ -219,10 +220,6 @@ local function grantRolls(player, count: number, source: string, boxId: string, 
 		if typeof(player) == "Instance" then
 			DataHandler.SyncStat(player, "Money")
 		end
-		-- Tutorial step 2 (open a box) completes here rather than at the
-		-- roll itself, so the overlay's next arrow (the Index) appears
-		-- exactly as the carousel lands instead of over a spinning reveal.
-		TutorialService.onRoll(player)
 		for _, b in broadcasts do
 			-- "chat" style: lands in the chat window as "[System]: ..." instead
 			-- of a notif card (Main.client's Notify handler routes it there);
@@ -275,6 +272,21 @@ function BullRollService.requestRoll(player, requestedBoxId: any)
 	grantRolls(player, 1, "MONEY", boxId, box)
 end
 
+-- Grant ONE free roll of a box/tier to a player (source "FREE"): resolves the
+-- box config from either the Money BOXES or the Robux LUCKY_BLOCKS tiers, then
+-- runs the standard grant path — so the client's BullAck "ROLLED" carousel
+-- auto-opens exactly like a bought roll. Used by the community reward claim.
+function BullRollService.grantFreeRoll(player, boxId: string)
+	local box = Config.BULLS.BOXES[boxId] or (Config.LUCKY_BLOCKS and Config.LUCKY_BLOCKS[boxId])
+	if not box then
+		warn(("[BullRoll] grantFreeRoll: unknown box '%s'"):format(tostring(boxId)))
+		return nil
+	end
+	if not profileReady(player) then
+		return nil
+	end
+	return grantRolls(player, 1, "FREE", boxId, box)
+end
 function BullRollService.requestEquip(player, bullId: any)
 	local now = os.clock()
 	if now - (lastEquipAt[player] or 0) < REQUEST_GAP then
@@ -296,8 +308,6 @@ function BullRollService.requestEquip(player, bullId: any)
 	end
 	DataHandler.SetEquippedBull(player, bullId) -- also mirrors the attribute
 	ack(player, "EQUIPPED", { bullId = bullId })
-	-- Tutorial step 3 (equip your bull) -> completion gift.
-	TutorialService.onEquip(player)
 end
 
 --==============================================================================
@@ -409,6 +419,42 @@ end)
 
 equipRemote.OnServerEvent:Connect(function(player, bullId)
 	BullRollService.requestEquip(player, bullId)
+end)
+
+-- "Like & Join the community" free reward (Main.client's Free Rewards panel):
+-- a ONE-TIME free Secret Block roll gated on Roblox group membership. Studio
+-- bypasses the group check AND skips persistence so the flow stays re-testable
+-- with no live leak. On success the reward rides grantFreeRoll's standard path,
+-- so the client's BullAck "ROLLED" carousel auto-opens like any roll; the reply
+-- on this remote only drives the panel's own feedback.
+local IS_STUDIO = RunService:IsStudio()
+communityRemote.OnServerEvent:Connect(function(player)
+	if not profileReady(player) then
+		communityRemote:FireClient(player, "DATA")
+		return
+	end
+	if DataHandler.GetStat(player, "GroupRewardClaimed") == true and not IS_STUDIO then
+		communityRemote:FireClient(player, "ALREADY_CLAIMED")
+		return
+	end
+	local groupId = tonumber(Config.COMMUNITY and Config.COMMUNITY.GROUP_ID) or 0
+	local inGroup = IS_STUDIO
+	if not inGroup and groupId > 0 then
+		local ok, res = pcall(function()
+			return player:IsInGroup(groupId)
+		end)
+		inGroup = ok and res == true
+	end
+	if not inGroup then
+		communityRemote:FireClient(player, "NOT_IN_GROUP")
+		return
+	end
+	if not IS_STUDIO then
+		DataHandler.SetStat(player, "GroupRewardClaimed", true)
+		player:SetAttribute("GroupRewardClaimed", true)
+	end
+	communityRemote:FireClient(player, "OK")
+	BullRollService.grantFreeRoll(player, (Config.COMMUNITY and Config.COMMUNITY.REWARD_BOX) or "SECRET")
 end)
 
 Players.PlayerRemoving:Connect(function(player)

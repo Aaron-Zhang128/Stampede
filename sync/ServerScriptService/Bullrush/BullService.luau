@@ -30,6 +30,7 @@ local GridUtil = require(ReplicatedStorage.Bullrush.GridUtil)
 local Remotes = ReplicatedStorage.Bullrush.Remotes
 
 local RagdollService = require(script.Parent.RagdollService)
+local ExtraLivesService = require(script.Parent.ExtraLivesService)
 
 -- Same ensure-on-require pattern as the other services: the Remotes folder is
 -- built in edit mode, so places that predate a feature still get its remotes.
@@ -129,15 +130,38 @@ function BullService.chargeAlong(startPos: Vector3, endPos: Vector3, crossCoord:
 						and math.abs(cross - crossCoord) < Config.BULL_HIT_HALF_WIDTH
 					then
 						killed[player] = true
-						-- Send them flying before onKill's Health = 0 default-death poof.
-						RagdollService.launch(character, endPos - startPos,
-							speed * LAUNCH_SPEED_SCALE + LAUNCH_SPEED_BASE)
-						onKill(player)
-						if state.cancelled then
-							-- That kill decided the round (onEliminated ->
-							-- cancelAll): spare the rest of this frame's
-							-- sweep so the last one standing actually wins.
-							break
+						-- Extra Lives: a player who's currently invulnerable (a revive
+						-- forcefield from a heart just spent) eats no hit; one holding
+						-- Extra Lives spends a heart to survive. Otherwise it's the
+						-- lethal fling + elimination. Only real players (not bot
+						-- proxies) carry the ability / i-frames.
+						local isRealPlayer = typeof(player) == "Instance"
+						local invulnerable = isRealPlayer
+							and character:FindFirstChildOfClass("ForceField") ~= nil
+						local survived = false
+						if not invulnerable and isRealPlayer
+							and player:GetAttribute("EquippedAbility") == "ExtraLives" then
+							survived = ExtraLivesService.consume(player)
+							if survived then
+								-- A heart absorbed the hit: still get FLUNG + camera shake
+								-- like any bull hit (same launch vector as a kill), but
+								-- NON-lethally — they ragdoll and get back up instead of
+								-- being eliminated.
+								RagdollService.flingSurvivor(character, endPos - startPos,
+									speed * LAUNCH_SPEED_SCALE + LAUNCH_SPEED_BASE)
+							end
+						end
+						if not (invulnerable or survived) then
+							-- Send them flying before onKill's Health = 0 default-death poof.
+							RagdollService.launch(character, endPos - startPos,
+								speed * LAUNCH_SPEED_SCALE + LAUNCH_SPEED_BASE)
+							onKill(player)
+							if state.cancelled then
+								-- That kill decided the round (onEliminated ->
+								-- cancelAll): spare the rest of this frame's
+								-- sweep so the last one standing actually wins.
+								break
+							end
 						end
 					end
 				end

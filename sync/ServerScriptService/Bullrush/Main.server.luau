@@ -53,6 +53,13 @@ local BullRollService = require(script.Parent.BullRollService)
 local SpinService = require(script.Parent.SpinService)
 local DailyRewardService = require(script.Parent.DailyRewardService)
 local TutorialService = require(script.Parent.TutorialService)
+local ExtraLivesService = require(script.Parent.ExtraLivesService)
+local BombService = require(script.Parent.BombService)
+local SpeedBoostService = require(script.Parent.SpeedBoostService)
+local ShockwaveService = require(script.Parent.ShockwaveService)
+local FreezePunchService = require(script.Parent.FreezePunchService)
+local AbilityService = require(script.Parent.AbilityService)
+local AbilityShopService = require(script.Parent.AbilityShopService)
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
 
 -- Onboarding funnel logger (start/finish of a player's first game). Loaded
@@ -74,6 +81,13 @@ BullRollService.init() -- bull roll/equip backend; registers its Robux-roll rece
 SpinService.init() -- fortune wheel: free-spin clock + Robux spin receipts
 DailyRewardService.init() -- daily login reward: 7-day loop + ready clock
 TutorialService.init() -- first-session tutorial: join trigger + resume (steps advance via service hooks)
+ExtraLivesService.init() -- extra-lives ability: overhead hearts + consume() hook (wired into BullService)
+BombService.init() -- throwable bomb ability: server-spawned bomb + outward blast knockback
+SpeedBoostService.init() -- speed-boost ability: server-owned WalkSpeed buff + speed-line trails
+ShockwaveService.init() -- shockwave ability: self-centered AoE non-lethal ragdoll
+FreezePunchService.init() -- freeze-punch ability: freeze the nearest player solid
+AbilityService.init() -- per-round ability selection (equip / ownership / lock)
+AbilityShopService.init() -- lobby ability shop: 5-min rotation + Money purchase + ownership
 
 --==============================================================================
 -- Per-round gravity (Low Gravity mode). workspace.Gravity replicates to every
@@ -98,6 +112,10 @@ local DEFAULT_WALK_SPEED = 16 -- Roblox StarterHumanoid default
 
 local function applyModeWalkSpeed(participants, mode)
 	local speed = mode.walkSpeed or DEFAULT_WALK_SPEED
+	-- The Speed ability's boost multiplier can be mode-specific (High Speed sprints
+	-- harder). SpeedBoostService reads this off the Bullrush folder; nil = its
+	-- default SPEED_BOOST.MULT.
+	Remotes.Parent:SetAttribute("SpeedBoostMult", mode.speedBoostMult)
 	for _, player in participants do
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -108,11 +126,28 @@ local function applyModeWalkSpeed(participants, mode)
 end
 
 local function restoreWalkSpeed(participants)
+	Remotes.Parent:SetAttribute("SpeedBoostMult", nil) -- back to the default boost between rounds
 	for _, player in participants do
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if humanoid then
 			humanoid.WalkSpeed = DEFAULT_WALK_SPEED
+		end
+	end
+end
+
+-- Hole modes (Hashtag / Reverse Hashtag) carve lethal trenches into the field, so a
+-- player who wanders during the pre-round countdown can fall in before the round even
+-- begins. Pin them on their tile (WalkSpeed 0) for that countdown; the thaw
+-- (applyModeWalkSpeed) hands their speed back the instant the round starts. Speed 0
+-- alone is enough -- with no horizontal speed a jump just lands on the same tile, and
+-- nothing else can shove them (push is round/practice-gated and no bulls are out yet).
+local function freezeOnField(participants)
+	for _, player in participants do
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = 0
 		end
 	end
 end
@@ -406,11 +441,15 @@ end
 
 -- All (row, col) pairs of the active window in random order, so spawn tiles
 -- are distinct.
-local function shuffledTiles(bounds): { { number } }
+local function shuffledTiles(bounds, holeLines): { { number } }
 	local tiles = {}
 	for row = bounds.rowMin, bounds.rowMax do
 		for col = bounds.colMin, bounds.colMax do
-			table.insert(tiles, { row, col })
+			-- Never spawn a player on a carved trench (Hashtag mode) — they'd
+			-- drop into the pit during the on-field countdown.
+			if not GridUtil.isHole(row, col, holeLines) then
+				table.insert(tiles, { row, col })
+			end
 		end
 	end
 	for i = #tiles, 2, -1 do
@@ -547,7 +586,7 @@ end
 -- Config.SHRINK.GRACE (stepping back in bounds resets their clock).
 -- Returns a stop function; Main calls it the moment the round is decided so
 -- nobody gets eliminated under the WINNER banner.
-local function startBoundsWatcher(): () -> ()
+local function startBoundsWatcher(holeLines): () -> ()
 	local running = true
 	task.spawn(function()
 		local outSince: { [Player]: number } = {}
@@ -556,20 +595,32 @@ local function startBoundsWatcher(): () -> ()
 			local bounds = ShrinkService.getBounds()
 			for _, player in RoundService.getAlive() do
 				local character = player.Character
+				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 				local root = character and character:FindFirstChild("HumanoidRootPart")
-				if root then
+				-- "Safe" = a LIVING character standing on a real, in-window,
+				-- non-hole tile. Anything else is unsafe and gets eliminated after
+				-- the grace window: no body yet, a dead/ragdolled body, out of
+				-- bounds, or fallen into a # trench (holeLines reads as out too).
+				-- Requiring a LIVE humanoid — not just a root — is what lets the
+				-- round END when a player died BEFORE startRound wired their Died
+				-- handler (e.g. fell in a trench during the on-field countdown):
+				-- that stale body can never fire Died, so without this check they'd
+				-- stay "alive" forever and the round could never reach 0-1 left.
+				local safe = false
+				if root and humanoid and humanoid.Health > 0 then
 					local row, col = GridUtil.worldToTile(root.Position)
-					if row ~= nil and GridUtil.inBounds(row, col, bounds) then
+					safe = row ~= nil and GridUtil.inBounds(row, col, bounds)
+						and not GridUtil.isHole(row, col, holeLines)
+				end
+				if safe then
+					outSince[player] = nil
+				else
+					if not outSince[player] then
+						outSince[player] = os.clock()
+					end
+					if os.clock() - outSince[player] > Config.SHRINK.GRACE then
 						outSince[player] = nil
-					else
-						if not outSince[player] then
-							outSince[player] = os.clock()
-							NotifyService.send(player, "GET BACK ON THE GRID!", "red", Config.SHRINK.GRACE + 1)
-						end
-						if os.clock() - outSince[player] > Config.SHRINK.GRACE then
-							outSince[player] = nil
-							RoundService.eliminate(player, "FELL")
-						end
+						RoundService.eliminate(player, "FELL")
 					end
 				end
 			end
@@ -696,7 +747,7 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 		if mode.startSize >= 9 and wave > 4 then
 			minBulls = if intensity < 0.35 then 2 else 3
 		end
-		local waveData = WaveDirector.getWave(intensity, bounds, difficulty, occupied, minBulls)
+		local waveData = WaveDirector.getWave(intensity, bounds, difficulty, occupied, minBulls, mode.holeLines)
 
 		setRoundState("ACTIVE", {
 			aliveCount = RoundService.aliveCount(),
@@ -827,9 +878,9 @@ while true do
 
 		-- Restore/configure the arena HERE (not at cleanup) so the sunken
 		-- tiles stay visible under the previous round's end banner.
-		ShrinkService.reset(mode.startSize, #mode.shrink.times)
+		ShrinkService.reset(mode.startSize, #mode.shrink.times, mode.holeLines)
 
-		local tiles = shuffledTiles(ShrinkService.getBounds())
+		local tiles = shuffledTiles(ShrinkService.getBounds(), mode.holeLines)
 		for i, player in participants do
 			local character = player.Character
 			if character then
@@ -846,6 +897,17 @@ while true do
 		-- Zippy round if the mode asks for it (restored after the waves).
 		applyModeWalkSpeed(participants, mode)
 
+		-- Ability selection: reset everyone to Push and open each player's picker
+		-- for the on-field countdown below — they choose before the bulls arrive.
+		AbilityService.beginSelection(participants)
+
+		-- Hole modes (Hashtag / Reverse Hashtag) carve lethal trenches into the grid,
+		-- so freeze everyone on their tile for the on-field countdown below -- nobody
+		-- should fall in before the round even starts. Thawed the instant it ends.
+		if mode.holeLines then
+			freezeOnField(participants)
+		end
+
 		-- Breather on the field: everyone stands on their tile for a short
 		-- countdown before bulls, shrink, and eliminations kick in. The
 		-- `starting` flag makes the client swap the sticky card for big
@@ -860,9 +922,15 @@ while true do
 			})
 			task.wait(1)
 		end
+		-- Countdown's over: hand hole-mode players their movement back for the round
+		-- (they were frozen in place above so nobody wandered into a trench).
+		if mode.holeLines then
+			applyModeWalkSpeed(participants, mode)
+		end
 
 		local roundStart = os.clock()
 		RoundService.startRound(participants, isTeams)
+		AbilityService.lockSelection(participants) -- pick window closed; lock the choice for the round
 		EconomyService.roundStarted(participants, mode)
 		RevengeService.roundStarted()
 
@@ -899,13 +967,16 @@ while true do
 			end
 		end
 
-		local stopWatcher = startBoundsWatcher()
+		local stopWatcher = startBoundsWatcher(mode.holeLines)
 		runWaves(soloRound, roundStart, mode)
 		stopWatcher()
 		RoundService.onEliminated = nil -- the waves' instant-end hook retires with them
 		RevengeService.roundEnded()
 		restoreGravity() -- back to normal for the end banner + lobby
 		restoreWalkSpeed(participants) -- reset any survivors' sprint
+		for _, p in participants do
+			AbilityService.clear(p) -- drop the round's ability + any extra-life hearts
+		end
 
 		local aliveList = RoundService.getAlive()
 		local summaryWinner: { [string]: any } = {} -- for the Summary tab (EconomyService.settle)

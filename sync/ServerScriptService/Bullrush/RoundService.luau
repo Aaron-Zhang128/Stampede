@@ -54,10 +54,10 @@ end
 -- within Config.PUSH.KILL_CREDIT seconds of a shove is credited to the
 -- pusher: the feed shows "<pusher> ELIMINATED <victim>" instead of the
 -- unattributed row.
-local recentPush: { [Player]: { byName: string, at: number } } = {}
+local recentPush: { [Player]: { byName: string, by: Player, at: number } } = {}
 
 function RoundService.notePush(victim: Player, pusher: Player)
-	recentPush[victim] = { byName = pusher.Name, at = os.clock() }
+	recentPush[victim] = { byName = pusher.Name, by = pusher, at = os.clock() }
 end
 
 -- A missing profile (player left mid-round, data still loading, ...) must
@@ -141,6 +141,13 @@ function RoundService.eliminate(player: Player, cause: string?)
 		and os.clock() - push.at <= (Config.PUSH.KILL_CREDIT or 6) then
 		cause = "PUSH"
 		pushedBy = push.byName
+		-- Their ABILITY caused this death — pay them for the KILL (the only money
+		-- abilities earn; landing a hit pays nothing). Face value through awardMoney
+		-- so friend/pass boosts apply; itemized on the Summary ledger.
+		if isRealPlayer(push.by) and push.by.Parent then
+			local paidKill = RoundService.awardMoney(push.by, Config.ABILITY_KILL_REWARD or 30)
+			EconomyService.noteKill(push.by, paidKill)
+		end
 	end
 
 	-- Bull hits kill the character; Health = 0 re-triggers Died ->

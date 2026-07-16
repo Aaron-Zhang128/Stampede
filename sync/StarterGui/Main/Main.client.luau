@@ -37,6 +37,22 @@ local player = Players.LocalPlayer
 local gui = script.Parent
 local SideUI = gui:WaitForChild("SideUI")
 local Frames = gui:WaitForChild("Frames")
+
+-- Ability art: ONE source of truth for each ability's image so it looks the SAME
+-- everywhere abilities appear — the round picker, the HUD Ability Box, the ability
+-- shop (Shop1), and the skills index (Shop2). Sourced from the Shop2 skill-card art
+-- the designer set (2026-07-15). Add a new ability's art here and every surface
+-- follows. When set, the image replaces that ability's emoji glyph.
+local ABILITY_IMAGE = {
+	Push = "rbxassetid://120680544153706",
+	Speed = "rbxassetid://127185649209271",
+	Bomb = "rbxassetid://129685303359422",
+	ExtraLives = "rbxassetid://71758683165076",
+	Shockwave = "rbxassetid://129036682553810",
+	FreezePunch = "rbxassetid://107113469378932",
+	Mine = "rbxassetid://125888253465870",
+	FastPunch = "rbxassetid://140046707321452",
+}
 local Store = Frames:WaitForChild("Store")
 local storeContainer = Store:WaitForChild("StoreFrame"):WaitForChild("Container")
 
@@ -102,6 +118,22 @@ local function openFrame(frame)
 	frame.Visible = true
 	tween(scale, POP_IN, { Scale = 1 })
 end
+
+-- Close whatever lobby window is open (shop, etc.) the moment a round BEGINS, so
+-- the shop tab never hangs over the gameplay once the game starts.
+task.spawn(function()
+	local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+	local remotes = bullrush and bullrush:FindFirstChild("Remotes")
+	local stateRemote = remotes and remotes:WaitForChild("RoundState", 30)
+	if not (stateRemote and stateRemote:IsA("RemoteEvent")) then
+		return
+	end
+	stateRemote.OnClientEvent:Connect(function(state)
+		if state == "ACTIVE" and currentFrame then
+			closeFrame(currentFrame)
+		end
+	end)
+end)
 
 -- The container itself must be visible or every window opens invisibly (its
 -- children toggle, it doesn't) — force it in case an Explorer click hid it.
@@ -246,63 +278,45 @@ local RED_OFF = ColorSequence.new({
 -- The kit's On/Off gradient pair doubles as the state look (On = ready to
 -- enter, Off = currently viewing, retinted red so "Exit Cam" reads as a
 -- stop control).
+-- The SideUI Button1(s): now the EXIT control ONLY. Shown while the overhead
+-- cam is up so it reads as a "stop" (red Off ramp) and stays exactly where the
+-- kit parks it. ENTERING the cam moved to the dedicated bottom-center pulsing
+-- button (section 20), so this one no longer shows "Become a Bull" or pulses.
 local function wireBullCamButton(btn)
 	handled[btn] = true
-	btn.Visible = false -- only round spectators of an ACTIVE round see it
+	btn.Visible = false -- only shown while actually viewing the cam
 	for _, d in ipairs(btn:GetDescendants()) do
 		if d:IsA("UIGradient") and d.Name == "Off" then
 			d.Color = RED_OFF
 		end
 	end
-	local function apply(viewing, canThrow)
-		local label = btn:FindFirstChild("Name")
-		if label and label:IsA("TextLabel") then
-			label.Text = if viewing then "Exit Cam"
-				elseif canThrow then "Become a Bull"
-				else "Bull Cam"
-		end
-		for _, d in ipairs(btn:GetDescendants()) do
-			if d:IsA("UIGradient") or d:IsA("UIStroke") then
-				if d.Name == "On" then
-					d.Enabled = not viewing
-				elseif d.Name == "Off" then
-					d.Enabled = viewing
-				end
+	-- Fixed "Exit Cam" red-stop look (it's only ever visible while viewing):
+	-- On = green ready ramp OFF, Off = red stop ramp ON.
+	local label = btn:FindFirstChild("Name")
+	if label and label:IsA("TextLabel") then
+		label.Text = "Exit Cam"
+	end
+	for _, d in ipairs(btn:GetDescendants()) do
+		if d:IsA("UIGradient") or d:IsA("UIStroke") then
+			if d.Name == "On" then
+				d.Enabled = false
+			elseif d.Name == "Off" then
+				d.Enabled = true
 			end
 		end
 	end
-	apply(false, false)
 	task.spawn(function()
 		local bridge = ReplicatedStorage:WaitForChild("RevengeViewBridge", 30)
 		if not (bridge and bridge:IsA("BindableEvent")) then
 			return -- BullrushClient absent; the button just stays hidden
 		end
 		local function refresh()
-			btn.Visible = bridge:GetAttribute("Eligible") == true
-			apply(bridge:GetAttribute("Viewing") == true, bridge:GetAttribute("CanThrow") == true)
+			btn.Visible = bridge:GetAttribute("Viewing") == true
 		end
-		bridge:GetAttributeChangedSignal("Eligible"):Connect(refresh)
-		bridge:GetAttributeChangedSignal("CanThrow"):Connect(refresh)
 		bridge:GetAttributeChangedSignal("Viewing"):Connect(refresh)
 		refresh()
 		btn.Activated:Connect(function()
 			bridge:Fire()
-		end)
-		-- Attention pulse: while the button is up and the player is NOT already
-		-- in the cam, it breathes ±6% so a freshly-eliminated player notices
-		-- their way into revenge. Manual RenderStepped math like every looped
-		-- animation here (Run-mode tween freeze); it drives Size, not the
-		-- UIScale, so section 3's hover/press tweens ride on top untouched.
-		local baseSize = btn.Size
-		RunService.RenderStepped:Connect(function()
-			if btn.Visible and bridge:GetAttribute("Viewing") ~= true then
-				local k = 1 + 0.06 * math.sin(os.clock() * 4)
-				btn.Size = UDim2.new(
-					baseSize.X.Scale * k, baseSize.X.Offset * k,
-					baseSize.Y.Scale * k, baseSize.Y.Offset * k)
-			elseif btn.Size ~= baseSize then
-				btn.Size = baseSize -- parked at rest while hidden / in the cam
-			end
 		end)
 	end)
 end
@@ -312,10 +326,18 @@ local FRAME_MAP = {
 	Store = "Store",
 	Gifts = "Daily",
 	Index = "Index",
+	-- The left "Index" button was renamed to "Inventory" (still the bull inventory).
+	Inventory = "Index",
 	Rebirth = "Rebirth1",
 	Buy = "StockShop",
 	Sell = "Sell",
-	Config = "Config/Settings",
+	-- The old Config/Settings button was repurposed into the SKILLS button: it now
+	-- opens Shop2 (the skills index — buildSkillsIndex below). Mapped under every
+	-- likely instance name in case the button was renamed in Studio. Settings itself
+	-- moves to its own small gear button (added right after the button-feedback loop).
+	Config = "Shop2",
+	Skills = "Shop2",
+	Skill = "Shop2",
 }
 
 for _, d in ipairs(SideUI:GetDescendants()) do
@@ -403,6 +425,36 @@ local function playClick()
 end
 local function playHover()
 	playUiSound(0.9, 1.5)
+end
+
+-- Shared "button juice": hover grows the button (+ a hover tick), a press dips it,
+-- release settles it, and a genuine activation plays the click. Applied to every
+-- static GuiButton at startup AND reused for buttons built at runtime (e.g. the
+-- ability-picker cards) so they all react identically. Deps (ensureScale / tween /
+-- HOVER_TI / PRESS_TI / playHover / playClick) are all defined above.
+local function addButtonFeedback(btn)
+	local scale = ensureScale(btn)
+	local base = scale.Scale
+	local hovering = false
+	btn.MouseEnter:Connect(function()
+		hovering = true
+		playHover()
+		tween(scale, HOVER_TI, { Scale = base * 1.07 })
+	end)
+	btn.MouseLeave:Connect(function()
+		hovering = false
+		tween(scale, HOVER_TI, { Scale = base })
+	end)
+	btn.MouseButton1Down:Connect(function()
+		tween(scale, PRESS_TI, { Scale = base * 0.92 })
+	end)
+	btn.MouseButton1Up:Connect(function()
+		tween(scale, HOVER_TI, { Scale = hovering and base * 1.07 or base })
+	end)
+	-- Click SFX on a genuine activation (press+release, or gamepad/keyboard);
+	-- Activated rather than MouseButton1Down so a scroll-drag that starts on a
+	-- card button doesn't machine-gun the sound.
+	btn.Activated:Connect(playClick)
 end
 -- One-shot from any named SFX-library template (same clone-route-reap idea as
 -- playUiSound, but not locked to the Click tick). Used for the round-end reveal
@@ -505,21 +557,49 @@ do
 		btn.Active = true
 		btn.Parent = holder
 
-		-- Swap the glyph for the glove and recolor the decorative ring green.
+		-- The Ability Box presents whichever ability is EQUIPPED (default Push).
+		-- Resolve the kit's icon / ring / name labels here; bindTo() below skins
+		-- them per ability and swaps in a glyph for the non-Push ones.
 		local icon = btn:FindFirstChild("Icon")
 		if icon and icon:IsA("ImageLabel") then
-			icon.Image = GLOVE_IMAGE
 			icon.ImageColor3 = Color3.new(1, 1, 1)
 		end
 		local decor = btn:FindFirstChild("Decor")
 		local ring = decor and decor:FindFirstChild("Highlight")
 		local ringStroke = ring and ring:FindFirstChild("UIStroke")
-		if ringStroke and ringStroke:IsA("UIStroke") then
-			ringStroke.Color = RING_GREEN
-		end
 		local nameLabel = btn:FindFirstChild("Name")
-		if nameLabel and nameLabel:IsA("TextLabel") then
-			nameLabel.Text = "PUSH"
+
+		-- Emoji glyph laid over the icon slot (used for every ability except Push,
+		-- which keeps its glove image).
+		local glyphLabel = Instance.new("TextLabel")
+		glyphLabel.Name = "Glyph"
+		glyphLabel.BackgroundTransparency = 1
+		glyphLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+		glyphLabel.Position = UDim2.fromScale(0.5, 0.45)
+		glyphLabel.Size = UDim2.fromScale(0.66, 0.66)
+		glyphLabel.Font = Enum.Font.GothamBold
+		glyphLabel.TextScaled = true
+		glyphLabel.RichText = true
+		glyphLabel.Text = ""
+		glyphLabel.Visible = false
+		glyphLabel.ZIndex = 3
+		glyphLabel.Parent = btn
+
+		-- Per-ability skin. `target` marks the melee abilities (Push, Freeze Punch)
+		-- whose button dims when nobody's in range; `passive` (Extra Lives) has no
+		-- bridge / cooldown. Keys mirror each ability client's activation key.
+		local ABILITY = {
+			Push = { label = "PUSH", image = GLOVE_IMAGE, ring = RING_GREEN, key = "F", bridge = "PushBridge", target = true },
+			Bomb = { label = "BOMB", glyph = "💣", ring = Color3.fromRGB(255, 150, 60), key = "F", bridge = "BombBridge" },
+			Speed = { label = "SPEED", glyph = "⚡", ring = Color3.fromRGB(120, 220, 255), key = "F", bridge = "SpeedBoostBridge" },
+			ExtraLives = { label = "2 Lives", glyph = "❤️", ring = Color3.fromRGB(255, 90, 120), passive = true },
+			Shockwave = { label = "SHOCK", glyph = "🌀", ring = Color3.fromRGB(150, 205, 255), key = "F", bridge = "ShockwaveBridge" },
+			FreezePunch = { label = "FREEZE", glyph = "❄️", ring = Color3.fromRGB(150, 225, 255), key = "F", bridge = "FreezePunchBridge", target = true },
+			Mine = { label = "MINE", glyph = "🧨", ring = Color3.fromRGB(255, 90, 60), key = "F", bridge = "MineBridge" },
+			FastPunch = { label = "FAST", image = GLOVE_IMAGE, ring = Color3.fromRGB(255, 210, 80), key = "F", bridge = "PushBridge", target = true },
+		}
+		local function currentAbilityKey(): string
+			return player:GetAttribute("EquippedAbility") or "Push"
 		end
 
 		-- Compact keybind badge straddling the button's TOP-RIGHT CORNER (half
@@ -531,16 +611,14 @@ do
 		-- 1.5%-of-screen right margin.
 		local UserInputService = game:GetService("UserInputService")
 
-		local function activationHint(): string
+		local function activationHint(kbKey: string): string
 			local lastInput = UserInputService:GetLastInputType()
 			if lastInput == Enum.UserInputType.Touch then
 				return "TAP"
-			elseif lastInput.Name:find("Gamepad") then
-				return "Y"
 			elseif not UserInputService.KeyboardEnabled and UserInputService.TouchEnabled then
 				return "TAP"
 			end
-			return "F"
+			return kbKey
 		end
 
 		local hintLabel = Instance.new("TextLabel")
@@ -553,7 +631,7 @@ do
 		hintLabel.TextScaled = true
 		hintLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 		hintLabel.TextXAlignment = Enum.TextXAlignment.Center
-		hintLabel.Text = activationHint()
+		hintLabel.Text = activationHint((ABILITY[currentAbilityKey()] or ABILITY.Push).key or "F")
 		hintLabel.ZIndex = 21 -- above the cooldown curtain
 		hintLabel.Parent = btn
 		-- Minimal padding now that there's no fill — just enough that the glyph's
@@ -583,7 +661,7 @@ do
 		)
 		hintGradient.Parent = hintLabel
 		UserInputService.LastInputTypeChanged:Connect(function()
-			hintLabel.Text = activationHint()
+			hintLabel.Text = activationHint((ABILITY[currentAbilityKey()] or ABILITY.Push).key or "F")
 		end)
 
 		-- Cooldown drain: a dark curtain over the button that shrinks from full
@@ -608,65 +686,438 @@ do
 		local RING_BRIGHT = 0.1
 		local RING_DIM = 0.4
 
-		-- Wait for PushClient to publish the bridge, then bind the look + taps.
-		task.spawn(function()
-			local bridge = ReplicatedStorage:WaitForChild("PushBridge", 30)
-			if not bridge then
+		-- Ability Box controller: this one button presents whichever ability is
+		-- EQUIPPED and forwards taps to that ability's bridge, re-skinning +
+		-- re-binding on every EquippedAbility change. Passive abilities (Extra
+		-- Lives) have no bridge — the box just shows their glyph while they're live.
+		local activeBridge: Instance? = nil
+		local bridgeConns: { RBXScriptConnection } = {}
+
+		local function skinFor(key: string)
+			local info = ABILITY[key] or ABILITY.Push
+			local art = ABILITY_IMAGE[key] or info.image
+			if icon then
+				icon.Image = art or ""
+				icon.Visible = art ~= nil
+			end
+			-- the image replaces the emoji when an ability has art
+			glyphLabel.Text = info.glyph or ""
+			glyphLabel.Visible = info.glyph ~= nil and art == nil
+			if ringStroke then
+				ringStroke.Color = info.ring or RING_GREEN
+			end
+			if nameLabel then
+				nameLabel.Text = info.label or key
+			end
+			if info.key then
+				hintLabel.Text = activationHint(info.key)
+			end
+		end
+
+		local function applyLook()
+			local info = ABILITY[currentAbilityKey()] or ABILITY.Push
+			if info.passive then
+				-- No bridge: show the box while the ability is live (hearts granted).
+				holder.Visible = player:GetAttribute("Lives") ~= nil
+				hintLabel.Visible = false
+				curtain.Visible = false
+				glyphLabel.TextTransparency = 0
 				return
 			end
-
-			local function isCooling()
-				return os.clock() < (bridge:GetAttribute("ReadyAt") or 0)
+			-- Pre-round PICK window: the server sets AbilityLocked=false at ability
+			-- selection. Show the equipped ability's box (dimmed PREVIEW) the moment it's
+			-- picked — no cooldown/target logic until the bridge goes live at round start.
+			-- (The Free-reward button hides across this same window, so the box takes over.)
+			local selecting = player:GetAttribute("AbilityLocked") == false
+			local bridge = activeBridge
+			local enabled = bridge ~= nil and bridge:GetAttribute("Enabled") == true
+			holder.Visible = enabled or selecting
+			if not holder.Visible then
+				hintLabel.Visible = false
+				curtain.Visible = false
+				return
 			end
-
-			local function applyLook()
-				holder.Visible = bridge:GetAttribute("Enabled") == true
-				hintLabel.Visible = holder.Visible
-				if not holder.Visible then
-					curtain.Visible = false
-					return
+			if not enabled then
+				-- selecting preview only: dimmed, no hint / cooldown / target logic yet
+				hintLabel.Visible = false
+				curtain.Visible = false
+				if icon and icon.Visible then
+					icon.ImageTransparency = ICON_DIM
 				end
-				local cooling = isCooling()
-				local bright = bridge:GetAttribute("HasTarget") == true and not cooling
-				if icon then
-					icon.ImageTransparency = bright and ICON_BRIGHT or ICON_DIM
-				end
+				glyphLabel.TextTransparency = 0.4
 				if ringStroke then
-					ringStroke.Transparency = bright and RING_BRIGHT or RING_DIM
+					ringStroke.Transparency = RING_DIM
 				end
-				curtain.Visible = cooling
+				return
 			end
+			hintLabel.Visible = true
+			local cooling = bridge and os.clock() < (bridge:GetAttribute("ReadyAt") or 0)
+			-- Melee abilities (target = true) dim when nobody's in range; the rest
+			-- are always bright when ready.
+			local hasTarget = (not info.target) or (bridge and bridge:GetAttribute("HasTarget") == true)
+			local bright = hasTarget and not cooling
+			if icon and icon.Visible then
+				icon.ImageTransparency = bright and ICON_BRIGHT or ICON_DIM
+			end
+			glyphLabel.TextTransparency = bright and 0 or 0.4
+			if ringStroke then
+				ringStroke.Transparency = bright and RING_BRIGHT or RING_DIM
+			end
+			curtain.Visible = cooling == true
+		end
 
-			bridge:GetAttributeChangedSignal("Enabled"):Connect(applyLook)
-			bridge:GetAttributeChangedSignal("HasTarget"):Connect(applyLook)
-			bridge:GetAttributeChangedSignal("ReadyAt"):Connect(applyLook)
+		local function bindTo(key: string)
+			for _, c in bridgeConns do
+				c:Disconnect()
+			end
+			table.clear(bridgeConns)
+			activeBridge = nil
+			skinFor(key)
 
-			-- Drain the curtain only while the button is up and on cooldown.
-			RunService.RenderStepped:Connect(function()
-				if not (holder.Visible and curtain.Visible) then
-					return
+			local info = ABILITY[key] or ABILITY.Push
+			if info.bridge then
+				local function attach(bridge: Instance)
+					activeBridge = bridge
+					for _, attr in { "Enabled", "HasTarget", "ReadyAt" } do
+						bridgeConns[#bridgeConns + 1] = bridge:GetAttributeChangedSignal(attr):Connect(applyLook)
+					end
+					applyLook()
 				end
-				local readyAt = bridge:GetAttribute("ReadyAt") or 0
-				local duration = bridge:GetAttribute("CooldownDuration") or 0
-				local remaining = readyAt - os.clock()
-				if remaining <= 0 then
-					curtain.Visible = false
-					applyLook() -- restore the bright/dim look now the shove is ready
-					return
+				local existing = ReplicatedStorage:FindFirstChild(info.bridge)
+				if existing then
+					attach(existing)
+				else
+					-- The ability's client may not have published its bridge yet.
+					task.spawn(function()
+						local bridge = ReplicatedStorage:WaitForChild(info.bridge, 30)
+						if bridge and currentAbilityKey() == key then
+							attach(bridge)
+						end
+					end)
 				end
-				curtain.Size = UDim2.fromScale(1, duration > 0 and math.clamp(remaining / duration, 0, 1) or 0)
-			end)
-
-			btn.Activated:Connect(function()
-				bridge:Fire()
-				playClick()
-			end)
-			btn.MouseEnter:Connect(playHover)
-
+			end
 			applyLook()
+		end
+
+		-- Drain the cooldown curtain against whatever bridge is currently active.
+		RunService.RenderStepped:Connect(function()
+			if not (holder.Visible and curtain.Visible and activeBridge) then
+				return
+			end
+			local readyAt = activeBridge:GetAttribute("ReadyAt") or 0
+			local duration = activeBridge:GetAttribute("CooldownDuration") or 0
+			local remaining = readyAt - os.clock()
+			if remaining <= 0 then
+				curtain.Visible = false
+				applyLook() -- restore the bright/dim look now the ability is ready
+				return
+			end
+			curtain.Size = UDim2.fromScale(1, duration > 0 and math.clamp(remaining / duration, 0, 1) or 0)
 		end)
+
+		-- Tap forwards to the equipped ability's bridge.
+		btn.Activated:Connect(function()
+			local b = activeBridge :: any
+			if b then
+				b:Fire()
+				playClick()
+			end
+		end)
+		btn.MouseEnter:Connect(playHover)
+
+		player:GetAttributeChangedSignal("Lives"):Connect(applyLook)
+		-- Round enters/leaves the ability-pick window (AbilityLocked false→true→nil):
+		-- show the box as a preview at selection, keep it through the round, hide in lobby.
+		player:GetAttributeChangedSignal("AbilityLocked"):Connect(applyLook)
+		player:GetAttributeChangedSignal("EquippedAbility"):Connect(function()
+			bindTo(currentAbilityKey())
+		end)
+		bindTo(currentAbilityKey())
 	end
 end
+
+---------------------------------------------------------------- 2d) Ability picker
+-- A translucent grey overlay shown at the START of each round (during the on-field
+-- countdown) with a card for every ability you OWN. Tap one to equip it into your
+-- Ability Box for the round. Non-blocking (backdrop Active = false, so you can still
+-- move; Push is the default), and the choice LOCKS when the round goes ACTIVE.
+--   AbilityService fires AbilityOffer (owned keys) at the countdown; a tap sends
+--   AbilityChoose(key); the picker closes when RoundState leaves the pre-round.
+task.spawn(function()
+	local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
+	local remotes = bullrush and bullrush:WaitForChild("Remotes", 30)
+	if not remotes then
+		return -- Bullrush systems missing from this place copy; skip the picker
+	end
+	local offerRemote = remotes:WaitForChild("AbilityOffer")
+	local chooseRemote = remotes:WaitForChild("AbilityChoose")
+	local stateRemote = remotes:WaitForChild("RoundState")
+
+	local PICK = {
+		Push = { label = "Push", glyph = "🥊", image = "rbxassetid://125148837464247", rarity = "COMMON", blurb = "Push Players" },
+		Bomb = { label = "Explosive", glyph = "💣", rarity = "UNCOMMON", blurb = "Throw Bombs" },
+		Speed = { label = "Speed", glyph = "⚡", rarity = "COMMON", blurb = "Run Faster" },
+		ExtraLives = { label = "2 Lives", glyph = "❤️", rarity = "EPIC", blurb = "Survive 2 Hits" },
+		Shockwave = { label = "Shockwave", glyph = "🌀", rarity = "LEGENDARY", blurb = "Knock Players Down" },
+		FreezePunch = { label = "Freeze Punch", glyph = "❄️", rarity = "RARE", blurb = "Freeze Players" },
+		Mine = { label = "Mine", glyph = "🧨", rarity = "EPIC", blurb = "Drop a Mine" },
+		FastPunch = { label = "Fast Punch", glyph = "👊", rarity = "UNCOMMON", blurb = "Punch Faster" },
+	}
+	local ORDER = { "Push", "Bomb", "Speed", "ExtraLives", "Shockwave", "FreezePunch", "Mine", "FastPunch" }
+
+	-- Power-tier color code, on the SAME gradient the bull system uses
+	-- (BullCatalog.Rarities): Common grey → Uncommon green → Rare blue → Epic purple
+	-- → Legendary gold. A card's box border + body tint read from this, so each
+	-- ability is colored by how OP it is: Shockwave/Bomb legendary, Mine/Extra Lives
+	-- epic, Freeze Punch rare, Fast Punch uncommon, Push/Speed common.
+	local RARITY_COLOR = {
+		COMMON = Color3.fromRGB(205, 212, 222),
+		UNCOMMON = Color3.fromRGB(58, 224, 104),
+		RARE = Color3.fromRGB(46, 158, 255),
+		EPIC = Color3.fromRGB(196, 78, 255),
+		LEGENDARY = Color3.fromRGB(255, 182, 24),
+	}
+
+	-- Each ability card is a clone of the actual HUD ability box (the "Index" kit
+	-- button Push is built from), skinned per ability — so the picker uses the same
+	-- box the abilities use in play.
+	local boxTemplate
+	for _, d in ipairs(SideUI:GetDescendants()) do
+		if d.Name == "Index" and d:IsA("ImageButton") then
+			boxTemplate = d
+			break
+		end
+	end
+
+	-- Fresh gui each spawn (Main re-runs on respawn), same dance as PushGui.
+	local old = gui.Parent:FindFirstChild("AbilityPickerGui")
+	if old then
+		old:Destroy()
+	end
+	local pickerGui = Instance.new("ScreenGui")
+	pickerGui.Name = "AbilityPickerGui"
+	pickerGui.DisplayOrder = 19000 -- under PushGui (20000) so the Ability Box stays on top
+	pickerGui.ResetOnSpawn = false
+	pickerGui.IgnoreGuiInset = true
+	pickerGui.Enabled = false
+	pickerGui.Parent = gui.Parent
+
+	-- Dim grey backdrop across the whole screen. Active = false so it never eats
+	-- movement input (the picker is non-blocking).
+	local backdrop = Instance.new("Frame")
+	backdrop.Name = "Backdrop"
+	backdrop.Size = UDim2.fromScale(1, 1)
+	backdrop.BackgroundColor3 = Color3.fromRGB(15, 16, 22)
+	backdrop.BackgroundTransparency = 0.4
+	backdrop.BorderSizePixel = 0
+	backdrop.Active = false
+	backdrop.Parent = pickerGui
+
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.BackgroundTransparency = 1
+	title.AnchorPoint = Vector2.new(0.5, 0)
+	title.Position = UDim2.fromScale(0.5, 0.13)
+	title.Size = UDim2.fromScale(0.8, 0.09)
+	title.Font = Enum.Font.GothamBlack
+	title.TextScaled = true
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.Text = "CHOOSE YOUR ABILITY"
+	title.Parent = backdrop
+	local titleStroke = Instance.new("UIStroke")
+	titleStroke.Color = Color3.fromRGB(0, 0, 0)
+	titleStroke.Thickness = 3
+	titleStroke.Parent = title
+
+
+	-- Card grid: TOP-anchored below the title and laid out top-down, so the cards
+	-- always start under the "CHOOSE YOUR ABILITY" title (never grow up over it) no
+	-- matter how many rows / how narrow the screen.
+	local grid = Instance.new("Frame")
+	grid.Name = "Cards"
+	grid.AnchorPoint = Vector2.new(0.5, 0)
+	grid.Position = UDim2.fromScale(0.5, 0.28)
+	grid.Size = UDim2.fromScale(0.94, 0.66)
+	grid.BackgroundTransparency = 1
+	grid.Parent = backdrop
+	local layout = Instance.new("UIGridLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Top
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	-- SCALE, not offset: fractions of the grid frame so cards scale with the screen
+		-- (calibrated to the old 160x210 / 28px look at 1080p; box aspect stays square).
+		layout.CellPadding = UDim2.fromScale(0.016, 0.038)
+	layout.CellSize = UDim2.fromScale(0.09, 0.3)
+	layout.Parent = grid
+
+	local cards: { [string]: any } = {}
+
+	local function refreshHighlight()
+		local equipped = player:GetAttribute("EquippedAbility") or "Push"
+		for key, cell in cards do
+			local box = cell:FindFirstChild("Box")
+			local selStroke = box and box:FindFirstChild("Sel")
+			if selStroke and selStroke:IsA("UIStroke") then
+				selStroke.Transparency = (key == equipped) and 0 or 1
+			end
+		end
+	end
+
+	local function makeCard(key: string, order: number)
+		local info = PICK[key] or PICK.Push
+
+		-- Cell = the ability BOX (a clone of the HUD ability box) up top + a one-line
+		-- blurb beneath it.
+		local cell = Instance.new("Frame")
+		cell.Name = key
+		cell.LayoutOrder = order
+		cell.BackgroundTransparency = 1
+		cell.Parent = grid
+
+		local box
+		if boxTemplate then
+			box = boxTemplate:Clone()
+		else
+			box = Instance.new("ImageButton") -- fallback if the kit button is missing
+			box.BackgroundColor3 = Color3.fromRGB(26, 28, 38)
+			local c = Instance.new("UICorner")
+			c.CornerRadius = UDim.new(0.1, 0)
+			c.Parent = box
+		end
+		box.Name = "Box"
+		box.AnchorPoint = Vector2.new(0.5, 0)
+		box.Position = UDim2.fromScale(0.5, 0)
+		box.Size = UDim2.fromScale(1, 1)
+		box.Visible = true
+		box.Active = true
+		box.Parent = cell
+		local aspect = Instance.new("UIAspectRatioConstraint")
+		aspect.AspectRatio = 1
+		aspect.DominantAxis = Enum.DominantAxis.Height
+		aspect.Parent = box
+
+		-- Skin the box's icon / ring / name exactly like the in-play Ability Box.
+		local art = ABILITY_IMAGE[key] or info.image
+		local icon = box:FindFirstChild("Icon")
+		if icon and icon:IsA("ImageLabel") then
+			icon.Image = art or ""
+			icon.Visible = art ~= nil
+			icon.ImageColor3 = Color3.new(1, 1, 1)
+		end
+		-- Rarity color-code: the box's outline, its inner ring, and a dark body tint
+		-- all read from the ability's power tier, on the same gradient the bull system
+		-- uses. The colored outline IS "the box around it".
+		local rarityCol = RARITY_COLOR[info.rarity] or RARITY_COLOR.COMMON
+		box.BackgroundColor3 = rarityCol:Lerp(Color3.fromRGB(24, 26, 34), 0.8)
+		local rarityBorder = Instance.new("UIStroke")
+		rarityBorder.Name = "Rarity"
+		rarityBorder.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		rarityBorder.Color = rarityCol
+		rarityBorder.Thickness = 3
+		rarityBorder.Parent = box
+		local decor = box:FindFirstChild("Decor")
+		local ring = decor and decor:FindFirstChild("Highlight")
+		local ringStroke = ring and ring:FindFirstChild("UIStroke")
+		if ringStroke and ringStroke:IsA("UIStroke") then
+			ringStroke.Color = rarityCol
+		end
+		local nameLabel = box:FindFirstChild("Name")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			nameLabel.Text = info.label
+		end
+
+		-- Emoji glyph over the icon slot only when the ability has NO art image.
+		if not art then
+			local glyph = Instance.new("TextLabel")
+			glyph.Name = "Glyph"
+			glyph.BackgroundTransparency = 1
+			glyph.AnchorPoint = Vector2.new(0.5, 0.5)
+			glyph.Position = UDim2.fromScale(0.5, 0.42)
+			glyph.Size = UDim2.fromScale(0.6, 0.6)
+			glyph.Font = Enum.Font.GothamBold
+			glyph.TextScaled = true
+			glyph.RichText = true
+			glyph.Text = info.glyph
+			glyph.ZIndex = 5
+			glyph.Parent = box
+		end
+
+		-- Bright outline when this ability is the equipped one.
+		local sel = Instance.new("UIStroke")
+		sel.Name = "Sel"
+		sel.Color = Color3.fromRGB(255, 255, 255)
+		sel.Thickness = 4
+		sel.Transparency = 1
+		sel.Parent = box
+
+		-- Same "juice" as every other UI button: hover grows the card + ticks,
+		-- press dips it, release settles, and a pick plays the click (addButtonFeedback
+		-- wires the hover/press SFX + scale so these feel identical to the rest of the UI).
+		addButtonFeedback(box)
+		box.Activated:Connect(function()
+			chooseRemote:FireServer(key)
+			refreshHighlight() -- optimistic; the server confirms via EquippedAbility
+			-- Picked → the selection screen has done its job; close it entirely. A
+			-- short beat lets the selected-card highlight + click SFX register before
+			-- it vanishes (the round-start state change still closes it as a fallback
+			-- for anyone who never picks).
+			task.delay(0.18, function()
+				pickerGui.Enabled = false
+			end)
+		end)
+
+		cards[key] = cell
+	end
+
+	local function openPicker(ownedKeys)
+		for _, card in cards do
+			card:Destroy()
+		end
+		table.clear(cards)
+		local ownedSet = {}
+		for _, key in ownedKeys do
+			ownedSet[key] = true
+		end
+		local order = 0
+		local ordered = {} -- cells in display order, for the staggered pop-in
+		for _, key in ORDER do
+			if ownedSet[key] and PICK[key] then
+				order += 1
+				makeCard(key, order)
+				table.insert(ordered, cards[key])
+			end
+		end
+		refreshHighlight()
+		pickerGui.Enabled = true
+
+		-- Lively entrance: each card POPS in from nothing, staggered across the row,
+		-- with a little overshoot — so the screen doesn't just blink into place.
+		local POP_TI = TweenInfo.new(0.34, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+		for i, cell in ipairs(ordered) do
+			local s = ensureScale(cell)
+			s.Scale = 0
+			task.delay(0.045 * (i - 1), function()
+				if cell.Parent then
+					tween(s, POP_TI, { Scale = 1 })
+					playSfx("Pop Sound Effect", 0.55, 1 + 0.04 * (i - 1)) -- a rising "pop" as each card pops in
+				end
+			end)
+		end
+	end
+
+	offerRemote.OnClientEvent:Connect(function(ownedKeys)
+		if typeof(ownedKeys) == "table" then
+			openPicker(ownedKeys)
+		end
+	end)
+	stateRemote.OnClientEvent:Connect(function(state)
+		if state == "ACTIVE" or state == "WINNER" or state == "ROUNDOVER" or state == "WAITING" then
+			pickerGui.Enabled = false
+		end
+	end)
+	player:GetAttributeChangedSignal("EquippedAbility"):Connect(refreshHighlight)
+end)
 
 -- Settings audio sliders: drag the handle across a row (or click the track) to
 -- set the matching SoundGroup volume live. "Music" -> SoundService.BackgroundMusic,
@@ -813,34 +1264,40 @@ do
 	end
 end
 
-local function addButtonFeedback(btn)
-	local scale = ensureScale(btn)
-	local base = scale.Scale
-	local hovering = false
-	btn.MouseEnter:Connect(function()
-		hovering = true
-		playHover()
-		tween(scale, HOVER_TI, { Scale = base * 1.07 })
-	end)
-	btn.MouseLeave:Connect(function()
-		hovering = false
-		tween(scale, HOVER_TI, { Scale = base })
-	end)
-	btn.MouseButton1Down:Connect(function()
-		tween(scale, PRESS_TI, { Scale = base * 0.92 })
-	end)
-	btn.MouseButton1Up:Connect(function()
-		tween(scale, HOVER_TI, { Scale = hovering and base * 1.07 or base })
-	end)
-	-- Click SFX on a genuine activation (press+release, or gamepad/keyboard);
-	-- Activated rather than MouseButton1Down so a scroll-drag that starts on a
-	-- card button doesn't machine-gun the sound.
-	btn.Activated:Connect(playClick)
-end
-
 for _, d in ipairs(gui:GetDescendants()) do
 	if d:IsA("GuiButton") then
 		addButtonFeedback(d)
+	end
+end
+
+-- Settings gear: the old Config/Settings button now opens the Skills index, so a
+-- small gear in the top-right corner keeps settings reachable. Top-right clears the
+-- left-side HUD; nudge its Position if it collides with anything. Rebuilt each spawn
+-- (destroy-then-create) so respawns never stack duplicates.
+do
+	local settingsFrame = Frames:FindFirstChild("Config/Settings")
+	local existing = gui:FindFirstChild("SettingsGear")
+	if existing then
+		existing:Destroy()
+	end
+	if settingsFrame then
+		-- Match the HUD "Config" settings button: same button plate + gear icon
+		-- (assets pulled from SideUI...Config so the two read as the same button).
+		local gear = Instance.new("ImageButton")
+		gear.Name = "SettingsGear"
+		gear.AnchorPoint = Vector2.new(1, 0)
+		gear.Position = UDim2.new(1, -14, 0, 14)
+		gear.Size = UDim2.fromOffset(74, 74)
+		gear.BackgroundTransparency = 1
+		gear.AutoButtonColor = false
+		gear.Image = "rbxassetid://100904737394351" -- the settings gear icon (no plate behind it)
+		gear.ScaleType = Enum.ScaleType.Fit
+		gear.ZIndex = 40
+		gear.Parent = gui
+		addButtonFeedback(gear) -- same hover/press juice as every other button
+		gear.Activated:Connect(function()
+			openFrame(settingsFrame)
+		end)
 	end
 end
 
@@ -958,15 +1415,7 @@ for _, d in ipairs(SideUI:GetDescendants()) do
 		end
 	end
 end
-local boosts = SideUI:FindFirstChild("Boosts")
-if boosts then
-	for _, slot in ipairs(boosts:GetChildren()) do
-		local icon = slot:IsA("Frame") and slot:FindFirstChild("Icon")
-		if icon then
-			addAnim("pulse", icon, 0.05, 2, ALWAYS)
-		end
-	end
-end
+-- Bottom-right Boosts icons stay STILL now (no pulse) — user request 2026-07-15.
 
 ---------------------------------------------------------------- 5) marquees
 -- The lucky-block marquees show the ACTUAL prizes you can roll for: each
@@ -5180,7 +5629,7 @@ do
 		local header = shopFrame:FindFirstChild("Header")
 		local headerName = header and header:FindFirstChild("Name")
 		if headerName and headerName:IsA("TextLabel") then
-			headerName.Text = "Lucky Boxes"
+			headerName.Text = "Eggs"
 		end
 		-- the kit header ships a pickaxe glyph; swap it for a real lucky-box image
 		-- (the Mega box art) in the same slot, falling back to a BOX text glyph if no
@@ -5349,6 +5798,563 @@ do
 		end
 	end
 
+	-------------------------------------------------- ability shop (Frames.Shop1)
+	-- The lobby shop now SELLS ABILITIES for Money instead of bull rolls. The
+	-- server (AbilityShopService) rotates a fresh SERVER-WIDE featured set every
+	-- Config.ABILITY_SHOP.ROTATION_SECONDS and publishes it as attributes on
+	-- ReplicatedStorage.Bullrush: AbilityShopFeatured (JSON array of keys) +
+	-- AbilityShopEndsAt (server time the rotation ends). We rebuild the cards
+	-- whenever the featured set changes, paint a live countdown off EndsAt, and
+	-- send purchases through the AbilityBuy remote (server acks {ok,reason,...};
+	-- Owns_<key> flips on success so the card repaints to OWNED). Prices are
+	-- static (Config), read straight from the passed table.
+	-- Ability rarity (shown in each card's Rarity slot) + its tier colour ramp.
+	-- Rarities match the picker's PICK table — keep the two in step.
+	local ABILITY_RARITY_COLOR = {
+		COMMON = Color3.fromRGB(205, 212, 222),
+		UNCOMMON = Color3.fromRGB(58, 224, 104),
+		RARE = Color3.fromRGB(46, 158, 255),
+		EPIC = Color3.fromRGB(196, 78, 255),
+		LEGENDARY = Color3.fromRGB(255, 182, 24),
+	}
+	local ABILITY_RARITY_NAME = {
+		COMMON = "Common", UNCOMMON = "Uncommon", RARE = "Rare", EPIC = "Epic", LEGENDARY = "Legendary",
+	}
+	local ABILITY_SHOP_META = {
+		Bomb = { label = "Explosive", glyph = "💣", color = Color3.fromRGB(255, 150, 60), rarity = "UNCOMMON", blurb = "Throw Bombs" },
+		Speed = { label = "Speed", glyph = "⚡", color = Color3.fromRGB(120, 220, 255), rarity = "COMMON", blurb = "Run Faster" },
+		ExtraLives = { label = "2 Lives", glyph = "❤️", color = Color3.fromRGB(255, 90, 120), rarity = "EPIC", blurb = "Survive 2 Hits" },
+		Shockwave = { label = "Shockwave", glyph = "🌀", color = Color3.fromRGB(150, 205, 255), rarity = "LEGENDARY", blurb = "Knock Players Down" },
+		FreezePunch = { label = "Freeze Punch", glyph = "❄️", color = Color3.fromRGB(150, 225, 255), rarity = "RARE", blurb = "Freeze Players" },
+		Mine = { label = "Mine", glyph = "🧨", color = Color3.fromRGB(255, 90, 60), rarity = "EPIC", blurb = "Drop a Mine" },
+		FastPunch = { label = "Fast Punch", glyph = "👊", color = Color3.fromRGB(255, 210, 80), rarity = "UNCOMMON", blurb = "Punch Faster" },
+	}
+	-- The pinned FREE starter card (first-timers, slot 1) wears this friendlier badge
+	-- instead of the ability's paid-rotation rarity. Mirrors Config.ABILITY_SHOP
+	-- .STARTER_RARITY (the client doesn't require Config, so keep the two in step).
+	local ABILITY_STARTER_RARITY = "UNCOMMON"
+
+	local function buildAbilityShop(bullrush, buyRemote, prices)
+		local shopFrame = Frames:FindFirstChild("Shop1")
+		local shopContainer = shopFrame and shopFrame:FindFirstChild("Container")
+		if not (shopFrame and shopContainer) then
+			return
+		end
+		local HttpService = game:GetService("HttpService")
+
+		-- Header: title + a real ability glyph in the kit icon slot.
+		local header = shopFrame:FindFirstChild("Header")
+		local headerName = header and header:FindFirstChild("Name")
+		if headerName and headerName:IsA("TextLabel") then
+			headerName.Text = "Ability Shop"
+		end
+		local headerIcon = header and header:FindFirstChild("Icon")
+		if headerIcon and headerIcon:IsA("ImageLabel") then
+			headerIcon.Image = ""
+			local glyph = headerIcon:FindFirstChild("AbilityGlyph")
+			if not glyph then
+				glyph = Instance.new("TextLabel")
+				glyph.Name = "AbilityGlyph"
+				glyph.BackgroundTransparency = 1
+				glyph.Size = UDim2.fromScale(1, 1)
+				glyph.TextScaled = true
+				glyph.Font = KIT_FONT
+				glyph.Parent = headerIcon
+			end
+			glyph.Text = "⚡"
+		end
+
+		-- Grab one kit card as the template, then clear the rest (bull boxes).
+		local template
+		for _, child in ipairs(shopContainer:GetChildren()) do
+			if child:IsA("Frame") and child:FindFirstChild("Info") then
+				if not template then
+					template = child:Clone()
+				end
+				child:Destroy()
+			end
+		end
+		if not template then
+			return
+		end
+
+		-- Live "New abilities in M:SS" countdown, pinned under the header. It's a
+		-- TextLabel (not a card Frame) so the per-rotation rebuild leaves it alone.
+		local timer = shopFrame:FindFirstChild("AbilityTimer")
+		if not timer then
+			timer = Instance.new("TextLabel")
+			timer.Name = "AbilityTimer"
+			timer.BackgroundTransparency = 1
+			timer.AnchorPoint = Vector2.new(0.5, 0)
+			timer.Position = UDim2.fromScale(0.5, 1.02) -- just BELOW the shop panel (was 0.135, awkward under the header)
+			timer.Size = UDim2.fromScale(0.8, 0.05)
+			timer.Font = Enum.Font.GothamMedium
+			timer.TextScaled = true
+			timer.TextColor3 = Color3.fromRGB(210, 215, 230)
+			timer.ZIndex = 5
+			timer.Parent = shopFrame
+			local ts = Instance.new("UIStroke")
+			ts.Color = INK
+			ts.Thickness = 2
+			ts.Parent = timer
+		end
+
+		local function paintCard(card, key, meta, price, opts)
+			opts = opts or {} -- { rarity, costText } overrides for the pinned FREE starter card
+			local owned = player:GetAttribute("Owns_" .. key) == true
+
+			local locked = card:FindFirstChild("Locked")
+			if locked then
+				locked.Visible = false
+			end
+
+			local info = card:FindFirstChild("Info")
+			local nameLabel = info and info:FindFirstChild("Name")
+			if nameLabel and nameLabel:IsA("TextLabel") then
+				nameLabel.Text = meta.label
+			end
+			-- Rarity slot: show the ability's RARITY (with its tier colour ramp), not
+			-- owned/permanent status — the green Buy button already shows OWNED / price.
+			local tagLabel = info and info:FindFirstChild("Rarity")
+			if tagLabel and tagLabel:IsA("TextLabel") then
+				local rarity = opts.rarity or meta.rarity or "COMMON"
+				tagLabel.Text = ABILITY_RARITY_NAME[rarity] or rarity
+				tagLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- white so the gradient shows at full value
+				local col = ABILITY_RARITY_COLOR[rarity] or ABILITY_RARITY_COLOR.COMMON
+				local g = tagLabel:FindFirstChildWhichIsA("UIGradient")
+				if not g then
+					g = Instance.new("UIGradient")
+					g.Parent = tagLabel
+				end
+				g.Rotation = 90
+				g.Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, col:Lerp(Color3.new(1, 1, 1), 0.55)),
+					ColorSequenceKeypoint.new(0.45, col),
+					ColorSequenceKeypoint.new(1, col:Lerp(Color3.fromRGB(15, 15, 15), 0.5)),
+				})
+			end
+
+			-- Icon slot: the ability's emoji glyph (no image art for abilities);
+			-- retint the kit's rarity border to the ability color.
+			local iconFrame = card:FindFirstChild("IconFrame")
+			if iconFrame then
+				local artId = ABILITY_IMAGE[key]
+				local img = iconFrame:FindFirstChild("Icon")
+				if img and img:IsA("GuiObject") then
+					img.Visible = false
+				end
+				local stroke = iconFrame:FindFirstChildWhichIsA("UIStroke")
+				local strokeGrad = stroke and stroke:FindFirstChildWhichIsA("UIGradient")
+				if strokeGrad then
+					strokeGrad.Color = ColorSequence.new(meta.color)
+				end
+				-- Prefer the shared ability ART image; fall back to the emoji glyph.
+				local art = iconFrame:FindFirstChild("AbilityArt")
+				local glyph = iconFrame:FindFirstChild("AbilityGlyph")
+				if artId then
+					if glyph then
+						glyph.Visible = false
+					end
+					if not art then
+						art = Instance.new("ImageLabel")
+						art.Name = "AbilityArt"
+						art.BackgroundTransparency = 1
+						art.AnchorPoint = Vector2.new(0.5, 0.5)
+						art.Position = UDim2.fromScale(0.5, 0.5)
+						art.Size = UDim2.fromScale(0.92, 0.92)
+						art.Parent = iconFrame
+					end
+					art.Image = artId
+					art.Visible = true
+				else
+					if art then
+						art.Visible = false
+					end
+					if not glyph then
+						glyph = Instance.new("TextLabel")
+						glyph.Name = "AbilityGlyph"
+						glyph.BackgroundTransparency = 1
+						glyph.AnchorPoint = Vector2.new(0.5, 0.5)
+						glyph.Position = UDim2.fromScale(0.5, 0.5)
+						glyph.Size = UDim2.fromScale(0.8, 0.8)
+						glyph.TextScaled = true
+						glyph.Font = KIT_FONT
+						glyph.Parent = iconFrame
+					end
+					glyph.Visible = true
+					glyph.Text = meta.glyph
+				end
+			end
+
+			-- The kit "Power" row becomes the one-line ability blurb.
+			local power = card:FindFirstChild("Power")
+			local powerLabel = power and power:FindFirstChild("Power")
+			if power then
+				local pIcon = power:FindFirstChild("Icon")
+				if pIcon and pIcon:IsA("GuiObject") then
+					pIcon.Visible = false
+				end
+			end
+			if powerLabel and powerLabel:IsA("TextLabel") then
+				-- clear any leftover odds figures a prior bull-box render left behind
+				for _, c in ipairs(powerLabel:GetChildren()) do
+					if c.Name == "OddsFig" or c:IsA("UIListLayout") then
+						c:Destroy()
+					end
+				end
+				powerLabel.RichText = false
+				powerLabel.Text = meta.blurb
+				powerLabel.TextColor3 = Color3.fromRGB(205, 210, 225)
+				powerLabel.TextWrapped = true
+				powerLabel.TextScaled = true
+			end
+
+			-- Buy button: money button retexted to "$price" / "OWNED"; the Robux
+			-- button hides (abilities are Money-only).
+			local buyButtons = card:FindFirstChild("BuyButtons")
+			local robuxBtn = buyButtons and buyButtons:FindFirstChild("BuyRobux")
+			if robuxBtn and robuxBtn:IsA("GuiObject") then
+				robuxBtn.Visible = false
+			end
+			local buyBtn = buyButtons and buyButtons:FindFirstChild("Buy/Equip/Equipped/Locked")
+			if buyBtn and buyBtn:IsA("GuiButton") then
+				buyBtn.Active = not owned
+				local costLabel = buyBtn:FindFirstChild("Cost/Equip/Equipped/Locked")
+				if costLabel and costLabel:IsA("TextLabel") then
+					costLabel.Text = owned and "OWNED" or (opts.costText or ("$" .. comma(price)))
+				end
+				-- green "Buy" gradient while purchasable; the grey "Equipped/Locked"
+				-- look once owned (the kit ships all state gradients on the button)
+				for _, d in ipairs(buyBtn:GetChildren()) do
+					if d:IsA("UIGradient") then
+						d.Enabled = owned and (d.Name ~= "Buy/Equip") or (not owned and d.Name == "Buy/Equip")
+					end
+				end
+			end
+		end
+
+		local cards: { [string]: any } = {}
+
+		local function rebuild()
+			for key, card in cards do
+				card:Destroy()
+				cards[key] = nil
+			end
+			local raw = bullrush:GetAttribute("AbilityShopFeatured")
+			local featured = {}
+			if type(raw) == "string" then
+				local ok, arr = pcall(function()
+					return HttpService:JSONDecode(raw)
+				end)
+				if ok and type(arr) == "table" then
+					featured = arr
+				end
+			end
+			-- Clone + paint + wire one card; shared by the featured cards and the pinned
+			-- FREE starter (opts carries its "FreeStarter" name / UNCOMMON badge / "FREE"
+			-- cost). cards is keyed by the card's NAME so the tutorial can find slot 1.
+			local function makeCard(key, meta, order, opts)
+				local card = template:Clone()
+				card.Name = (opts and opts.name) or key
+				card.LayoutOrder = order
+				paintCard(card, key, meta, prices[key] or 0, opts)
+
+				local buyButtons = card:FindFirstChild("BuyButtons")
+				local buyBtn = buyButtons and buyButtons:FindFirstChild("Buy/Equip/Equipped/Locked")
+				if buyBtn and buyBtn:IsA("GuiButton") then
+					addButtonFeedback(buyBtn) -- clones carry no connections; rewire feel+sfx
+					buyBtn.Activated:Connect(function()
+						if player:GetAttribute("Owns_" .. key) == true then
+							return
+						end
+						if buyRemote then
+							buyRemote:FireServer(key)
+						end
+					end)
+				end
+				-- repaint the instant ownership flips (purchase / free-claim ack)
+				player:GetAttributeChangedSignal("Owns_" .. key):Connect(function()
+					if card.Parent then
+						paintCard(card, key, meta, prices[key] or 0, opts)
+					end
+				end)
+
+				cards[card.Name] = card
+				card.Parent = shopContainer
+			end
+
+			-- Pinned FREE starter (first-timers): the server names its key on the
+			-- FreeStarterAbility attr while eligible (in the tutorial, not yet owned).
+			-- Slot 1 (LayoutOrder 0), badged UNCOMMON + FREE, and filtered out of the
+			-- paid rotation below so it never double-lists.
+			local freeKey = player:GetAttribute("FreeStarterAbility")
+			local freeMeta = type(freeKey) == "string" and ABILITY_SHOP_META[freeKey] or nil
+			if freeKey and freeMeta then
+				makeCard(freeKey, freeMeta, 0, { name = "FreeStarter", rarity = ABILITY_STARTER_RARITY, costText = "FREE" })
+			end
+
+			for i, key in ipairs(featured) do
+				if key ~= freeKey then -- never double-list the free starter as a paid card
+					local meta = ABILITY_SHOP_META[key]
+					if meta then
+						makeCard(key, meta, i)
+					end
+				end
+			end
+		end
+
+		rebuild()
+		bullrush:GetAttributeChangedSignal("AbilityShopFeatured"):Connect(rebuild)
+		-- Re-pin / unpin the FREE starter card as the player's tutorial + ownership move.
+		player:GetAttributeChangedSignal("FreeStarterAbility"):Connect(rebuild)
+
+		-- Countdown loop: dies with this script copy on respawn (no stacking).
+		task.spawn(function()
+			while shopFrame.Parent do
+				local endsAt = bullrush:GetAttribute("AbilityShopEndsAt")
+				if type(endsAt) == "number" then
+					local remaining = math.max(0, math.floor(endsAt - workspace:GetServerTimeNow()))
+					timer.Text = string.format("New abilities in %d:%02d", math.floor(remaining / 60), remaining % 60)
+				else
+					timer.Text = ""
+				end
+				task.wait(1)
+			end
+		end)
+
+		-- Purchase acks: surface failures (success repaints via Owns_<key> above).
+		if buyRemote then
+			buyRemote.OnClientEvent:Connect(function(ack)
+				if typeof(ack) ~= "table" or ack.ok then
+					return
+				end
+				local msg = "Can't buy that right now"
+				if ack.reason == "NO_MONEY" then
+					msg = "Not enough Money"
+				elseif ack.reason == "OWNED" then
+					msg = "You already own that"
+				elseif ack.reason == "NOT_FEATURED" then
+					msg = "That's not on sale right now"
+				end
+				if pushNotif then
+					pushNotif(msg, "red", 3)
+				else
+					warn("[Main] AbilityBuy failed: " .. tostring(ack.reason))
+				end
+			end)
+		end
+	end
+
+	-------------------------------------------------- skills index (Frames.Shop2)
+	-- A VIEW-ONLY catalog of every ability, displayed like the bull Index (§12). Shop2 is
+	-- now REAL editable frames (in Studio): Shop2.SkillCardTemplate (a clone of the bull
+	-- kit card — edit it to restyle every skill card) + Shop2.Container's own UIGridLayout
+	-- / UIPadding (edit for card size / spacing / margins). This code only POPULATES them:
+	-- it clones the template per ability and fills name / glyph / owned state. Owned skills
+	-- show full colour; locked skills show the same real name + glyph, just greyed + faded.
+	-- View-only (buying = ability shop, equipping = round picker). Ownership mirrors
+	-- AbilityService: Push + Speed free (FREE_SKILLS), the rest read Owns_<key>.
+	local SKILLS_META = {
+		{ key = "Push", label = "Push", image = "rbxassetid://125148837464247", color = Color3.fromRGB(85, 255, 127), rarity = "COMMON", blurb = "Push Players" },
+		{ key = "ExtraLives", label = "2 Lives", glyph = "❤️", color = Color3.fromRGB(255, 90, 120), rarity = "EPIC", blurb = "Survive 2 Hits" },
+		{ key = "Speed", label = "Speed", glyph = "⚡", color = Color3.fromRGB(120, 220, 255), rarity = "COMMON", blurb = "Run Faster" },
+		{ key = "Bomb", label = "Explosive", glyph = "💣", color = Color3.fromRGB(255, 150, 60), rarity = "UNCOMMON", blurb = "Throw Bombs" },
+		{ key = "Shockwave", label = "Shockwave", glyph = "🌀", color = Color3.fromRGB(150, 205, 255), rarity = "LEGENDARY", blurb = "Knock Players Down" },
+		{ key = "FreezePunch", label = "Freeze Punch", glyph = "❄️", color = Color3.fromRGB(150, 225, 255), rarity = "RARE", blurb = "Freeze Players" },
+		{ key = "Mine", label = "Mine", glyph = "🧨", color = Color3.fromRGB(255, 90, 60), rarity = "EPIC", blurb = "Drop a Mine" },
+		{ key = "FastPunch", label = "Fast Punch", glyph = "👊", color = Color3.fromRGB(255, 210, 80), rarity = "UNCOMMON", blurb = "Punch Faster" },
+	}
+
+	-- Push + Speed are the free defaults (mirror AbilityService.DEFAULT_OWNED); the rest
+	-- read the Owns_<key> attribute the ability shop sets on purchase.
+	local FREE_SKILLS = { Push = true, Speed = true }
+	local function ownsSkill(key)
+		if FREE_SKILLS[key] then
+			return true
+		end
+		return player:GetAttribute("Owns_" .. key) == true
+	end
+
+	local function buildSkillsIndex()
+		local shopFrame = Frames:FindFirstChild("Shop2")
+		local host = shopFrame and shopFrame:FindFirstChild("Container")
+		local template = shopFrame and shopFrame:FindFirstChild("SkillCardTemplate")
+		if not (shopFrame and host and template) then
+			return -- Shop2 isn't set up (needs its Container + the SkillCardTemplate)
+		end
+
+		-- Retitle the header if the frame ships one.
+		local header = shopFrame:FindFirstChild("Header")
+		local headerName = header and header:FindFirstChild("Name")
+		if headerName and headerName:IsA("TextLabel") then
+			headerName.Text = "Skills"
+		end
+
+		-- We POPULATE the physical, designer-editable skill cards already sitting in
+		-- Shop2.Container (each named by ability key). We DON'T destroy/rebuild them, so
+		-- Studio edits stick; SkillCardTemplate is only a fallback for a missing card.
+
+		-- Paint one skill card like a bull card, but LOCKED skills aren't hidden as
+		-- "???"/silhouettes — they show their real name + glyph, just greyed + faded so
+		-- they read as "not unlocked yet". The tier slot reads "Skill".
+		local function paintSkillCard(card, meta)
+			local owned = ownsSkill(meta.key)
+			local inner = card:FindFirstChild("Frame")
+			if not inner then
+				return
+			end
+
+			local nameLabel = inner:FindFirstChild("Name")
+			if nameLabel and nameLabel:IsA("TextLabel") then
+				nameLabel.Text = meta.label -- always the real name; locked just greys it
+				nameLabel.TextColor3 = owned and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 152, 160)
+				nameLabel.TextTransparency = owned and 0 or 0.1
+			end
+
+			local info = inner:FindFirstChild("Info")
+			local typeLabel = info and info:FindFirstChild("Type")
+			local rarityLabel = info and info:FindFirstChild("Rarity")
+			if typeLabel and typeLabel:IsA("TextLabel") then
+				typeLabel.Text = meta.blurb -- always the real description; greyed when locked
+				typeLabel.TextColor3 = owned and Color3.fromRGB(205, 210, 225) or Color3.fromRGB(128, 130, 138)
+			end
+			if rarityLabel and rarityLabel:IsA("TextLabel") then
+				rarityLabel.Text = ABILITY_RARITY_NAME[meta.rarity] or "Skill"
+				-- swap the kit's rainbow gradient for the ability's own tier-style ramp
+				-- (lit top -> saturated middle -> shaded base), like the bull rarity label
+				for _, g in ipairs(rarityLabel:GetChildren()) do
+					if g:IsA("UIGradient") then
+						g:Destroy()
+					end
+				end
+				-- Rarity ALWAYS keeps its tier colour (unlocked or locked) — the rest of a
+				-- locked card greys out, but the rarity badge stays coloured so you can read it.
+				local col = ABILITY_RARITY_COLOR[meta.rarity] or meta.color
+				rarityLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+				local rg = Instance.new("UIGradient")
+				rg.Rotation = 90
+				rg.Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, col:Lerp(Color3.new(1, 1, 1), 0.55)),
+					ColorSequenceKeypoint.new(0.45, col),
+					ColorSequenceKeypoint.new(1, col:Lerp(Color3.fromRGB(15, 15, 15), 0.5)),
+				})
+				rg.Parent = rarityLabel
+			end
+
+			-- Preview slot: hide the kit Icon, show the real glyph (or Push's image)
+			-- portrait. Owned = full colour; LOCKED = greyed + faded (not a silhouette).
+			local kitIcon = inner:FindFirstChild("Icon")
+			if kitIcon and kitIcon:IsA("GuiObject") then
+				kitIcon.Visible = false
+			end
+			local preview = inner:FindFirstChild("SkillPreview")
+			if not preview then
+				preview = Instance.new("ImageLabel")
+				preview.Name = "SkillPreview"
+				preview.BackgroundTransparency = 1
+				preview.AnchorPoint = Vector2.new(0.5, 0.5)
+				preview.Position = UDim2.fromScale(0.5, 0.5)
+				preview.Size = UDim2.fromScale(0.96, 0.82)
+				preview.ZIndex = 0 -- kit name/info labels sit above at 1, like the bull viewport
+				preview.Parent = inner
+				local g = Instance.new("TextLabel")
+				g.Name = "Glyph"
+				g.BackgroundTransparency = 1
+				g.AnchorPoint = Vector2.new(0.5, 0.5)
+				g.Position = UDim2.fromScale(0.5, 0.5)
+				g.Size = UDim2.fromScale(0.82, 0.82)
+				g.TextScaled = true
+				g.Font = Enum.Font.GothamBold
+				g.ZIndex = 0
+				g.Parent = preview
+			end
+			local glyph = preview:FindFirstChild("Glyph")
+			local art = ABILITY_IMAGE[meta.key] or meta.image
+			if art then
+				preview.Image = art
+				-- always the real icon; locked just greys + fades it
+				preview.ImageColor3 = owned and Color3.new(1, 1, 1) or Color3.fromRGB(120, 122, 130)
+				preview.ImageTransparency = owned and 0 or 0.35
+				if glyph then
+					glyph.Visible = false
+				end
+			else
+				preview.Image = ""
+				if glyph then
+					glyph.Visible = true
+					glyph.Text = meta.glyph -- always the real glyph; locked just fades it
+					glyph.TextColor3 = Color3.new(1, 1, 1)
+					glyph.TextTransparency = owned and 0 or 0.5
+				end
+			end
+		end
+
+		for i, meta in ipairs(SKILLS_META) do
+			-- Prefer the PHYSICAL card the designer placed in Studio (a Container child
+			-- named by key); clone the template only if it's somehow missing.
+			local card = host:FindFirstChild(meta.key)
+			if not (card and card:IsA("Frame") and card:FindFirstChild("Frame")) then
+				card = template:Clone()
+				card.Name = meta.key
+				card.Parent = host
+			end
+			card.LayoutOrder = i
+			card.Visible = true
+
+			-- Strip any bull-only bits the template might carry over (defensive).
+			local inner = card:FindFirstChild("Frame")
+			if inner then
+				for _, n in ipairs({ "BullPreview", "MutationTag", "EquippedTag" }) do
+					local stale = inner:FindFirstChild(n)
+					if stale then
+						stale:Destroy()
+					end
+				end
+			end
+
+			paintSkillCard(card, meta)
+
+			-- Whole card reacts like a bull card: hover grows the inner. View-only —
+			-- no equip; a locked tap just hints where to unlock it.
+			if inner then
+				local oldBtn = card:FindFirstChild("SkillButton")
+				if oldBtn then
+					oldBtn:Destroy() -- fresh button each build so re-runs don't stack
+				end
+				local btn = Instance.new("TextButton")
+				btn.Name = "SkillButton"
+				btn.BackgroundTransparency = 1
+				btn.Text = ""
+				btn.Size = UDim2.fromScale(1, 1)
+				btn.ZIndex = 5
+				btn.Parent = card
+				local innerScale = ensureScale(inner)
+				btn.MouseEnter:Connect(function()
+					playHover()
+					tween(innerScale, HOVER_TI, { Scale = 1.06 })
+				end)
+				btn.MouseLeave:Connect(function()
+					tween(innerScale, HOVER_TI, { Scale = 1 })
+				end)
+				btn.Activated:Connect(function()
+					playClick()
+					if not ownsSkill(meta.key) and pushNotif then
+						pushNotif("Unlock " .. meta.label .. " in the Ability Shop!", "white", 2.5)
+					end
+				end)
+			end
+
+			-- Repaint the instant ownership flips (buying it in the shop).
+			if not FREE_SKILLS[meta.key] then
+				player:GetAttributeChangedSignal("Owns_" .. meta.key):Connect(function()
+					if card.Parent then
+						paintSkillCard(card, meta)
+					end
+				end)
+			end
+		end
+	end
+
 	-------------------------------------------------- wire remotes + config
 	task.spawn(function()
 		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
@@ -5400,7 +6406,19 @@ do
 			end
 		end
 		setRolling(false) -- paints the button label now that the box cost is known
-		buildBoxShop()    -- Shop1 -> the Lucky Boxes window (needs BOXES + catalog)
+		-- Bull boxes REMOVED from the lobby shop (Shop1): it now sells ABILITIES for
+		-- Money (buildAbilityShop, driven by the server's AbilityShopFeatured /
+		-- AbilityShopEndsAt attrs + the AbilityBuy remote). The bull reveal carousel +
+		-- acks below stay intact for FREE rolls (wheel / daily / levels) and the lobby
+		-- egg prompts — only Shop1's cards change.
+		do
+			local abilityBuy = remotes and remotes:WaitForChild("AbilityBuy", 15)
+			local prices = (okConfig and typeof(config) == "table" and typeof(config.ABILITY_SHOP) == "table" and config.ABILITY_SHOP.PRICES)
+				or {}
+			buildAbilityShop(bullrush, abilityBuy, prices)
+		end
+
+		buildSkillsIndex() -- Frames.Shop2: view-only catalog of every ability
 
 		ackRemote.OnClientEvent:Connect(function(kind, data)
 			data = typeof(data) == "table" and data or {}
@@ -5433,6 +6451,50 @@ do
 		end)
 
 		rollRemote = requestRemote -- arm the buttons only once acks are wired
+
+		-- Lobby EGG prompts: the three sample eggs (Workspace.SamplePic) each wear
+		-- a ProximityPrompt tagged "EggRollPrompt" carrying a BoxId attribute
+		-- (Common=BASIC, Lunar=SUPER, Hell=MEGA). Triggering one opens that box
+		-- exactly like the Shop1 buy button — same rollRemote:FireServer(boxId),
+		-- same `rolling` debounce — so the shared BullAck "ROLLED" handler above
+		-- auto-opens the reveal carousel and NO_MONEY still pushes a red notif. No
+		-- new remote, no server change; the prompt is just another buy entry point.
+		do
+			local CollectionService = game:GetService("CollectionService")
+
+			local function wirePrompt(prompt)
+				if not (prompt:IsA("ProximityPrompt") and prompt:GetAttribute("BoxId")) then
+					return
+				end
+				-- keep the on-egg label synced to live Config (name + price)
+				local box = BOXES and BOXES[prompt:GetAttribute("BoxId")]
+				if box then
+					if typeof(box.name) == "string" then
+						prompt.ObjectText = box.name
+					end
+					local cost = tonumber(box.cost)
+					prompt.ActionText = cost and ("Open — $" .. comma(cost)) or "Open"
+				end
+				prompt.Triggered:Connect(function()
+					local id = prompt:GetAttribute("BoxId")
+					if rolling or not rollRemote or typeof(id) ~= "string" then
+						return
+					end
+					if BOXES and not BOXES[id] then
+						return
+					end
+					lastBoxId = id      -- ROLL AGAIN re-buys the egg you just opened
+					setRolling(true)
+					rollRemote:FireServer(id)
+				end)
+			end
+
+			for _, prompt in ipairs(CollectionService:GetTagged("EggRollPrompt")) do
+				wirePrompt(prompt)
+			end
+			-- re-wire any prompt that streams back in (lobby streaming safety)
+			CollectionService:GetInstanceAddedSignal("EggRollPrompt"):Connect(wirePrompt)
+		end
 	end)
 end
 
@@ -6105,6 +7167,11 @@ do
 			-- joins on cooldown is disarmed then, so the window never pops itself
 			-- later when the timer laps mid-session. Only opens when nothing else
 			-- is already up, so it never steals focus from the round summary etc.
+			-- Not shown until the player has COMPLETED THE TUTORIAL: a brand-new player
+			-- shouldn't get the daily popup mid-onboarding. TutorialStep reaches DONE(3)
+			-- when they finish the tour (Data.server grandfathers veterans to 3 on load,
+			-- so returning players still see it on join like before).
+			local TUTORIAL_DONE = 3 -- mirrors TutorialService.DONE
 			local autoOpenChecked = false
 			local function maybeAutoOpen()
 				if autoOpenChecked then
@@ -6114,10 +7181,26 @@ do
 				if ready == nil then
 					return -- attributes not seeded yet; wait for the server
 				end
-				autoOpenChecked = true
-				if ready == true and currentFrame == nil then
-					openFrame(dailyFrame)
+				-- Tutorial not finished yet: stay ARMED (don't disarm) so this fires the
+				-- moment they complete it -- right after the final step, or on a later
+				-- join -- instead of never.
+				if (tonumber(player:GetAttribute("TutorialStep")) or 0) < TUTORIAL_DONE then
+					return
 				end
+				-- On cooldown now: disarm so a mid-session timer lap can't pop the
+				-- window later (preserves the original join-only guarantee).
+				if ready ~= true then
+					autoOpenChecked = true
+					return
+				end
+				-- Ready -- but wait for a clear screen AND the lobby: never steal focus
+				-- from the round summary, and never pop over an active round. Stays
+				-- armed; the per-second poll retries once it's safe.
+				if currentFrame ~= nil or player:GetAttribute("InRound") == true then
+					return
+				end
+				autoOpenChecked = true
+				openFrame(dailyFrame)
 			end
 
 			-- NextReward = the countdown; mirrors the wheel's timer (section 10),
@@ -6233,6 +7316,7 @@ do
 				while true do
 					renderAll() -- ticks the locked cards' live unlock countdowns
 					refreshTimer()
+					maybeAutoOpen() -- retry the tutorial-gated join auto-open once the screen's clear + in the lobby
 					task.wait(1)
 				end
 			end)
@@ -6670,33 +7754,42 @@ do
 	watchViewport()
 
 	-- Hold the panel back until the local player is actually spawned in the lobby
-	-- (respawned after the round), then wait REVEAL_PAUSE for a deliberate beat.
-	-- The token cancels a pending reveal if the round starts before it fires.
+	-- AND the round summary is closed: the vote panel must never peek out behind the
+	-- Summary window (user request 2026-07-15). It reveals the moment the player
+	-- dismisses the Summary, or when it folds itself on SUMMARY_AUTOCLOSE -- so a
+	-- player who never touches it still gets to vote.
+	local summaryFrame = Frames:FindFirstChild("Summary")
+	-- Bumped each time a new ballot schedules a reveal; a stale coroutine compares
+	-- its captured token and bails if a newer one superseded it. This was USED below
+	-- (revealToken += 1) but never declared -- `nil += 1` threw on scheduleReveal's
+	-- first line, so the panel never revealed. Declared here, before both users.
 	local revealToken = 0
-
-	-- X = dismiss for this ballot: hide now, cancel any reveal still pending;
-	-- the next NEW ballot (key change -> scheduleReveal) brings the panel back
-	closeBtn.Activated:Connect(function()
-		revealToken += 1
-		hide()
-	end)
-
+	-- Spawned + alive back in the lobby (mirrors the ability clients' alive-root
+	-- checks). The vote panel waits on this so it never slides in over a dead or
+	-- mid-respawn screen. This was CALLED below but never defined -- the missing
+	-- global threw inside the reveal coroutine, so the panel never showed at all.
 	local function characterReady(): boolean
-		local char = player.Character
-		local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-		return humanoid ~= nil and humanoid.Health > 0 and char:FindFirstChild("HumanoidRootPart") ~= nil
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		return humanoid ~= nil and humanoid.Health > 0 and root ~= nil
 	end
 	local function scheduleReveal()
 		revealToken += 1
 		local token = revealToken
 		task.spawn(function()
-			while token == revealToken and not characterReady() do
+			task.wait(REVEAL_PAUSE) -- a deliberate beat after the ballot arrives
+			-- Hold until we're respawned in the lobby AND no window is covering the
+			-- screen (esp. the round Summary) — the vote pops the moment you exit it.
+			-- Gate on the Summary's OWN Visible (not the shared currentFrame, which a
+			-- stale pointer or an unrelated open tab can pin non-nil forever), and cap
+			-- the wait so nothing can eat the whole intermission and hide the vote.
+			local waited = 0
+			while token == revealToken and waited < 6
+				and (not characterReady() or (summaryFrame ~= nil and summaryFrame.Visible)) do
 				task.wait(0.1)
+				waited += 0.1
 			end
-			if token ~= revealToken then
-				return
-			end
-			task.wait(REVEAL_PAUSE)
 			if token == revealToken then
 				show()
 			end
@@ -6729,8 +7822,7 @@ do
 				end
 				applyCounts(info.voteCounts)
 				styleSelection()
-				local seconds = math.max(0, math.floor((tonumber(info.timeLeft) or 0) + 0.5))
-				header.Text = ("VOTE NEXT MODE — %ds"):format(seconds)
+				header.Text = "VOTE NEXT MODE"
 			else
 				currentKey = nil
 				myVote = nil
@@ -7344,19 +8436,20 @@ do
 	end)
 end
 
+-- Assigned by section 20 (the bottom-center ENTER-cam button). Declared here
+-- so section 18's step-1 hint can glow on it. nil until §20 builds it.
+local enterBullCamButton = nil
+
 ---------------------------------------------------------------- 18) tutorial
 -- First-session guided tour: purely REACTIVE chrome for the server-owned
--- TutorialStep attribute (Bullrush/TutorialService — 0/4 = nothing, 1 = send
--- a bull, 2 = open the free box, 3 = equip the roll). The server advances
--- the step at each action's real source (RevengeService throw,
--- BullRollService roll + equip), so this section never fires anything — it
--- just keeps ONE pulsing gold stroke + ONE ~5-word hint parked on the next
--- thing to press:
---   1: the Become-a-Bull button, then the SEND BULL panel once viewing
+-- TutorialStep attribute (Bullrush/TutorialService — 0/3 = nothing, 2 = claim
+-- the free ability; the old bull-send step 1 was REMOVED 2026-07-15). The server
+-- advances the step at its real source (AbilityShopService claim), so this
+-- section never fires anything — it just keeps ONE pulsing gold stroke + ONE
+-- ~5-word hint parked on the next thing to press:
 --   2: a billboard on the lobby shop stall (Shop1 has no HUD button — the
---      stall's ShopPrompt is its only door), then the BASIC box's buy
---      button once the window is open
---   3: the Index HUD button, then the right rarity tab, then the new card
+--      stall's ShopPrompt is its only door), then the FREE ability card's
+--      claim button once the window is open (claiming it finishes the tour)
 -- Hard-hides whenever the player is ALIVE in a round (InRound — the tutorial
 -- never blocks play), while the roll carousel is up (never talk over a
 -- reveal), and while an unrelated window is open. Copy stays kid-simple:
@@ -7369,22 +8462,6 @@ do
 	-- Bright "GO here" green: the hint text and the highlight ring now share it
 	-- (user request) so the one click target reads as a single green cue.
 	local GREEN = Color3.fromRGB(70, 255, 105)
-
-	-- §12's rarity tab pairing, needed to point at the right Index tab
-	local RARITY_TAB = {
-		COMMON = "Normal", UNCOMMON = "Gold", RARE = "Diamond",
-		EPIC = "Rainbow", LEGENDARY = "Clover",
-	}
-	local RARITY_RANK = { COMMON = 1, UNCOMMON = 2, RARE = 3, EPIC = 4, LEGENDARY = 5 }
-
-	local BullCatalog = nil -- resolved off-thread; tab targeting degrades without it
-	task.spawn(function()
-		local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 60)
-		local ok, catalog = pcall(require, bullrush and bullrush:WaitForChild("BullCatalog", 30))
-		if ok and typeof(catalog) == "table" then
-			BullCatalog = catalog
-		end
-	end)
 
 	local bridge = nil -- RevengeViewBridge (Eligible/Viewing gates for step 1)
 	task.spawn(function()
@@ -7599,57 +8676,17 @@ do
 		end
 	end
 
-	-- "Bull sent! Exit Cam!" holds off a beat (user request) so the thrower
-	-- actually gets to watch their bull's telegraph + charge before the
-	-- tutorial starts walking them out of the cam. Resumed sessions keep the
-	-- 0 default, so a rejoiner mid-step sees the exit hint immediately.
-	local BULL_SENT_DELAY = 5
-	local step2At = 0 -- os.clock() when TutorialStep last flipped to 2
-	player:GetAttributeChangedSignal("TutorialStep"):Connect(function()
-		if (tonumber(player:GetAttribute("TutorialStep")) or 0) == 2 then
-			step2At = os.clock()
-		end
-	end)
-
-	-- Inventory mirrors, decoded once per change instead of every frame.
-	local ownedBulls: { [string]: boolean } = {}
+	-- Free-box bank mirror, decoded once per change instead of every frame:
+	-- step 2's hint reads whether the player still has an unopened FREE box.
 	local freeBasicBanked = false
-	local function refreshOwned()
-		local ok, decoded = pcall(function()
-			return HttpService:JSONDecode(player:GetAttribute("Bulls") or "{}")
-		end)
-		ownedBulls = (ok and type(decoded) == "table") and decoded or {}
-	end
 	local function refreshFree()
 		local ok, bank = pcall(function()
 			return HttpService:JSONDecode(player:GetAttribute("FreeBoxRolls") or "{}")
 		end)
 		freeBasicBanked = ok and type(bank) == "table" and (tonumber(bank.BASIC) or 0) > 0
 	end
-	player:GetAttributeChangedSignal("Bulls"):Connect(refreshOwned)
 	player:GetAttributeChangedSignal("FreeBoxRolls"):Connect(refreshFree)
-	refreshOwned()
 	refreshFree()
-
-	-- The bull step 3 teaches: owned, not worn, non-STARTER first, rarest on
-	-- ties — the freshly rolled bull under every normal flow.
-	local function targetBullId(): string?
-		local equipped = player:GetAttribute("EquippedBull") or "STARTER"
-		local best, bestRank = nil, -1
-		for id in ownedBulls do
-			if id ~= equipped then
-				local rank = 0
-				if id ~= "STARTER" then
-					local bull = BullCatalog and BullCatalog.Bulls and BullCatalog.Bulls[id]
-					rank = 1 + ((bull and RARITY_RANK[bull.rarity]) or 0)
-				end
-				if rank > bestRank then
-					best, bestRank = id, rank
-				end
-			end
-		end
-		return best
-	end
 
 	-- SideUI ships several layout VARIANTS (Lef1/Left2/Left3, only one
 	-- visible), each with its own Button1/Index — and wireBullCamButton sets
@@ -7696,15 +8733,14 @@ do
 	local sendBtn = revengePanel and revengePanel:FindFirstChild("Send")
 	local rollFrame = Frames:FindFirstChild("BullRoll") -- §11 carousel
 	local shop1Frame = Frames:FindFirstChild("Shop1")
-	local indexFrame = Frames:FindFirstChild("Index")
 
 	-- What deserves the glow right now: kind "ui" (GuiObject target + text,
 	-- plus an optional forced hint side), "stall" (world marker), or nil
 	-- (all chrome hidden).
 	local function resolve(): (string?, GuiObject?, string?, string?)
 		local step = tonumber(player:GetAttribute("TutorialStep")) or 0
-		if step < 1 or step > 3 then
-			return nil
+		if step ~= 2 then
+			return nil -- only the claim-the-free-ability step has chrome now
 		end
 		if player:GetAttribute("InRound") == true then
 			return nil -- playing: the tutorial never blocks (or nags during) a round
@@ -7712,94 +8748,30 @@ do
 		if rollFrame and rollFrame.Visible then
 			return nil -- never talk over a spinning reveal
 		end
-
-		if step == 1 then
-			if bridge and bridge:GetAttribute("Viewing") == true then
-				if sendBtn and sendBtn:IsA("GuiObject") and revengePanel.Visible then
-					return "ui", sendBtn, "Pick a lane. Hit SEND!"
-				end
-				return nil
-			end
-			-- Wait out the death ragdoll (user request): the glow lands once
-			-- they're back on their feet in the lobby, not over their corpse.
-			local character = player.Character
-			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-			if not (humanoid and humanoid.Health > 0) then
-				return nil
-			end
-			local btn = hudButton("Button1")
-			if btn and btn.Visible and bridge and bridge:GetAttribute("Eligible") == true then
-				return "ui", btn, "Send a bull!"
-			end
-			return nil -- no ACTIVE round to spectate right now: wait quietly
-		elseif step == 2 then
-			if bridge and bridge:GetAttribute("Viewing") == true then
-				if os.clock() - step2At < BULL_SENT_DELAY then
-					return nil -- let them watch their bull run first
-				end
-				-- Still parked in the overhead cam after the throw: the stall
-				-- arrows/billboard are lobby-side and invisible from up here,
-				-- so the handoff to the shop phase starts with walking them
-				-- out (Button1 reads "Exit Cam" while viewing).
-				local btn = hudButton("Button1")
-				if btn and btn.Visible then
-					return "ui", btn, "Bull sent! Exit Cam!"
-				end
-				return nil
-			end
-			if shop1Frame and shop1Frame.Visible then
-				local container = shop1Frame:FindFirstChild("Container")
-				local card = container and container:FindFirstChild("BASIC")
-				local buttons = card and card:FindFirstChild("BuyButtons")
-				local buy = buttons and buttons:FindFirstChild("Buy/Equip/Equipped/Locked")
-				if buy and buy:IsA("GuiButton") then
-					-- pinned to the button's RIGHT (user request): the default
-					-- half-screen rule would tuck it left, over the card art
-					return "ui", buy,
-						if freeBasicBanked then "Grab your first FREE box!" else "Open a lucky box!",
-						"right"
-				end
-				return nil -- cards still building
-			end
-			if currentFrame == nil then
-				return "stall" -- walk them to the stall
-			end
-			return nil -- some other window is up; don't point behind it
-		else -- step 3
-			if bridge and bridge:GetAttribute("Viewing") == true then
-				-- same overhead dead-end guard as step 2 (they wandered back
-				-- into the cam mid-tutorial): point at the exit first
-				local btn = hudButton("Button1")
-				if btn and btn.Visible then
-					return "ui", btn, "Exit Cam! Equip your bull!"
-				end
-				return nil
-			end
-			local bullId = targetBullId()
-			if indexFrame and indexFrame.Visible then
-				local container = indexFrame:FindFirstChild("Container")
-				local card = bullId and container and container:FindFirstChild(bullId)
-				if card then
-					local inner = card:FindFirstChild("Frame")
-					return "ui", (inner or card) :: GuiObject, "Tap your new bull!"
-				end
-				local bull = bullId and BullCatalog and BullCatalog.Bulls and BullCatalog.Bulls[bullId]
-				local tabName = bull and RARITY_TAB[bull.rarity]
-				local typeButtons = tabName and indexFrame:FindFirstChild("TypeButtons")
-				local tab = typeButtons and typeButtons:FindFirstChild(tabName)
-				if tab and tab:IsA("GuiButton") then
-					return "ui", tab, "Check this tab!"
-				end
-				return nil
-			end
-			if currentFrame == nil then
-				local btn = hudButton("Index")
-				if btn and btn.Visible then
-					return "ui", btn, "Equip your new bull!"
-				end
-			end
+		-- If they wandered into the overhead bull cam, wait quietly until they're
+		-- back out - the stall arrows/billboard are lobby-side and invisible from
+		-- up there (the bull-send step that used to live here was removed).
+		if bridge and bridge:GetAttribute("Viewing") == true then
 			return nil
 		end
+		if shop1Frame and shop1Frame.Visible then
+			-- The ability shop pins the FREE starter ability to slot 1 for
+			-- first-timers (card named "FreeStarter"); point them at its claim button.
+			local container = shop1Frame:FindFirstChild("Container")
+			local card = container and container:FindFirstChild("FreeStarter")
+			local buttons = card and card:FindFirstChild("BuyButtons")
+			local buy = buttons and buttons:FindFirstChild("Buy/Equip/Equipped/Locked")
+			if buy and buy:IsA("GuiButton") then
+				-- pinned to the button's RIGHT (user request): the default
+				-- half-screen rule would tuck it left, over the card art
+				return "ui", buy, "Claim your FREE ability!", "right"
+			end
+			return nil -- card still building
+		end
+		if currentFrame == nil then
+			return "stall" -- walk them to the stall
+		end
+		return nil -- some other window is up; don't point behind it
 	end
 
 	-- Manual RenderStepped math like every looped animation here (Run-mode
@@ -7810,7 +8782,7 @@ do
 		if stallMarker then
 			stallMarker.Enabled = kind == "stall"
 			if kind == "stall" and stallLabel then
-				stallLabel.Text = "Grab your FREE box!"
+				stallLabel.Text = "Grab your FREE ability!"
 				stallLabel.TextTransparency = 0.15 - 0.15 * math.sin(os.clock() * 4)
 			end
 		end
@@ -7861,20 +8833,415 @@ do
 		hint.Visible = true
 		local cx = rel.X + size.X / 2
 		local cy = rel.Y + size.Y / 2
-		-- Wobble in lockstep with the halo pulse (user request): same os.clock()*5
-		-- rate as `wave` above, so the text and the ring beat together. The
-		-- bottom-strip hint bobs UP/DOWN; side hints keep their left-right sway.
-		local bob = 10 * math.sin(os.clock() * 5)
+		-- Bob the hint WITH the halo it labels, not on its own out-of-phase wobble
+		-- (user request 2026-07-15). Anchor it a fixed gap off the halo's OWN pulsing
+		-- edge (hx/hy/hw/hh, which breathe with `pad`) plus a little extra travel in
+		-- the SAME `wave` phase, so the text and the ring push out and pull in as one
+		-- instead of drifting against each other (the old bob ran anti-phase below).
+		local edgeBob = 6 * wave -- extra hint travel, in phase with the halo's breath
 		if side ~= "right" and cy > screen.Y * 0.78 then
-			-- bottom strip (the SEND BULL panel): sit above the target, bob vertically
+			-- bottom strip (the SEND BULL panel): ride just above the halo's top edge
 			hint.AnchorPoint = Vector2.new(0.5, 1)
-			hint.Position = UDim2.fromOffset(cx, rel.Y - 10 + bob)
+			hint.Position = UDim2.fromOffset(cx, hy - 6 - edgeBob)
 		elseif side == "right" or cx <= screen.X / 2 then
+			-- to the RIGHT of the halo's right edge
 			hint.AnchorPoint = Vector2.new(0, 0.5)
-			hint.Position = UDim2.fromOffset(rel.X + size.X + 14 + bob, cy)
+			hint.Position = UDim2.fromOffset(hx + hw + 10 + edgeBob, cy)
 		else
+			-- to the LEFT of the halo's left edge
 			hint.AnchorPoint = Vector2.new(1, 0.5)
-			hint.Position = UDim2.fromOffset(rel.X - 14 - bob, cy)
+			hint.Position = UDim2.fromOffset(hx - 10 - edgeBob, cy)
 		end
 	end)
+end
+
+--------------------------------------------------------------- 20) enter bull cam
+-- Dedicated ENTER control for the revenge bull-cam: parked bottom-center and
+-- pulsing so a just-eliminated player can't miss their way in. Built as its OWN
+-- ScreenGui (like §19's FREE button), NOT riding a SideUI layout variant — that
+-- indirection (which variant renders, and when the panel streams in on a cold
+-- join) is what made the old in-panel button miss the very first spectate. Wired
+-- straight to the RevengeViewBridge and refreshed on every Eligible/Viewing
+-- change AND once on wire, so a first-round spectate always lights it.
+-- Visible while Eligible and NOT already Viewing; the SideUI Button1 is EXIT.
+-- (Placed before §19 so §19's early return on a missing Frames.Sell can't skip it.)
+do
+	local template = SideUI:FindFirstChild("Left3")
+	template = template and template:FindFirstChild("Buttons")
+	template = template and template:FindFirstChild("Other")
+	template = template and template:FindFirstChild("Button1")
+	if not template then
+		for _, d in ipairs(SideUI:GetDescendants()) do
+			if d.Name == "Button1" and d:IsA("GuiButton") then
+				template = d
+				break
+			end
+		end
+	end
+	if template then
+		local oldGui = gui.Parent:FindFirstChild("EnterBullCamGui")
+		if oldGui then
+			oldGui:Destroy()
+		end
+		local camGui = Instance.new("ScreenGui")
+		camGui.Name = "EnterBullCamGui"
+		camGui.DisplayOrder = 100 -- same band as the FREE button; below the loading screen
+		camGui.ResetOnSpawn = false
+		camGui.IgnoreGuiInset = false
+		camGui.Parent = gui.Parent
+
+		local holder = Instance.new("Frame")
+		holder.Name = "EnterBullCamButton"
+		holder.BackgroundTransparency = 1
+		holder.AnchorPoint = Vector2.new(0.5, 1)
+		holder.Position = UDim2.fromScale(0.5, 0.85) -- bottom-center, clear of the very-bottom XP bar
+		holder.Size = UDim2.fromScale(0.28, 0.09)
+		holder.Visible = false
+		holder.Parent = camGui
+		local holderAspect = Instance.new("UIAspectRatioConstraint")
+		holderAspect.AspectRatio = 3
+		holderAspect.DominantAxis = Enum.DominantAxis.Height
+		holderAspect.Parent = holder
+
+		local btn = template:Clone()
+		btn.Name = "EnterBullCam"
+		btn.Visible = true
+		btn.AnchorPoint = Vector2.new(0.5, 0.5)
+		btn.Position = UDim2.fromScale(0.5, 0.5)
+		btn.Size = UDim2.fromScale(1, 1)
+		btn.Active = true
+		-- Green "ready to enter" look: On ramp on, Off ramp off.
+		for _, d in ipairs(btn:GetDescendants()) do
+			if d:IsA("UIGradient") or d:IsA("UIStroke") then
+				if d.Name == "On" then
+					d.Enabled = true
+				elseif d.Name == "Off" then
+					d.Enabled = false
+				end
+			end
+		end
+		local nameLabel = btn:FindFirstChild("Name")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			nameLabel.Text = "Become a Bull"
+		end
+		btn.Parent = holder
+		addButtonFeedback(btn)
+		enterBullCamButton = btn -- §18 step-1 hint targets this
+
+		-- Attention pulse: the holder breathes ±7% while shown. Drives holder.Size
+		-- (section 3's hover/press tweens ride the button's own UIScale, untouched);
+		-- the aspect constraint keeps it proportional. Manual RenderStepped math
+		-- like every looped animation here (Run-mode tween freeze).
+		local baseSize = holder.Size
+		RunService.RenderStepped:Connect(function()
+			if holder.Visible then
+				local k = 1 + 0.07 * math.sin(os.clock() * 4)
+				holder.Size = UDim2.new(
+					baseSize.X.Scale * k, baseSize.X.Offset * k,
+					baseSize.Y.Scale * k, baseSize.Y.Offset * k)
+			elseif holder.Size ~= baseSize then
+				holder.Size = baseSize -- parked at rest while hidden
+			end
+		end)
+
+		task.spawn(function()
+			local bridge = ReplicatedStorage:WaitForChild("RevengeViewBridge", 30)
+			if not (bridge and bridge:IsA("BindableEvent")) then
+				return -- BullrushClient absent; the button just stays hidden
+			end
+			local function refresh()
+				-- Up whenever the player may WATCH (Eligible) and isn't already in
+				-- the cam. Reading live attributes on every change AND once now means
+				-- a cold-join spectate that flips Eligible before/at wire time still
+				-- lights the button — the first-time miss the user hit.
+				holder.Visible = bridge:GetAttribute("Eligible") == true
+					and bridge:GetAttribute("Viewing") ~= true
+			end
+			bridge:GetAttributeChangedSignal("Eligible"):Connect(refresh)
+			bridge:GetAttributeChangedSignal("Viewing"):Connect(refresh)
+			refresh()
+			btn.Activated:Connect(function()
+				bridge:Fire()
+			end)
+		end)
+	end
+end
+
+---------------------------------------------------------------- 19) free rewards
+-- The "Free Rewards" window (Frames.Sell) + its right-edge access button (a copy
+-- of the Bull Cam button). The window shows "Like the Game / Join the Group ->
+-- free Lucky Block roll" with the shop lucky-block image and a CLAIM button that
+-- fires Remotes.ClaimCommunityReward (server verifies group membership, grants a
+-- free Secret Block roll -> the BullAck carousel auto-opens). The FREE button
+-- hides once GroupRewardClaimed is set. No newline escapes in any string.
+do
+	local freeFrame = Frames:FindFirstChild("Sell")
+	if not freeFrame then
+		return
+	end
+
+	-- Alien lucky-block image (the shop's Alien card icon) + reward name from Config
+	local blockImage, rewardName = "rbxassetid://127100106993842", "Lucky Block"
+	do
+		local okCfg, Config = pcall(function()
+			return require(ReplicatedStorage:WaitForChild("Bullrush"):WaitForChild("Config"))
+		end)
+		if okCfg and typeof(Config) == "table" then
+			local rewardId = Config.COMMUNITY and Config.COMMUNITY.REWARD_BOX
+			local tier = rewardId and Config.LUCKY_BLOCKS and Config.LUCKY_BLOCKS[rewardId]
+			if typeof(tier) == "table" and tier.name then
+				rewardName = tier.name
+			end
+		end
+	end
+
+	-- content inside the Free Rewards window (below its header)
+	local claimedAttr = "GroupRewardClaimed"
+	local old = freeFrame:FindFirstChild("FreeRewardContent")
+	if old then
+		old:Destroy()
+	end
+	local content = Instance.new("Frame")
+	content.Name = "FreeRewardContent"
+	content.AnchorPoint = Vector2.new(0.5, 1)
+	content.Position = UDim2.fromScale(0.5, 0.96)
+	content.Size = UDim2.fromScale(0.9, 0.74)
+	content.BackgroundTransparency = 1
+	content.ZIndex = 5
+	content.Parent = freeFrame
+
+	local function makeLabel(name, text, posY, sizeY, opts)
+		opts = opts or {}
+		local l = Instance.new("TextLabel")
+		l.Name = name
+		l.AnchorPoint = Vector2.new(0.5, 0.5)
+		l.Position = UDim2.fromScale(0.5, posY)
+		l.Size = UDim2.fromScale(opts.width or 0.96, sizeY)
+		l.BackgroundTransparency = 1
+		l.Font = opts.font or Enum.Font.GothamBlack
+		l.Text = text
+		l.TextColor3 = opts.color or Color3.fromRGB(255, 255, 255)
+		l.TextScaled = true
+		l.TextWrapped = true
+		l.ZIndex = 6
+		l.Parent = content
+		local s = Instance.new("UIStroke")
+		s.Color = Color3.fromRGB(0, 0, 0)
+		s.Thickness = 2
+		s.Transparency = 0.4
+		s.Parent = l
+		if opts.maxTextSize then
+			local c = Instance.new("UITextSizeConstraint")
+			c.MaxTextSize = opts.maxTextSize
+			c.Parent = l
+		end
+		return l
+	end
+
+	makeLabel("Step1", "1.  Like the Game", 0.08, 0.11, { color = Color3.fromRGB(255, 226, 170), maxTextSize = 30 })
+	makeLabel("Step2", "2.  Join the Group", 0.21, 0.11, { color = Color3.fromRGB(255, 226, 170), maxTextSize = 30 })
+	makeLabel("Reward", "Get a FREE Lucky Block roll!", 0.34, 0.1, { color = Color3.fromRGB(120, 255, 150), maxTextSize = 26 })
+
+	local blockImg = Instance.new("ImageLabel")
+	blockImg.Name = "Block"
+	blockImg.AnchorPoint = Vector2.new(0.5, 0.5)
+	blockImg.Position = UDim2.fromScale(0.5, 0.58)
+	blockImg.Size = UDim2.fromScale(0.4, 0.34)
+	blockImg.BackgroundTransparency = 1
+	blockImg.Image = blockImage
+	blockImg.ScaleType = Enum.ScaleType.Fit
+	blockImg.ZIndex = 6
+	blockImg.Parent = content
+
+	-- gentle up/down hover on the lucky block while the tab is open
+	local blockBaseX, blockBaseY = blockImg.Position.X.Scale, blockImg.Position.Y.Scale
+	local bobConn
+	bobConn = RunService.RenderStepped:Connect(function()
+		if not content.Parent then
+			bobConn:Disconnect()
+			return
+		end
+		if freeFrame.Visible then
+			blockImg.Position = UDim2.fromScale(blockBaseX, blockBaseY + 0.03 * math.sin(os.clock() * 2.5))
+		end
+	end)
+
+	local hint = makeLabel("Hint", "", 0.79, 0.07, { font = Enum.Font.GothamBold, color = Color3.fromRGB(255, 120, 110), maxTextSize = 20 })
+	hint.Visible = false
+
+	local claimBtn = Instance.new("TextButton")
+	claimBtn.Name = "Claim"
+	claimBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+	claimBtn.Position = UDim2.fromScale(0.5, 0.92)
+	claimBtn.Size = UDim2.fromScale(0.7, 0.13)
+	claimBtn.BackgroundColor3 = Color3.fromRGB(70, 190, 90)
+	claimBtn.AutoButtonColor = true
+	claimBtn.Font = Enum.Font.GothamBlack
+	claimBtn.Text = "CLAIM"
+	claimBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	claimBtn.TextScaled = true
+	claimBtn.ZIndex = 7
+	claimBtn.Parent = content
+	local claimCorner = Instance.new("UICorner")
+	claimCorner.CornerRadius = UDim.new(0.3, 0)
+	claimCorner.Parent = claimBtn
+	local claimStroke = Instance.new("UIStroke")
+	claimStroke.Color = Color3.fromRGB(15, 55, 25)
+	claimStroke.Thickness = 3.5
+	claimStroke.Parent = claimBtn
+	local claimTC = Instance.new("UITextSizeConstraint")
+	claimTC.MaxTextSize = 28
+	claimTC.Parent = claimBtn
+	addButtonFeedback(claimBtn)
+
+	local function isClaimed()
+		return player:GetAttribute(claimedAttr) == true
+	end
+	local function refreshClaim()
+		if isClaimed() then
+			claimBtn.Text = "CLAIMED"
+			claimBtn.BackgroundColor3 = Color3.fromRGB(120, 120, 120)
+			claimBtn.AutoButtonColor = false
+			claimBtn.Active = false
+		else
+			claimBtn.Text = "CLAIM"
+			claimBtn.BackgroundColor3 = Color3.fromRGB(70, 190, 90)
+			claimBtn.AutoButtonColor = true
+			claimBtn.Active = true
+		end
+	end
+
+	local remotes = ReplicatedStorage:FindFirstChild("Bullrush")
+	remotes = remotes and remotes:FindFirstChild("Remotes")
+	local claimRemote = remotes and remotes:WaitForChild("ClaimCommunityReward", 30)
+
+	local pending = false
+	claimBtn.Activated:Connect(function()
+		if isClaimed() or pending or not claimRemote then
+			return
+		end
+		pending = true
+		hint.Visible = false
+		claimBtn.Text = "CHECKING..."
+		claimRemote:FireServer()
+		task.delay(6, function()
+			if pending then
+				pending = false
+				refreshClaim()
+			end
+		end)
+	end)
+	if claimRemote then
+		claimRemote.OnClientEvent:Connect(function(result)
+			if not content.Parent then
+				return
+			end
+			pending = false
+			if result == "OK" then
+				hint.Visible = false
+				player:SetAttribute(claimedAttr, true) -- hides the FREE button + flips CLAIM to CLAIMED
+				closeFrame(freeFrame)
+				if pushNotif then
+					pushNotif("Reward claimed - enjoy your " .. rewardName .. "!", "green", 4)
+				end
+			elseif result == "NOT_IN_GROUP" then
+				hint.Text = "Join the group first, then claim!"
+				hint.Visible = true
+			elseif result == "ALREADY_CLAIMED" then
+				hint.Text = "You already claimed this reward."
+				hint.Visible = true
+			elseif result == "DATA" then
+				hint.Text = "Still loading - try again."
+				hint.Visible = true
+			end
+			refreshClaim()
+		end)
+	end
+	player:GetAttributeChangedSignal(claimedAttr):Connect(function()
+		if content.Parent then
+			refreshClaim()
+		end
+	end)
+	refreshClaim()
+
+	-- right-edge access button (a copy of the Bull Cam button) -> opens the window
+	local template = SideUI:FindFirstChild("Left3")
+	template = template and template:FindFirstChild("Buttons")
+	template = template and template:FindFirstChild("Other")
+	template = template and template:FindFirstChild("Button1")
+	if not template then
+		for _, d in ipairs(SideUI:GetDescendants()) do
+			if d.Name == "Button1" and d:IsA("GuiButton") then
+				template = d
+				break
+			end
+		end
+	end
+	if template then
+		local oldGui = gui.Parent:FindFirstChild("FreeRewardGui")
+		if oldGui then
+			oldGui:Destroy()
+		end
+		local freeGui = Instance.new("ScreenGui")
+		freeGui.Name = "FreeRewardGui"
+		freeGui.DisplayOrder = 100 -- below the loading screen (LoadingScreenLocal uses 1000)
+		freeGui.ResetOnSpawn = false
+		freeGui.IgnoreGuiInset = false
+		freeGui.Parent = gui.Parent
+
+		local holder = Instance.new("Frame")
+		holder.Name = "FreeRewardButton"
+		holder.BackgroundTransparency = 1
+		holder.AnchorPoint = Vector2.new(1, 0.5)
+		holder.Position = UDim2.fromScale(0.985, 0.5)
+		holder.Size = UDim2.fromScale(0.165, 0.064)
+		holder.Visible = false
+		holder.Parent = freeGui
+		local holderAspect = Instance.new("UIAspectRatioConstraint")
+		holderAspect.AspectRatio = 3
+		holderAspect.DominantAxis = Enum.DominantAxis.Height
+		holderAspect.Parent = holder
+
+		local btn = template:Clone()
+		btn.Name = "FreeReward"
+		btn.Visible = true
+		btn.AnchorPoint = Vector2.new(0.5, 0.5)
+		btn.Position = UDim2.fromScale(0.5, 0.5)
+		btn.Size = UDim2.fromScale(1, 1)
+		btn.Active = true
+		for _, d in ipairs(btn:GetDescendants()) do
+			if d:IsA("UIGradient") or d:IsA("UIStroke") then
+				if d.Name == "On" then
+					d.Enabled = true
+				elseif d.Name == "Off" then
+					d.Enabled = false
+				end
+			end
+		end
+		local nameLabel = btn:FindFirstChild("Name")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			nameLabel.Text = "FREE"
+		end
+		btn.Parent = holder
+		addButtonFeedback(btn)
+		btn.Activated:Connect(function()
+			openFrame(freeFrame)
+		end)
+
+		-- Stays visible in the lobby, through the 5s pre-round countdown, AND for
+		-- the whole round; only claiming the reward hides it. (It used to vanish
+		-- once InRound flipped true at round start.)
+		local function refreshAccess()
+			holder.Visible = player:GetAttribute(claimedAttr) ~= true
+				and player:GetAttribute("InRound") ~= true -- hide during a round (combat HUD)
+				and player:GetAttribute("AbilityLocked") == nil -- and from ability SELECTION on (the ability box takes this spot)
+			if not holder.Visible and currentFrame == freeFrame then
+				closeFrame(freeFrame)
+			end
+		end
+		player:GetAttributeChangedSignal(claimedAttr):Connect(refreshAccess)
+		player:GetAttributeChangedSignal("InRound"):Connect(refreshAccess)
+		player:GetAttributeChangedSignal("AbilityLocked"):Connect(refreshAccess)
+		refreshAccess()
+	end
 end

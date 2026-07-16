@@ -82,9 +82,17 @@ local function startBrain(proxy)
 			end
 			if os.clock() >= (proxy.busyUntil or 0) then
 				local bounds = ShrinkService.getBounds()
-				humanoid:MoveTo(tilePoint(
-					rng:NextInteger(bounds.rowMin, bounds.rowMax),
-					rng:NextInteger(bounds.colMin, bounds.colMax)))
+				local holeLines = ShrinkService.getHoleLines()
+				-- Re-roll off any carved trench (Hashtag) so bots don't amble in.
+				local r, c
+				for _ = 1, 8 do
+					r = rng:NextInteger(bounds.rowMin, bounds.rowMax)
+					c = rng:NextInteger(bounds.colMin, bounds.colMax)
+					if not GridUtil.isHole(r, c, holeLines) then
+						break
+					end
+				end
+				humanoid:MoveTo(tilePoint(r, c))
 			end
 			task.wait(rng:NextNumber(WANDER_PAUSE[1], WANDER_PAUSE[2]))
 		end
@@ -204,6 +212,11 @@ function AIService.onTelegraph(lanes, telegraphTime: number, bounds)
 			dangerCols[lane.index] = true
 		end
 	end
+	-- Holes (either Hashtag layout) never make a safe tile: the per-tile isHole
+	-- test below rejects them, so a bot never flees into a trench or off a
+	-- Reverse-# walkway. Handled per candidate rather than by whole-line danger
+	-- because inverted mode's safe ground is single tiles, not full rows/cols.
+	local holeLines = ShrinkService.getHoleLines()
 
 	local dodgeChance = settings().DODGE_CHANCE or 0.8
 	local reaction = settings().REACTION_TIME or { 0.25, 0.9 }
@@ -217,18 +230,19 @@ function AIService.onTelegraph(lanes, telegraphTime: number, bounds)
 				local row, col = GridUtil.worldToTile(root.Position)
 				local exposed = row == nil
 					or dangerRows[row] or dangerCols[col]
+					or GridUtil.isHole(row, col, holeLines)
 					or not GridUtil.inBounds(row, col, bounds)
 				if not exposed then
 					return -- already standing somewhere safe
 				end
-				-- Nearest tile on a safe row AND safe column.
+				-- Nearest safe tile: off every telegraphed lane AND on solid ground.
 				local fromRow = row or math.floor((bounds.rowMin + bounds.rowMax) / 2)
 				local fromCol = col or math.floor((bounds.colMin + bounds.colMax) / 2)
 				local bestRow, bestCol, bestDist
 				for r = bounds.rowMin, bounds.rowMax do
 					if not dangerRows[r] then
 						for c = bounds.colMin, bounds.colMax do
-							if not dangerCols[c] then
+							if not dangerCols[c] and not GridUtil.isHole(r, c, holeLines) then
 								local dist = math.abs(r - fromRow) + math.abs(c - fromCol)
 								if not bestDist or dist < bestDist then
 									bestRow, bestCol, bestDist = r, c, dist

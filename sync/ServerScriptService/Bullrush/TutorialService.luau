@@ -1,28 +1,29 @@
 --[[
 	TutorialService - server-authoritative first-session tutorial.
 
-	Three guided steps for brand-new players (playing a round itself needs no
-	teaching): 1 = send a bull from the Bull Cam, 2 = open the free BASIC
-	lucky box at the shop stall, 3 = equip the rolled bull in the Index.
-	Progress lives in the profile as TutorialStep (0 = not started, 4 = done)
-	and mirrors to the same-named player attribute; the client overlay
-	(StarterGui.Main section 18) is purely reactive and never talks back -
-	every completion below is observed at its server-side source, so the
-	steps can't be spoofed and no tutorial remotes exist.
+	ONE guided step for brand-new players (playing a round itself needs no
+	teaching): claim the FREE starter ability from the lobby ability shop's
+	pinned slot-1 card. (The old bull-send step - TutorialStep 1 - was REMOVED
+	2026-07-15; the tour now opens straight at the claim step, which is KEPT as
+	step 2 so DONE = 3, the client overlay, and old saves all stay valid.)
+	Progress lives in the profile as TutorialStep (0 = not started, 3 = done) and
+	mirrors to the same-named player attribute; the client overlay
+	(StarterGui.Main section 18) is purely reactive and never talks back - the
+	one completion below is observed at its server-side source
+	(AbilityShopService claim), so it can't be spoofed and no tutorial remotes exist.
 
 	Start trigger: joining while a round is ACTIVE and young (wave <=
-	JOIN_WAVE_CUTOFF) starts it immediately - the joiner is a spectator and
-	may throw (RevengeService's 2026-07-13 widening). Everyone else starts on
-	their FIRST elimination, whenever that lands (a player who wins game one
-	starts when they die in game two). The tutorial never blocks play: while
-	the player is alive in a round the overlay hides on its own (InRound).
+	JOIN_WAVE_CUTOFF) starts it immediately; everyone else starts on their FIRST
+	elimination, whenever that lands (a player who wins game one starts when they
+	die in game two). The tutorial never blocks play: while the player is alive
+	in a round the overlay hides on its own (InRound).
 
-	Steps 2/3 can be satisfied out-of-band (a fortune-wheel bull, a
-	self-served roll or equip), so every write re-normalizes: anything the
-	profile already proves learned is skipped, and a player left with nothing
-	actionable is completed rather than stranded. Completion pays a one-time
-	RAW money gift (no friend/VIP multipliers, no XP - the LevelService gift
-	rule), exactly once, because crossing into DONE persists.
+	Step 2 can be satisfied out-of-band (the player already owns the starter
+	ability), so every write re-normalizes: anything the profile already proves
+	learned is skipped, and a player left with nothing actionable is completed
+	rather than stranded. Completion pays a one-time RAW money gift (no
+	friend/VIP multipliers, no XP - the LevelService gift rule), exactly once,
+	because crossing into DONE persists.
 
 	Old saves never see any of this: Data.server grandfathers a missing
 	TutorialStep key straight to DONE on load, and load-failed sessions
@@ -31,22 +32,39 @@
 
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 
+local Config = require(ReplicatedStorage.Bullrush.Config)
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
 local NotifyService = require(script.Parent.NotifyService)
+
+-- The ability first-timers claim FREE in step 2 (AbilityShopService pins it to the
+-- shop's slot 1). Owning it is the persistent proof step 2 is done.
+local STARTER_ABILITY = Config.ABILITY_SHOP.STARTER_FREE
+
+-- Tutorial funnel logger (optional). Loaded defensively like in Main.server /
+-- Data.server: a missing/broken Analytics module must never disrupt a throw, a
+-- roll, or a data write, so guard every call with `if Analytics`.
+local Analytics do
+	local mod = ServerScriptService:FindFirstChild("Analytics")
+	if mod then
+		local ok, m = pcall(require, mod)
+		if ok then Analytics = m end
+	end
+end
 
 -- TUTORIAL TESTING MODE (STUDIO ONLY) --------------------------------------
 -- Flip this true to make EVERY join restart the tour as a brand-new
 -- first-timer: fresh STARTER-only inventory, one banked free BASIC box, and
--- TutorialStep reset to 0 so the next elimination opens step 1 (a young
+-- TutorialStep reset to 0 so the next elimination opens step 2 (a young
 -- mid-round join still auto-starts it immediately). Hard-gated to
 -- RunService:IsStudio() below, so a stray `true` can NEVER wipe a live
 -- player's bulls. TURN OFF before publishing.
 local TEST_MODE = false
 
-local DONE = 4
+local DONE = 3
 local REWARD = 150 -- completion gift; keep small, the economy is deliberately lean
 local JOIN_WAVE_CUTOFF = 2 -- an ACTIVE round at wave <= this is "just started"
 local DATA_READY_TIMEOUT = 60
@@ -71,30 +89,22 @@ local function getStep(player): number
 	return if ok then tonumber(step) or 0 else 0
 end
 
-local function bullCount(profile): number
-	local bulls = if typeof(profile.Bulls) == "table" then profile.Bulls else {}
-	local n = 0
-	for _ in bulls do
-		n += 1
-	end
-	return n
+local function ownsStarterAbility(profile): boolean
+	local owned = if typeof(profile.OwnedAbilities) == "table" then profile.OwnedAbilities else {}
+	return STARTER_ABILITY ~= nil and owned[STARTER_ABILITY] == true
 end
 
--- Skips any step the profile already proves learned. Step 1 (the throw) has
--- no persistent trace, so it only ever completes live via onThrow.
+-- Folds the RETIRED bull-send step (1) into the claim step (2): the tour no
+-- longer teaches throwing, so any legacy step-1 value - a save from before the
+-- 2026-07-15 removal, or a resume - resolves straight to the claim step. Then
+-- skips even that when the profile already proves the free ability was claimed
+-- (owns STARTER_ABILITY), completing rather than stranding.
 local function normalized(profile, step: number): number
-	while step == 2 or step == 3 do
-		if step == 2 then
-			if bullCount(profile) <= 1 then
-				break -- still only STARTER: the roll is genuinely undone
-			end
-		else
-			local equipped = profile.EquippedBull or "STARTER"
-			if equipped == "STARTER" and bullCount(profile) > 1 then
-				break -- owns a rolled bull but still wears STARTER: teach the equip
-			end
-		end
-		step += 1
+	if step == 1 then
+		step = 2 -- retired bull-send step folds into the claim step
+	end
+	if step == 2 and ownsStarterAbility(profile) then
+		return DONE -- already claimed the free ability: nothing left to teach
 	end
 	return step
 end
@@ -118,6 +128,18 @@ local function setStepUnsafe(player, step: number)
 	DataHandler.SetStat(player, "TutorialStep", step)
 	if typeof(player) == "Instance" then
 		player:SetAttribute("TutorialStep", step)
+		-- Analytics "Tutorial" funnel, now START -> FINISH (the middle
+		-- "sent bull" event retired with the bull-send step). The tour opens
+		-- straight at the claim step, so onTutorialStart fires on the 0 -> 2
+		-- write and onTutorialFinish on 2 -> DONE; each at most once.
+		if Analytics then
+			if before < 1 and step >= 1 then
+				Analytics.onTutorialStart(player)
+			end
+			if before < DONE and step >= DONE then
+				Analytics.onTutorialFinish(player)
+			end
+		end
 	end
 end
 
@@ -138,37 +160,24 @@ function TutorialService.onRoundState(state: string, info: any)
 		else nil
 end
 
--- RoundService.eliminate (real players, quits excluded): the first death of
--- an untaught player opens the tutorial - they are about to become a
--- spectator of a round that is still running, the perfect launch classroom.
+-- RoundService.eliminate (real players, quits excluded): the first death of an
+-- untaught player opens the tutorial at the claim step (step 2; the bull-send
+-- step 1 was retired 2026-07-15), guiding them to the lobby ability shop once
+-- they're back on their feet.
 function TutorialService.onEliminated(player)
 	if typeof(player) == "Instance" and player:GetAttribute("DataLoadFailed") then
 		return -- temp profile: could be a veteran, never re-teach
 	end
 	if getStep(player) == 0 then
-		setStep(player, 1)
-	end
-end
-
--- RevengeService.requestThrow success: step 1 done.
-function TutorialService.onThrow(player)
-	if getStep(player) == 1 then
 		setStep(player, 2)
 	end
 end
 
--- BullRollService commitReveal (any box, any payment): step 2 done. Riding
--- the reveal commit means the attribute flips exactly as the carousel lands,
--- so the overlay never points at the Index mid-spin.
-function TutorialService.onRoll(player)
+-- AbilityShopService free-starter claim: step 2 (grab the free ability from the
+-- shop's pinned slot-1 card) is the final step -> completion gift. Fires the
+-- instant the grant lands, so the overlay clears as the card flips to OWNED.
+function TutorialService.onClaimStarter(player)
 	if getStep(player) == 2 then
-		setStep(player, 3)
-	end
-end
-
--- BullRollService.requestEquip success: step 3 done -> completion gift.
-function TutorialService.onEquip(player)
-	if getStep(player) == 3 then
 		setStep(player, DONE)
 	end
 end
@@ -212,12 +221,13 @@ local function watchJoin(player: Player)
 		end
 		local step = getStep(player)
 		if step == 0 then
-			-- Joined mid-round, early enough to matter? They're a spectator
-			-- (never added to a round in progress) who can throw right now.
+			-- Joined mid-round, early enough to matter? A young-round spectator is
+			-- in the lobby-shop flow just like a fresh joiner, so open the claim
+			-- step (step 2; the bull-send step 1 was retired 2026-07-15).
 			if roundState == "ACTIVE"
 				and (roundWave or math.huge) <= JOIN_WAVE_CUTOFF
 				and player:GetAttribute("InRound") ~= true then
-				setStep(player, 1)
+				setStep(player, 2)
 			end
 			-- Otherwise stay untaught: their first elimination starts it.
 		elseif step < DONE then

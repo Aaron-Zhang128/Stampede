@@ -2,7 +2,7 @@ local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
-local DataStore = DataStoreService:GetDataStore("PlayerData_v2")
+local DataStore = DataStoreService:GetDataStore("PlayerData_v3")
 local DataHandler = require(game.ServerScriptService.UserData.DataHandler)
 
 -- Onboarding funnel logger. Loaded defensively: a missing/broken Analytics module
@@ -112,7 +112,7 @@ Players.PlayerAdded:Connect(function(player)
 			-- existing save already knows the ropes, so grandfather them
 			-- straight to done rather than pointing arrows at veterans.
 			if savedData.TutorialStep == nil then
-				profile.TutorialStep = 4
+				profile.TutorialStep = 3 -- DONE (TutorialService); >= DONE reads as complete
 			end
 			-- WheelSpun postdates old saves too: a veteran's first spin shouldn't
 			-- be hijacked by the new dragon near-miss, so a missing key means

@@ -135,6 +135,73 @@ function GridUtil.inBounds(row: number, col: number, bounds: Bounds): boolean
 		and col >= bounds.colMin and col <= bounds.colMax
 end
 
+-- Whether tile (row, col) is a permanent HOLE (a carved trench) for a mode's
+-- holeLines spec = { rows = {..}?, cols = {..}?, invert = boolean? } of absolute
+-- 1..GRID_SIZE indices. A nil spec (every normal mode) means no holes, so this
+-- is a cheap false. Holes read as OUT OF BOUNDS wherever it matters (spawn
+-- placement, the bounds watcher), so falling into a hole eliminates like
+-- stepping off the edge.
+--   invert = false/nil (Hashtag #): a tile ON a listed row OR col is the hole
+--            (thin lethal trenches; the nine 3x3 rooms are solid ground).
+--   invert = true (Reverse Hashtag): the pattern flips — the listed rows/cols
+--            are the ONLY solid ground (a # of 1-tile walkways) and every OTHER
+--            tile is a hole (the nine 3x3 rooms become pits).
+function GridUtil.isHole(row: number, col: number, holeLines): boolean
+	if not holeLines then
+		return false
+	end
+	local onLine = false
+	if holeLines.rows then
+		for _, r in holeLines.rows do
+			if r == row then
+				onLine = true
+				break
+			end
+		end
+	end
+	if not onLine and holeLines.cols then
+		for _, c in holeLines.cols do
+			if c == col then
+				onLine = true
+				break
+			end
+		end
+	end
+	-- Normal: a tile on a line is the hole. Inverted: a tile OFF every line is.
+	if holeLines.invert then
+		return not onLine
+	end
+	return onLine
+end
+
+-- Whether an entire LANE is carved out (it runs over holes), so no bull should
+-- ever charge down it. nil spec = nothing blocked. WaveDirector uses this to
+-- keep bulls on solid lanes.
+--   invert = false/nil (Hashtag): a lane is blocked when its index IS a listed
+--            trench line — bulls run every solid room lane instead.
+--   invert = true (Reverse Hashtag): flipped — only the listed lines are solid
+--            walkways, so a lane is blocked UNLESS its index is one of them
+--            (bulls charge only the four # corridors).
+function GridUtil.isLaneBlocked(lane: Lane, holeLines): boolean
+	if not holeLines then
+		return false
+	end
+	local list = if lane.axis == "row" then holeLines.rows else holeLines.cols
+	local onLine = false
+	if list then
+		for _, idx in list do
+			if idx == lane.index then
+				onLine = true
+				break
+			end
+		end
+	end
+	if holeLines.invert then
+		return not onLine
+	end
+	return onLine
+end
+
 -- Array of { row = r, col = c } for the lane's tiles INSIDE bounds,
 -- ordered along the bull's travel direction. bounds defaults to the full grid.
 function GridUtil.laneTiles(lane: Lane, bounds: Bounds?): { Cell }

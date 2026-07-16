@@ -42,6 +42,7 @@ local Remotes = ReplicatedStorage.Bullrush.Remotes
 local AIService = require(script.Parent.AIService)
 local RoundService = require(script.Parent.RoundService)
 local NotifyService = require(script.Parent.NotifyService)
+local EconomyService = require(script.Parent.EconomyService)
 
 local PushService = {}
 
@@ -283,7 +284,12 @@ function PushService.init()
 		end
 		local now = os.clock()
 		local last = lastPushAt[pusher]
-		if last and now - last < Config.PUSH.COOLDOWN then
+		-- Fast Punch is the same shove with the cooldown HALVED (Config.FAST_PUNCH.MULT).
+		local cooldown = Config.PUSH.COOLDOWN
+		if pusher:GetAttribute("EquippedAbility") == "FastPunch" then
+			cooldown *= (Config.FAST_PUNCH and Config.FAST_PUNCH.MULT) or 0.5
+		end
+		if last and now - last < cooldown then
 			return
 		end
 
@@ -333,7 +339,9 @@ function PushService.init()
 
 		lastPushAt[pusher] = now
 		-- Credit window: if the victim falls or dies to a bull within
-		-- PUSH.KILL_CREDIT seconds, the feed names this pusher.
+		-- PUSH.KILL_CREDIT seconds, the feed names this pusher AND pays them the
+		-- kill (RoundService.eliminate → ABILITY_KILL_REWARD). Landing the shove
+		-- itself pays NOTHING now — only causing a death does.
 		RoundService.notePush(victim, pusher)
 
 		if typeof(victim) == "Instance" then
@@ -341,12 +349,12 @@ function PushService.init()
 			-- the burst.
 			Remotes.Pushed:FireClient(victim, flat.Unit)
 			playImpactFx(targetRoot)
-			NotifyService.send(pusher, "You shoved " .. victim.DisplayName .. "!", "green", 2)
+			NotifyService.send(pusher, ("You shoved %s!"):format(victim.DisplayName), "green", 2)
 			NotifyService.send(victim, pusher.DisplayName .. " shoved you!", "red", 2)
 		else
 			-- Bot: server-owned rig, server drives the knockback.
 			shoveBot(victim, flat.Unit)
-			NotifyService.send(pusher, "You shoved " .. victim.Name .. "!", "green", 2)
+			NotifyService.send(pusher, ("You shoved %s!"):format(victim.Name), "green", 2)
 		end
 	end)
 
