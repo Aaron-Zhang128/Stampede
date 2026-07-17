@@ -21,8 +21,19 @@ Config.TILE_CHARCOAL = Color3.fromRGB(55, 48, 42) -- dropped/sunken tiles
 
 Config.BULL_RIDE_HEIGHT = 2.5     -- bull Root center height above tile surface
 Config.BULL_OVERSHOOT = 12        -- studs beyond the active window edge where bulls spawn and exit
-Config.BULL_HIT_HALF_LENGTH = 3.5 -- kill box half-length along the travel axis
-Config.BULL_HIT_HALF_WIDTH = 3.9  -- kill box half-width across the lane
+-- Kill box half-extents = HALF of the BullTemplate model's true bounding box, so
+-- the hitbox matches the bull players SEE (measured in Studio, oriented to travel:
+-- 9.83 nose-to-tail x 5.21 side-to-side x 8.68 tall). Re-measure and update these
+-- if the bull model is resized. (Skinned revenge/special bulls can differ in size;
+-- the box tracks the standard bull, not each skin.)
+Config.BULL_HIT_HALF_LENGTH = 4.9 -- kill box half-length along the travel axis (nose-to-tail 9.83 / 2)
+Config.BULL_HIT_HALF_WIDTH = 2.6  -- kill box half-width across the lane (side-to-side 5.21 / 2)
+-- Half-HEIGHT (= bull height 8.68 / 2) doubles as the JUMP-OVER gap: the box is
+-- centered on the charge line (tile surface + BULL_RIDE_HEIGHT = 22.5), so its top
+-- is ~26.85 (the bull's own top). A standing root sits ~0.5 above the line so
+-- walkers are always caught, but a default jump lifts the root ~7 studs (apex
+-- ~7.5 above the line), clearing the box for the upper stretch of the hop.
+Config.BULL_HIT_HALF_HEIGHT = 4.34
 
 Config.MIN_PLAYERS = 2            -- matches need 2+ players; a lone player waits in the lobby (practice arena is always open)
 -- Studio-only solo rounds (testing): a lone playtester starts a round instead
@@ -671,7 +682,7 @@ Config.MODES = {
 		-- trench), so each room's 3 rows/3 cols give just enough dodge room; the
 		-- 1-tile gaps between rooms are a risky running-jump apart. Shrink eats
 		-- the outer rooms from the outside in.
-		id = "HASHTAG", name = "Hashtag", weight = 2, minPlayers = 1,
+		id = "HASHTAG", name = "Boxes", weight = 2, minPlayers = 1,
 		startSize = 11,
 		holeLines = { rows = { 4, 8 }, cols = { 4, 8 } },
 		shrink = { times = { 55, 100 }, aliveFractions = { 0.55, 0.3 } },
@@ -689,7 +700,7 @@ Config.MODES = {
 		-- onto. Scarce dodge room, so bulls stay a hair slower/roomier than base
 		-- and it pays the most. One gentle shrink (to 7x7) keeps the # readable
 		-- rather than collapsing to a degenerate 5x5 ring.
-		id = "REVHASH", name = "Reverse Hashtag", weight = 2, minPlayers = 1,
+		id = "REVHASH", name = "Hash", weight = 2, minPlayers = 1,
 		startSize = 9,
 		holeLines = { rows = { 4, 8 }, cols = { 4, 8 }, invert = true },
 		shrink = { times = { 60 }, aliveFractions = { 0.4 } },

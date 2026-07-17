@@ -126,8 +126,12 @@ function BullService.chargeAlong(startPos: Vector3, endPos: Vector3, crossCoord:
 					local p = root.Position
 					local along = if axis == "row" then p.X else p.Z
 					local cross = if axis == "row" then p.Z else p.X
+					-- 3D kill box: the height term lets a player JUMP OVER the bull --
+					-- a root lifted more than BULL_HIT_HALF_HEIGHT above the charge line
+					-- (position.Y) has cleared it (Config.BULL_HIT_HALF_HEIGHT).
 					if math.abs(along - bullAlong) < Config.BULL_HIT_HALF_LENGTH
 						and math.abs(cross - crossCoord) < Config.BULL_HIT_HALF_WIDTH
+						and math.abs(p.Y - position.Y) < Config.BULL_HIT_HALF_HEIGHT
 					then
 						killed[player] = true
 						-- Extra Lives: a player who's currently invulnerable (a revive

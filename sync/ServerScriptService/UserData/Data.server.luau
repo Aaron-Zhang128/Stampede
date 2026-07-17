@@ -2,7 +2,7 @@ local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
-local DataStore = DataStoreService:GetDataStore("PlayerData_v3")
+local DataStore = DataStoreService:GetDataStore("PlayerData_v200000")
 local DataHandler = require(game.ServerScriptService.UserData.DataHandler)
 
 -- Onboarding funnel logger. Loaded defensively: a missing/broken Analytics module
@@ -120,6 +120,12 @@ Players.PlayerAdded:Connect(function(player)
 			if savedData.WheelSpun == nil then
 				profile.WheelSpun = true
 			end
+			-- DailyUnlocked postdates old saves: a veteran is long past onboarding,
+			-- so grandfather them to unlocked rather than making them play a round
+			-- before the daily window can auto-open again.
+			if savedData.DailyUnlocked == nil then
+				profile.DailyUnlocked = true
+			end
 		end
 		dataLoaded[player.UserId] = true
 	else
@@ -150,6 +156,11 @@ Players.PlayerAdded:Connect(function(player)
 	-- so it must exist the moment the profile does. Grandfathered saves land
 	-- here as 4 (done) and the overlay never shows.
 	player:SetAttribute("TutorialStep", profile.TutorialStep or 0)
+
+	-- Daily-window auto-open gate (Main §13): the client stays armed until this is
+	-- true, which Main.server flips once the player finishes a round with the
+	-- tutorial already complete (grandfathered saves land here as true).
+	player:SetAttribute("DailyUnlocked", profile.DailyUnlocked or false)
 
 	-- FirstTimer replicates while HasPlayedBefore is false; Main.server clears
 	-- it (and flips HasPlayedBefore) when their first round finishes. No

@@ -86,6 +86,13 @@ function DataHandler.GetDefaultProfile()
 		DailyStreak = 0,
 		LastDailyClaim = 0,
 
+		-- Gates the daily-reward window's auto-open (Main §13). A brand-new player
+		-- shouldn't get the popup the instant they finish the tutorial, so it stays
+		-- false until they've completed ONE full round AFTER the tutorial was done
+		-- (flipped by Main.server at round finish). Old saves are grandfathered to
+		-- true in Data.server -- veterans are past onboarding and pop as before.
+		DailyUnlocked = false,
+
 		-- Player level progression (LevelService): Level 1..Config.LEVELS.MAX_LEVEL;
 		-- XP = progress INTO the current level (the per-level step is subtracted on
 		-- each level-up). Old saves keep these defaults via the load merge, so

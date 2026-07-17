@@ -384,9 +384,11 @@ end
 -- overwritten by the camera update that runs after it). Re-binds cleanly if a
 -- second shove lands mid-shake.
 local SHAKE_BIND = "PushCamShake"
-local SHAKE_POS = 0.2592 -- studs of positional jitter at peak
-local SHAKE_ROT = 1.44 -- degrees of rotational jitter at peak
+local SHAKE_POS = 0.15552 -- studs of positional jitter at peak (reduced 40% from 0.2592, user request 2026-07-15)
+local SHAKE_ROT = 0.864 -- degrees of rotational jitter at peak (reduced 40% from 1.44)
 local SHAKE_TIME = 0.3 -- seconds to settle
+-- Phones get 30% less camera shake than PC (user request 2026-07-16).
+local MOBILE_SHAKE_MULT = (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled) and 0.7 or 1
 
 local function shakeCamera()
 	pcall(function()
@@ -404,8 +406,8 @@ local function shakeCamera()
 		end
 		local falloff = 1 - t / SHAKE_TIME
 		falloff = falloff * falloff -- sharp at impact, quick settle
-		local p = SHAKE_POS * falloff
-		local r = math.rad(SHAKE_ROT * falloff)
+		local p = SHAKE_POS * falloff * MOBILE_SHAKE_MULT
+		local r = math.rad(SHAKE_ROT * falloff * MOBILE_SHAKE_MULT)
 		cam.CFrame = cam.CFrame
 			* CFrame.new((math.random() * 2 - 1) * p, (math.random() * 2 - 1) * p, (math.random() * 2 - 1) * p)
 			* CFrame.Angles((math.random() * 2 - 1) * r, (math.random() * 2 - 1) * r, (math.random() * 2 - 1) * r)

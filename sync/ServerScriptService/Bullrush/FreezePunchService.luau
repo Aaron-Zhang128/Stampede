@@ -43,6 +43,11 @@ local function playSfxAt(name: string, at: BasePart?)
 	end
 	sound.Looped = false
 	sound.RollOffMaxDistance = 100
+	-- Freeze's library template is a quiet 0.5; the raw clone was easy to miss, so
+	-- crank it well above the template and hold full volume close in (same "make the
+	-- hit read" intent as PushService.playImpactSound, just a bigger lift).
+	sound.Volume = 3
+	sound.RollOffMinDistance = 15
 	sound.Parent = at
 	pcall(function()
 		sound:Play()

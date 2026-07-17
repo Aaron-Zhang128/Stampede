@@ -187,9 +187,11 @@ end
 -- Short decaying camera jolt on the victim, layered one priority after the
 -- default camera so our offset survives the camera update (mirrors PushClient).
 local SHAKE_BIND = "BombCamShake"
-local SHAKE_POS = 0.32
-local SHAKE_ROT = 1.8
+local SHAKE_POS = 0.192 -- reduced 40% (was 0.32, user request 2026-07-15)
+local SHAKE_ROT = 1.08 -- reduced 40% (was 1.8)
 local SHAKE_TIME = 0.35
+-- Phones get 30% less camera shake than PC (user request 2026-07-16).
+local MOBILE_SHAKE_MULT = (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled) and 0.7 or 1
 
 local function shakeCamera()
 	pcall(function()
@@ -207,8 +209,8 @@ local function shakeCamera()
 		end
 		local falloff = 1 - t / SHAKE_TIME
 		falloff = falloff * falloff
-		local p = SHAKE_POS * falloff
-		local r = math.rad(SHAKE_ROT * falloff)
+		local p = SHAKE_POS * falloff * MOBILE_SHAKE_MULT
+		local r = math.rad(SHAKE_ROT * falloff * MOBILE_SHAKE_MULT)
 		cam.CFrame = cam.CFrame
 			* CFrame.new((math.random() * 2 - 1) * p, (math.random() * 2 - 1) * p, (math.random() * 2 - 1) * p)
 			* CFrame.Angles((math.random() * 2 - 1) * r, (math.random() * 2 - 1) * r, (math.random() * 2 - 1) * r)

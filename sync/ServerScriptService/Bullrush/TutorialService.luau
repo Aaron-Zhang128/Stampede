@@ -1,16 +1,20 @@
 --[[
 	TutorialService - server-authoritative first-session tutorial.
 
-	ONE guided step for brand-new players (playing a round itself needs no
-	teaching): claim the FREE starter ability from the lobby ability shop's
-	pinned slot-1 card. (The old bull-send step - TutorialStep 1 - was REMOVED
-	2026-07-15; the tour now opens straight at the claim step, which is KEPT as
-	step 2 so DONE = 3, the client overlay, and old saves all stay valid.)
-	Progress lives in the profile as TutorialStep (0 = not started, 3 = done) and
-	mirrors to the same-named player attribute; the client overlay
-	(StarterGui.Main section 18) is purely reactive and never talks back - the
-	one completion below is observed at its server-side source
-	(AbilityShopService claim), so it can't be spoofed and no tutorial remotes exist.
+	TWO guided beats for brand-new players, BOTH carried on TutorialStep 2 (so
+	DONE stays 3 and no save renumbers): first CLAIM the FREE starter ability from
+	the lobby ability shop's pinned slot-1 card, then PLAY A ROUND and die once
+	while owning it. Which beat the client shows is derived purely from whether
+	the starter ability is owned (the Owns_<starter> attribute the claim sets):
+	not owned -> the "claim" halo on the shop card; owned -> a lobby "Play a game
+	using ability 0/1" objective. (The old bull-send step - TutorialStep 1 - was
+	REMOVED 2026-07-15.) Progress lives in the profile as TutorialStep (0 = not
+	started, 2 = the two-beat tour, 3 = done) and mirrors to the same-named player
+	attribute; the client overlay (StarterGui.Main section 18) is purely reactive
+	and never talks back - both transitions are observed at their server-side
+	source (owning the starter ability flips the client onto the play beat; a
+	RoundService elimination while owning it completes the tour + pays the gift),
+	so they can't be spoofed and no tutorial remotes exist.
 
 	Start trigger: joining while a round is ACTIVE and young (wave <=
 	JOIN_WAVE_CUTOFF) starts it immediately; everyone else starts on their FIRST
@@ -18,12 +22,11 @@
 	die in game two). The tutorial never blocks play: while the player is alive
 	in a round the overlay hides on its own (InRound).
 
-	Step 2 can be satisfied out-of-band (the player already owns the starter
-	ability), so every write re-normalizes: anything the profile already proves
-	learned is skipped, and a player left with nothing actionable is completed
-	rather than stranded. Completion pays a one-time RAW money gift (no
-	friend/VIP multipliers, no XP - the LevelService gift rule), exactly once,
-	because crossing into DONE persists.
+	The claim beat has a persistent proof (owning the starter ability) that the
+	play beat does not, so owning it no longer auto-COMPLETES the tour - it just
+	moves the player onto the play beat; only a real in-round death finishes.
+	Completion pays a one-time RAW money gift (no friend/VIP multipliers, no XP -
+	the LevelService gift rule), exactly once, because crossing into DONE persists.
 
 	Old saves never see any of this: Data.server grandfathers a missing
 	TutorialStep key straight to DONE on load, and load-failed sessions
@@ -38,7 +41,6 @@ local HttpService = game:GetService("HttpService")
 
 local Config = require(ReplicatedStorage.Bullrush.Config)
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
-local NotifyService = require(script.Parent.NotifyService)
 
 -- The ability first-timers claim FREE in step 2 (AbilityShopService pins it to the
 -- shop's slot 1). Owning it is the persistent proof step 2 is done.
@@ -94,17 +96,15 @@ local function ownsStarterAbility(profile): boolean
 	return STARTER_ABILITY ~= nil and owned[STARTER_ABILITY] == true
 end
 
--- Folds the RETIRED bull-send step (1) into the claim step (2): the tour no
--- longer teaches throwing, so any legacy step-1 value - a save from before the
--- 2026-07-15 removal, or a resume - resolves straight to the claim step. Then
--- skips even that when the profile already proves the free ability was claimed
--- (owns STARTER_ABILITY), completing rather than stranding.
-local function normalized(profile, step: number): number
+-- Folds the RETIRED bull-send step (1) into the two-beat tour step (2): the tour
+-- no longer teaches throwing, so any legacy step-1 value - a save from before
+-- the 2026-07-15 removal, or a resume - resolves straight to step 2. Owning the
+-- starter ability is deliberately NOT folded to DONE here anymore: it only proves
+-- the CLAIM beat is behind them, so the player resumes on the "play a game" beat
+-- (still step 2) and finishes by DYING in a round, not by owning the ability.
+local function normalized(_profile, step: number): number
 	if step == 1 then
-		step = 2 -- retired bull-send step folds into the claim step
-	end
-	if step == 2 and ownsStarterAbility(profile) then
-		return DONE -- already claimed the free ability: nothing left to teach
+		step = 2 -- retired bull-send step folds into the two-beat tour step
 	end
 	return step
 end
@@ -120,10 +120,11 @@ local function setStepUnsafe(player, step: number)
 		step = DONE
 		-- One-time completion gift: RAW money through SetStat (leaderstats
 		-- must tick) - never RoundService.awardMoney, which would stack
-		-- friend/VIP multipliers onto a fixed gift and feed the XP curve.
+		-- friend/VIP multipliers onto a fixed gift and feed the XP curve. No
+		-- "Tutorial finished!" toast here - the client's fading objective card
+		-- (Main.client section 18) already announces it, so a notif would double up.
 		DataHandler.SetStat(player, "Money",
 			(DataHandler.GetStat(player, "Money") or 0) + REWARD)
-		NotifyService.send(player, ("Tutorial done! +$%d"):format(REWARD), "green", 5)
 	end
 	DataHandler.SetStat(player, "TutorialStep", step)
 	if typeof(player) == "Instance" then
@@ -160,25 +161,61 @@ function TutorialService.onRoundState(state: string, info: any)
 		else nil
 end
 
--- RoundService.eliminate (real players, quits excluded): the first death of an
--- untaught player opens the tutorial at the claim step (step 2; the bull-send
--- step 1 was retired 2026-07-15), guiding them to the lobby ability shop once
--- they're back on their feet.
+-- RoundService.eliminate (real players, quits excluded): one hook now drives
+-- BOTH ends of the two-beat tour.
+--   * An untaught player's FIRST death opens the tour at step 2 (claim beat;
+--     the bull-send step 1 was retired 2026-07-15), guiding them to the lobby
+--     ability shop once they're back on their feet.
+--   * A LATER death, once they already OWN the starter ability (the play beat -
+--     "play a game using your ability"), completes the tour and pays the gift.
+--     Gating completion on ownership means a death BEFORE claiming (they died
+--     again while still shopping) can't skip the claim.
 function TutorialService.onEliminated(player)
 	if typeof(player) == "Instance" and player:GetAttribute("DataLoadFailed") then
 		return -- temp profile: could be a veteran, never re-teach
 	end
-	if getStep(player) == 0 then
-		setStep(player, 2)
+	local step = getStep(player)
+	if step == 0 then
+		setStep(player, 2) -- first death opens the claim beat
+	elseif step == 2 then
+		local profile = DataHandler.Profiles[player.UserId]
+		if profile and ownsStarterAbility(profile) then
+			setStep(player, DONE) -- play beat done: died in a round owning the ability
+		end
 	end
 end
 
--- AbilityShopService free-starter claim: step 2 (grab the free ability from the
--- shop's pinned slot-1 card) is the final step -> completion gift. Fires the
--- instant the grant lands, so the overlay clears as the card flips to OWNED.
-function TutorialService.onClaimStarter(player)
+-- Main.server round-end settlement (called for each SURVIVOR - see the aliveList
+-- loop there, NOT all participants): a play-beat player who FINISHED the round
+-- WITHOUT dying - won it, or survived to the end - also completes the tour. The
+-- "play a game using your ability" beat is satisfied by playing a full round, not
+-- specifically by dying, so a winner isn't left stranded on 0/1. Survivors-only
+-- is deliberate: an eliminated player who claimed the ability mid-round (from the
+-- lobby, while the round they died in was still running) must NOT finish on that
+-- round - only on the next one they actually play. Gated on owning the starter,
+-- exactly like onEliminated, so a claim-beat player who never claimed isn't
+-- completed just by surviving.
+function TutorialService.onFinishedRound(player)
+	if typeof(player) == "Instance" and player:GetAttribute("DataLoadFailed") then
+		return -- temp profile: could be a veteran, never re-teach
+	end
 	if getStep(player) == 2 then
-		setStep(player, DONE)
+		local profile = DataHandler.Profiles[player.UserId]
+		if profile and ownsStarterAbility(profile) then
+			setStep(player, DONE)
+		end
+	end
+end
+
+-- AbilityShopService free-starter claim: claiming no longer FINISHES the tour -
+-- it moves the player from the claim beat onto the play beat. The client switches
+-- chrome off the Owns_<starter> attribute the grant just set (this hook doesn't
+-- touch the step for a mid-tour player), so all this does is advance a player who
+-- somehow claimed BEFORE their first death (still at step 0) into the tour rather
+-- than leaving them untaught; the tour then completes on their next in-round death.
+function TutorialService.onClaimStarter(player)
+	if getStep(player) == 0 then
+		setStep(player, 2)
 	end
 end
 

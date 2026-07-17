@@ -272,6 +272,11 @@ local votes: { [Player]: string } = {} -- voter -> modeId
 local voteCandidates: { { id: string, name: string } } = {} -- current ballot
 local votingOpen = false
 
+-- Set by the admin "/voting" chat command (see below) while a round is ACTIVE:
+-- runWaves bails out, so the round loop cycles straight back into the next
+-- intermission's mode vote. Reset the instant runWaves returns.
+local forceEndRound = false
+
 -- Same eligibility rules as pickMode (respect minPlayers, drop the last mode
 -- when there's a choice), then a shuffled slice of up to N options.
 local function pickVoteCandidates(playerCount: number)
@@ -387,6 +392,86 @@ Players.PlayerRemoving:Connect(function(player)
 		end
 	end
 end)
+
+--==============================================================================
+-- Admin commands: /voting and /npc
+-- /voting force-ends the ACTIVE round so the next intermission's mode vote comes
+-- up right away -- handy for testing the vote HUD without playing a whole round.
+-- /npc toggles solo-practice-with-bots (see setNpcPractice below).
+-- Both are restricted to the place OWNER (resolved live from game.CreatorId, so
+-- there's no user id to hard-code) plus anyone listed in ADMIN_USER_IDS.
+--==============================================================================
+
+local ADMIN_USER_IDS: { [number]: boolean } = {
+	-- [123456789] = true, -- add extra admin user ids here
+}
+
+-- "Only I" = the place owner: the creator for a player-owned game, or the group
+-- owner (rank 255) for a group-owned game. GetRankInGroup is a cached network
+-- read, so pcall it. ADMIN_USER_IDS is an explicit override for co-devs/alts.
+local function isAdmin(player: Player): boolean
+	if ADMIN_USER_IDS[player.UserId] then
+		return true
+	end
+	if game.CreatorType == Enum.CreatorType.Group then
+		local ok, rank = pcall(function()
+			return player:GetRankInGroup(game.CreatorId)
+		end)
+		return ok and rank == 255
+	end
+	return player.UserId == game.CreatorId
+end
+
+-- /npc — owner-only toggle for solo playtesting with AI opponents. Flips the
+-- shared Config table (AIService reads AI_PLAYERS.ENABLED live, so bots join the
+-- NEXT round) and drops MIN_PLAYERS to 1 so a lone tester clears the WAITING gate
+-- instead of standing there forever waiting for a second real player. Toggling it
+-- back off restores the published MIN_PLAYERS. Both reads happen fresh each round
+-- loop, so no restart is needed.
+local defaultMinPlayers = Config.MIN_PLAYERS
+local function setNpcPractice(on: boolean)
+	Config.AI_PLAYERS.ENABLED = on
+	Config.MIN_PLAYERS = if on then 1 else defaultMinPlayers
+end
+
+local function onAdminChat(player: Player, message: string)
+	local cmd = message:lower():gsub("%s+", "") -- tolerate stray spaces
+	if cmd ~= "/voting" and cmd ~= "/npc" then
+		return
+	end
+	if not isAdmin(player) then
+		return -- silent: non-admins shouldn't learn the commands exist
+	end
+	if cmd == "/npc" then
+		local turningOn = not Config.AI_PLAYERS.ENABLED
+		setNpcPractice(turningOn)
+		if turningOn then
+			NotifyService.send(player, "NPC practice ON -- bots join the next round.", "green", 4)
+		else
+			NotifyService.send(player, "NPC practice OFF.", "white", 3)
+		end
+		return
+	end
+	-- /voting
+	if currentState == "INTERMISSION" and votingOpen then
+		NotifyService.send(player, "Voting is already open.", "white", 3)
+	elseif currentState ~= "ACTIVE" then
+		NotifyService.send(player, "Start a round first -- the vote runs right after it.", "white", 3)
+	else
+		forceEndRound = true -- runWaves bails; the loop cycles into intermission voting
+		NotifyService.send(player, "Ending the round -- vote coming up.", "green", 3)
+	end
+end
+
+local function hookAdmin(player: Player)
+	player.Chatted:Connect(function(message)
+		onAdminChat(player, message)
+	end)
+end
+for _, player in Players:GetPlayers() do
+	hookAdmin(player)
+end
+Players.PlayerAdded:Connect(hookAdmin)
 
 --==============================================================================
 -- Team Rush bookkeeping
@@ -702,15 +787,15 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 	-- of sitting out a full telegraph/gap with nothing left to settle.
 	local function waitUnlessDecided(duration: number): boolean
 		local deadline = os.clock() + duration
-		while not decided and os.clock() < deadline do
+		while not decided and not forceEndRound and os.clock() < deadline do
 			task.wait(math.min(0.1, deadline - os.clock()))
 		end
-		return decided
+		return decided or forceEndRound
 	end
 
 	while true do
 		wave += 1
-		if roundDecided(soloRound, isTeams) then
+		if forceEndRound or roundDecided(soloRound, isTeams) then
 			return
 		end
 
@@ -783,7 +868,7 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 				-- Mid-wave short-circuit: bulls not yet launched are skipped
 				-- once the round is decided; charging bulls are cancelled by
 				-- the onEliminated hook the moment the field is settled.
-				if not decided then
+				if not decided and not forceEndRound then -- also skip once an admin /voting force-ends
 					-- Rolled at launch (not wave build) so the Epic+ broadcast
 					-- lands exactly as the special leaves the gate.
 					local style, speedMult = maybeSpecialBull()
@@ -812,6 +897,8 @@ end
 --==============================================================================
 -- The round loop
 --==============================================================================
+
+local TUTORIAL_DONE = 3 -- mirrors TutorialService.DONE (also mirrored client-side)
 
 while true do
 	setRoundState("WAITING", {})
@@ -871,6 +958,22 @@ while true do
 		local isTeams = mode.teams == true
 		if isTeams then
 			assignTeams(participants)
+		end
+
+		-- Onboarding pacing for the daily-window auto-open (Main §13): players who
+		-- had ALREADY finished the tutorial when this round STARTED graduate the
+		-- DailyUnlocked gate when it ENDS -- so a new player plays one full game
+		-- after the tutorial before the daily popup shows. Snapshot at start (from
+		-- the participant list) so eliminated players graduate too; flipped below at
+		-- round finish. Already-unlocked players and bots are skipped.
+		local dailyUnlockAtFinish: { Player } = {}
+		for _, p in participants do
+			if typeof(p) == "Instance"
+				and (tonumber(p:GetAttribute("TutorialStep")) or 0) >= TUTORIAL_DONE
+				and p:GetAttribute("DailyUnlocked") ~= true
+			then
+				table.insert(dailyUnlockAtFinish, p)
+			end
 		end
 
 		-- Floaty round if the mode asks for it (restored after the waves).
@@ -969,6 +1072,7 @@ while true do
 
 		local stopWatcher = startBoundsWatcher(mode.holeLines)
 		runWaves(soloRound, roundStart, mode)
+		forceEndRound = false -- clear the admin /voting skip (only ever set during ACTIVE)
 		stopWatcher()
 		RoundService.onEliminated = nil -- the waves' instant-end hook retires with them
 		RevengeService.roundEnded()
@@ -1072,6 +1176,23 @@ while true do
 			end
 		end
 
+		-- Tutorial play beat: a player who SURVIVED this round (won it, or was
+		-- still standing at the end) completes the "play a game using your ability"
+		-- step. SURVIVORS ONLY, not all participants: a first-timer who died this
+		-- round then claimed the ability from the lobby while the round was still
+		-- running is now an eliminated participant sitting on the play beat — firing
+		-- for every participant would finish their tour on the round they DIED in,
+		-- before they ever play a fresh one. You can only claim in the lobby (never
+		-- while alive mid-round), so any survivor who owns the starter necessarily
+		-- claimed it BEFORE this round began — they genuinely played it on the play
+		-- beat. Eliminated play-beat players instead complete on their NEXT round
+		-- (die -> onEliminated, or survive -> here).
+		for _, player in aliveList do
+			if typeof(player) == "Instance" then
+				TutorialService.onFinishedRound(player)
+			end
+		end
+
 		-- First-timers who just finished their first-ever round graduate: clear
 		-- the FirstTimer attribute and persist the fact. Participants are
 		-- captured at round start, so eliminated players graduate too -- they
@@ -1080,6 +1201,17 @@ while true do
 			if typeof(player) == "Instance" and player:GetAttribute("FirstTimer") == true then
 				player:SetAttribute("FirstTimer", nil)
 				DataHandler.SetStat(player, "HasPlayedBefore", true)
+			end
+		end
+
+		-- Graduate the daily-window auto-open gate for anyone who had finished the
+		-- tutorial before this round began (snapshot above): they've now played
+		-- their one post-tutorial game, so the popup may show. Guarded against a
+		-- mid-round leave (Parent nil) so we don't seed a ghost attribute.
+		for _, player in dailyUnlockAtFinish do
+			if player.Parent and player:GetAttribute("DailyUnlocked") ~= true then
+				player:SetAttribute("DailyUnlocked", true)
+				DataHandler.SetStat(player, "DailyUnlocked", true)
 			end
 		end
 

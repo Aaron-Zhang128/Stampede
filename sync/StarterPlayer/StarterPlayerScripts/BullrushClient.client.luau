@@ -160,8 +160,11 @@ local PULSE_FLOOR = 0.4 -- min red intensity so the lane never reads as safe
 
 local SHAKE_RANGE = 14 -- studs from the lane center line
 local SHAKE_DECAY_TIME = 0.4
-local SHAKE_MAGNITUDE = 0.4493
+local SHAKE_MAGNITUDE = 0.26958 -- reduced 40% (was 0.4493, user request 2026-07-15)
 local MAX_TRAUMA = 1.25
+-- Phones get 30% less camera shake than PC (user request 2026-07-16). Applied to
+-- the final CameraOffset intensity so trauma/tremor accumulation is untouched.
+local MOBILE_SHAKE_MULT = (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled) and 0.7 or 1
 
 local GRAZE_RANGE = 14 -- planar studs: a bull's closest approach inside this counts as a near miss
 local GRAZE_DEADLY = 5 -- at/inside this it practically brushed you: full-strength punch
@@ -1150,7 +1153,7 @@ for _, other in Players:GetPlayers() do
 end
 Players.PlayerAdded:Connect(watchGhostCandidate)
 
--- Lobby BullCamPad ("Become a Bull"): stepping onto it flips the overhead
+-- Lobby BullCamPad ("Launch a Bull"): stepping onto it flips the overhead
 -- bull-cam on (see updateOverhead below) - purely client-side, no server
 -- script. Only meaningful while a round is ACTIVE and you're a spectator of
 -- it (eliminated, or in the lobby having joined late / sat out), so hide it
@@ -1206,7 +1209,7 @@ end
 -- top-down camera that frames the CURRENT window (re-framing as it shrinks),
 -- picking a lane with the arrow keys / HUD arrows (see the lane-selection
 -- sections) instead of walking the ring. Enter by stepping
--- onto the lobby BullCamPad or via the HUD "Become a Bull" button
+-- onto the lobby BullCamPad or via the HUD "Launch a Bull" button
 -- (StarterGui.Main owns the button per the UI rule; it talks to this script
 -- through the RevengeViewBridge BindableEvent in ReplicatedStorage). The
 -- character stays free to walk while viewing — moving away IS the exit
@@ -1403,7 +1406,7 @@ local function sendSelectedBull()
 	revengeThrowRemote:FireServer({ axis = lane.axis, index = lane.index, direction = lane.direction })
 end
 
--- One bridge, two jobs: no command = the HUD "Become a Bull" button toggling
+-- One bridge, two jobs: no command = the HUD "Launch a Bull" button toggling
 -- the cam (the original contract); "left"/"right"/"send" = the lane controls.
 viewBridge.Event:Connect(function(command)
 	if command == "left" then
@@ -2323,7 +2326,7 @@ eliminatedRemote.OnClientEvent:Connect(function(playerName, aliveCount, cause)
 		addTrauma(MAX_TRAUMA) -- trampled: a hard 1.25 kick (near-misses now ramp higher, 1.4-2, since the cap was removed)
 		playHapticPulse("GameplayExplosion") -- phones etc; gamepads peak via the trauma-driven motors
 		playOneShot("thud", { Volume = 0.42, PlaybackSpeed = 0.5 })
-		updateBridgeAttributes() -- the HUD "Become a Bull" button appears now
+		updateBridgeAttributes() -- the HUD "Launch a Bull" button appears now
 	end
 	refreshGhosts() -- hides the new ghost -- or, if WE just died, reveals them all
 	-- Other players' eliminations reach the feed as server-pushed white cards
@@ -2572,7 +2575,7 @@ RunService.RenderStepped:Connect(function(dt)
 		shakeDirty = true
 		local humanoid = getHumanoid()
 		if humanoid then
-			local intensity = shakeLevel * shakeLevel * SHAKE_MAGNITUDE
+			local intensity = shakeLevel * shakeLevel * SHAKE_MAGNITUDE * MOBILE_SHAKE_MULT
 			humanoid.CameraOffset = Vector3.new(
 				shakeRandom:NextNumber(-1, 1) * intensity,
 				shakeRandom:NextNumber(-1, 1) * intensity,
@@ -2625,7 +2628,10 @@ end
 --==============================================================================
 
 task.spawn(function()
-	local rig = workspace:WaitForChild("Noob")
+	-- Rig lives under the Lobby folder (a top-level WaitForChild("Noob") never
+	-- resolved after it was moved there, so the greeter stood frozen).
+	local lobby = workspace:WaitForChild("Lobby")
+	local rig = lobby:WaitForChild("Noob")
 	local humanoid = rig:WaitForChild("Humanoid")
 	local animator = humanoid:WaitForChild("Animator")
 

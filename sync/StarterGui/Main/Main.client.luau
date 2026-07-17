@@ -15,7 +15,7 @@
 	                      "2x Rewards?" prompts a dev product
 	  9. Revenge lane controls — ◀ SEND BULL ▶ panel shown while the overhead
 	                      bull-cam is up; talks to BullrushClient over the
-	                      RevengeViewBridge (same bridge as "Become a Bull")
+	                      RevengeViewBridge (same bridge as "Launch a Bull")
 	  10. Fortune wheel — Frames.Spinner runs the kit's 6-slice wheel against
 	                      SpinService (server-committed spins, SpinAck replay)
 	  11. Bull roll     — code-built gacha carousel (BullRoll/BullAck); results
@@ -267,13 +267,13 @@ local RED_OFF = ColorSequence.new({
 	ColorSequenceKeypoint.new(1, Color3.fromRGB(204, 8, 8)),
 })
 
--- "Become a Bull" button (former "Slow" toggle): enters/exits the revenge
+-- "Launch a Bull" button (former "Slow" toggle): enters/exits the revenge
 -- bull-cam. BullrushClient owns the camera + eligibility rules and exposes a
 -- client-local bridge (ReplicatedStorage.RevengeViewBridge BindableEvent):
 -- Fire() toggles the cam; its "Eligible"/"CanThrow"/"Viewing" attributes
 -- drive the button's visibility and label. Since the 2026-07-13 widening
 -- EVERY round spectator may also throw, so CanThrow tracks Eligible and the
--- label reads "Become a Bull"; the "Bull Cam" fallback stays for any future
+-- label reads "Launch a Bull"; the "Bull Cam" fallback stays for any future
 -- watch-only split.
 -- The kit's On/Off gradient pair doubles as the state look (On = ready to
 -- enter, Off = currently viewing, retinted red so "Exit Cam" reads as a
@@ -281,7 +281,7 @@ local RED_OFF = ColorSequence.new({
 -- The SideUI Button1(s): now the EXIT control ONLY. Shown while the overhead
 -- cam is up so it reads as a "stop" (red Off ramp) and stays exactly where the
 -- kit parks it. ENTERING the cam moved to the dedicated bottom-center pulsing
--- button (section 20), so this one no longer shows "Become a Bull" or pulses.
+-- button (section 20), so this one no longer shows "Launch a Bull" or pulses.
 local function wireBullCamButton(btn)
 	handled[btn] = true
 	btn.Visible = false -- only shown while actually viewing the cam
@@ -3701,6 +3701,10 @@ if summaryMain then
 
 	if doubleButton then
 		doubleButton.Visible = false
+		-- The kit shipped this ImageButton with Active=false (every other button in
+		-- the UI is true). A GuiButton's Activated event never fires while Active is
+		-- false, so the tap did nothing and no purchase prompt appeared — force it on.
+		doubleButton.Active = true
 		doubleButton.Activated:Connect(function()
 			if not canDouble then
 				return
@@ -3803,19 +3807,30 @@ end
 -- or counts down the server cooldown ("ReadyIn" attribute). BullrushClient
 -- owns selection state, the lane tile highlight, and the RevengeThrow
 -- remote; this section is pure chrome, per the all-UI-in-this-script rule.
--- Commands ride the same bridge the "Become a Bull" button uses:
+-- Commands ride the same bridge the "Launch a Bull" button uses:
 -- Fire("left" | "right" | "send").
 do
 	local panel = Instance.new("Frame")
 	panel.Name = "RevengeControls"
 	panel.AnchorPoint = Vector2.new(0.5, 1)
 	panel.Position = UDim2.new(0.5, 0, 1, -28)
-	panel.Size = UDim2.new(0, 400, 0, 104)
+	panel.Size = UDim2.new(0, 280, 0, 73)
 	panel.BackgroundTransparency = 1
 	panel.Visible = false
 	panel.Parent = gui
 
-	-- The buttons are CLONES of the kit's Button1 (the "Become a Bull"
+	-- Enlarge the whole ◀ SEND BULL ▶ control on PC — it reads too small next to
+	-- a mouse cursor — while leaving mobile at its tuned thumb-friendly size. The
+	-- panel is anchored bottom-center, so a UIScale grows it symmetrically in
+	-- place (buttons, gaps, and text all together). "Mobile" is this script's
+	-- standard touch-and-no-keyboard heuristic; device capability is known
+	-- immediately, so a one-shot read is enough.
+	do
+		local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+		ensureScale(panel).Scale = if isMobile then 1 else 1.35
+	end
+
+	-- The buttons are CLONES of the kit's Button1 (the "Launch a Bull"
 	-- ImageButton): same body image, bevel decor, stroke, and the On/Off
 	-- gradient pair (On = green, Off = red — wireBullCamButton retints the
 	-- template's grey before this clones it), which doubles as the SEND BULL
@@ -3855,9 +3870,9 @@ do
 	local selLabel = Instance.new("TextLabel")
 	selLabel.Name = "Selection"
 	selLabel.BackgroundTransparency = 1
-	selLabel.Size = UDim2.new(1, 0, 0, 28)
+	selLabel.Size = UDim2.new(1, 0, 0, 20)
 	selLabel.Font = Enum.Font.GothamBlack
-	selLabel.TextSize = 24
+	selLabel.TextSize = 17
 	selLabel.TextColor3 = Color3.fromRGB(240, 238, 230)
 	selLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	selLabel.TextStrokeTransparency = 0.4
@@ -3912,7 +3927,7 @@ do
 		btn.Name = name
 		btn.AnchorPoint = Vector2.new(anchorX, 1)
 		btn.Position = UDim2.new(xScale, 0, 1, 0)
-		btn.Size = UDim2.new(0, width, 0, 64)
+		btn.Size = UDim2.new(0, width, 0, 44)
 		-- retile the stud texture in fixed pixels so it isn't scale-squished on
 		-- the skinny arrows (see studTile above)
 		local stud = btn:FindFirstChild("Stud", true)
@@ -3925,9 +3940,9 @@ do
 		return btn
 	end
 
-	local leftBtn = makeButton("Left", "◀", 0, 0, 72)
-	local sendBtn = makeButton("Send", "SEND BULL", 0.5, 0.5, 220)
-	local rightBtn = makeButton("Right", "▶", 1, 1, 72)
+	local leftBtn = makeButton("Left", "◀", 0, 0, 50)
+	local sendBtn = makeButton("Send", "SEND BULL", 0.5, 0.5, 154)
+	local rightBtn = makeButton("Right", "▶", 1, 1, 50)
 
 	local function applySendState(readyIn)
 		local ready = readyIn <= 0
@@ -4025,126 +4040,6 @@ do
 				end
 			end
 		end
-
-		-- ── Dragon teaser (first-spin near-miss) ────────────────────────────
-		-- A glowing "???" dragon medallion embedded at a slice BOUNDARY of the
-		-- dial. It rides the dial like a 7th mini-wedge but is NOT a reward, so a
-		-- spin can only ever rest BESIDE it (SpinService rigs a new player's very
-		-- first spin to land on the neighbouring slice). Built on demand for both
-		-- dials (this window + the lobby-face mirror) from ReplicatedStorage.Dragon,
-		-- which lives ONLY here -- the model exists nowhere else in the game.
-		local dragonSource, dragonConfig
-		local dragonGlows = {} -- UIStrokes pulsed together below
-
-		local function frameDragonViewport(viewport)
-			local model = dragonSource:Clone()
-			for _, p in model:GetDescendants() do
-				if p:IsA("BasePart") then
-					p.Anchored = true
-					p.CanCollide = false
-					p.CanQuery = false
-				end
-			end
-			model.Parent = viewport
-			local cam = Instance.new("Camera")
-			cam.Parent = viewport
-			viewport.CurrentCamera = cam
-			viewport.Ambient = Color3.fromRGB(150, 140, 160)
-			viewport.LightColor = Color3.fromRGB(255, 244, 230)
-			local cf, size = model:GetBoundingBox()
-			local center = cf.Position
-			local reach = math.max(size.X, size.Y, size.Z)
-			local dist = size.Magnitude * 0.6 + reach * 0.9 + 2
-			local dir = Vector3.new(0.45, 0.28, 1).Unit -- front-right, a touch above
-			cam.CFrame = CFrame.lookAt(center + dir * dist, center)
-			cam.FieldOfView = 45
-		end
-
-		local function maybeBuildDragon(dial)
-			if not (dial and dragonSource and dragonConfig) then
-				return
-			end
-			if dial:FindFirstChild("DragonTeaser") then
-				return -- already built (or arrived via the mirror clone)
-			end
-			-- Full-size container rotated to the boundary angle: exactly like a
-			-- slice, its children sit at the top rim and the rotation carries them
-			-- around, so it stays pinned between two prizes as the dial spins.
-			local teaser = Instance.new("Frame")
-			teaser.Name = "DragonTeaser"
-			teaser.BackgroundTransparency = 1
-			teaser.AnchorPoint = Vector2.new(0.5, 0.5)
-			teaser.Position = UDim2.fromScale(0.5, 0.5)
-			teaser.Size = UDim2.fromScale(1, 1)
-			teaser.Rotation = tonumber(dragonConfig.boundaryRotation) or 90
-			teaser.ZIndex = 5
-			teaser.Parent = dial
-
-			local badge = Instance.new("Frame")
-			badge.Name = "Badge"
-			badge.AnchorPoint = Vector2.new(0.5, 0.5)
-			badge.Position = UDim2.fromScale(0.5, 0.14) -- the rim band the slice icons live in
-			badge.Size = UDim2.fromScale(0.19, 0.19)
-			badge.BackgroundColor3 = Color3.fromRGB(24, 16, 30)
-			badge.ZIndex = 5
-			badge.Parent = teaser
-			local badgeCorner = Instance.new("UICorner")
-			badgeCorner.CornerRadius = UDim.new(1, 0) -- full circle
-			badgeCorner.Parent = badge
-			local badgeStroke = Instance.new("UIStroke")
-			badgeStroke.Color = Color3.fromRGB(255, 140, 40) -- dragon-fire glow
-			badgeStroke.Thickness = 3
-			badgeStroke.Parent = badge
-			dragonGlows[#dragonGlows + 1] = badgeStroke
-
-			local view = Instance.new("ViewportFrame")
-			view.Name = "View"
-			view.BackgroundTransparency = 1
-			view.AnchorPoint = Vector2.new(0.5, 0.5)
-			view.Position = UDim2.fromScale(0.5, 0.5)
-			view.Size = UDim2.fromScale(0.92, 0.92)
-			view.ZIndex = 6
-			view.Parent = badge
-			pcall(frameDragonViewport, view)
-
-			local mystery = Instance.new("TextLabel")
-			mystery.Name = "Mystery"
-			mystery.BackgroundTransparency = 1
-			mystery.AnchorPoint = Vector2.new(0.5, 0)
-			mystery.Position = UDim2.fromScale(0.5, 0.245)
-			mystery.Size = UDim2.fromScale(0.17, 0.055)
-			mystery.Font = Enum.Font.GothamBlack
-			mystery.Text = "???"
-			mystery.TextScaled = true
-			mystery.TextColor3 = Color3.fromRGB(255, 190, 90)
-			mystery.ZIndex = 6
-			local mysteryStroke = Instance.new("UIStroke")
-			mysteryStroke.Color = Color3.fromRGB(0, 0, 0)
-			mysteryStroke.Thickness = 2
-			mysteryStroke.Parent = mystery
-			mystery.Parent = teaser
-		end
-
-		-- Pulse every dragon glow together (cheap: no-ops until the first is built).
-		RunService.RenderStepped:Connect(function()
-			if #dragonGlows == 0 then
-				return
-			end
-			local pulse = 0.5 + 0.5 * math.sin(os.clock() * 3)
-			for _, stroke in dragonGlows do
-				stroke.Thickness = 2 + 2.5 * pulse
-				stroke.Transparency = 0.1 - 0.1 * pulse
-			end
-		end)
-
-		task.spawn(function()
-			local d = ReplicatedStorage:WaitForChild("Dragon", 30)
-			if d then
-				dragonSource = d
-				maybeBuildDragon(spinDial)
-				maybeBuildDragon(surfaceDial)
-			end
-		end)
 
 		-- both spinners share the dial-angle math (slice 1 up at angle 0);
 		-- parking the UI dial at 0 keeps them mirrored from the first frame
@@ -4394,11 +4289,8 @@ do
 				-- slice labels + odds come from the shared reward table
 				if typeof(bullrushConfig.SPINNER) == "table" then
 					spinnerRewards = bullrushConfig.SPINNER.REWARDS
-					dragonConfig = bullrushConfig.SPINNER.DRAGON
 					paintDial(spinDial)
 					paintDial(surfaceDial)
-					maybeBuildDragon(spinDial)
-					maybeBuildDragon(surfaceDial)
 				end
 			end
 
@@ -4565,18 +4457,11 @@ do
 				local dial = replica:FindFirstChild("Spin")
 				if dial then
 					dial.Rotation = 0
-					-- the clone may have copied the window's teaser; drop it and
-					-- rebuild a fresh one so this dial owns its own glow + viewport
-					local strayTeaser = dial:FindFirstChild("DragonTeaser")
-					if strayTeaser then
-						strayTeaser:Destroy()
-					end
 				end
 				replica.Parent = surface
 				surface.Parent = player:WaitForChild("PlayerGui")
 				surfaceDial = dial
 				paintDial(surfaceDial)
-				maybeBuildDragon(surfaceDial)
 			end
 
 			local ring = wheelModel:FindFirstChild("Ring")
@@ -7167,11 +7052,12 @@ do
 			-- joins on cooldown is disarmed then, so the window never pops itself
 			-- later when the timer laps mid-session. Only opens when nothing else
 			-- is already up, so it never steals focus from the round summary etc.
-			-- Not shown until the player has COMPLETED THE TUTORIAL: a brand-new player
-			-- shouldn't get the daily popup mid-onboarding. TutorialStep reaches DONE(3)
-			-- when they finish the tour (Data.server grandfathers veterans to 3 on load,
-			-- so returning players still see it on join like before).
-			local TUTORIAL_DONE = 3 -- mirrors TutorialService.DONE
+			-- Not shown until the player is past onboarding: a brand-new player
+			-- shouldn't get the daily popup the instant they finish the tutorial.
+			-- The server owns DailyUnlocked -- it flips true once the player has
+			-- finished the tutorial AND played one full round after it (Main.server /
+			-- Data profile). Veterans are grandfathered to true on load, so returning
+			-- players still see the popup on join like before.
 			local autoOpenChecked = false
 			local function maybeAutoOpen()
 				if autoOpenChecked then
@@ -7181,10 +7067,10 @@ do
 				if ready == nil then
 					return -- attributes not seeded yet; wait for the server
 				end
-				-- Tutorial not finished yet: stay ARMED (don't disarm) so this fires the
-				-- moment they complete it -- right after the final step, or on a later
-				-- join -- instead of never.
-				if (tonumber(player:GetAttribute("TutorialStep")) or 0) < TUTORIAL_DONE then
+				-- Still in onboarding (tutorial unfinished, or no post-tutorial game
+				-- yet): stay ARMED (don't disarm) so this fires the moment the server
+				-- unlocks it -- that round's end, or a later join -- instead of never.
+				if player:GetAttribute("DailyUnlocked") ~= true then
 					return
 				end
 				-- On cooldown now: disarm so a mid-session timer lap can't pop the
@@ -7302,7 +7188,7 @@ do
 
 			-- the server seeds/flips DailyReady / advances DailyDay; re-render on
 			-- any of it, and take the one-shot join auto-open on the first seed
-			for _, attr in { "DailyDay", "DailyReady", "DailyStreak", "NextDailyClaim" } do
+			for _, attr in { "DailyDay", "DailyReady", "DailyStreak", "NextDailyClaim", "DailyUnlocked" } do
 				player:GetAttributeChangedSignal(attr):Connect(function()
 					renderAll()
 					refreshTimer()
@@ -7616,7 +7502,7 @@ do
 			local button = Instance.new("TextButton")
 			button.Name = "VoteBtn"
 			button.AnchorPoint = Vector2.new(0.5, 1)
-			button.Position = UDim2.new(0.5, 0, 1, -10)
+			button.Position = UDim2.new(0.5, 0, 1, -6)
 			button.Size = UDim2.new(1, -24, 0, 34)
 			button.BackgroundColor3 = PAPER -- gradient below is the visible ramp
 			button.BorderSizePixel = 0
@@ -7795,6 +7681,16 @@ do
 			end
 		end)
 	end
+
+	-- Wire the close X (built way up top, deliberately left unconnected until
+	-- hide()/revealToken existed). Dismisses the panel for the CURRENT ballot
+	-- only: a new ballot changes currentKey and re-reveals via scheduleReveal,
+	-- so the player still gets to vote next intermission. Bump revealToken so a
+	-- reveal coroutine still in flight can't pop the panel back up after the tap.
+	closeBtn.Activated:Connect(function()
+		revealToken += 1
+		hide()
+	end)
 
 	-- Hook the remotes off the main thread; UI must never stall if Bullrush is
 	-- missing from a place copy.
@@ -8442,19 +8338,23 @@ local enterBullCamButton = nil
 
 ---------------------------------------------------------------- 18) tutorial
 -- First-session guided tour: purely REACTIVE chrome for the server-owned
--- TutorialStep attribute (Bullrush/TutorialService — 0/3 = nothing, 2 = claim
--- the free ability; the old bull-send step 1 was REMOVED 2026-07-15). The server
--- advances the step at its real source (AbilityShopService claim), so this
--- section never fires anything — it just keeps ONE pulsing gold stroke + ONE
--- ~5-word hint parked on the next thing to press:
---   2: a billboard on the lobby shop stall (Shop1 has no HUD button — the
---      stall's ShopPrompt is its only door), then the FREE ability card's
---      claim button once the window is open (claiming it finishes the tour)
+-- TutorialStep attribute (Bullrush/TutorialService — 0/3 = nothing, 2 = the
+-- two-beat tour; the old bull-send step 1 was REMOVED 2026-07-15). The server
+-- advances the step at its real sources, so this section never fires anything —
+-- it reads TutorialStep + whether the starter ability is owned and shows ONE of:
+--   claim beat (step 2, starter NOT owned): a billboard on the lobby shop stall
+--      (Shop1 has no HUD button — the stall's ShopPrompt is its only door), then
+--      a pulsing gold ring + ~5-word hint on the FREE ability card's claim button
+--      once the window is open.
+--   play beat (step 2, starter OWNED): a lobby-only "Play a game using ability
+--      0/1" objective card that pushes them to actually PLAY a round. Once the
+--      server marks the tour DONE (they finished a round — died OR won it) and
+--      the player is back ALIVE, it ticks to 1/1, flashes green and fades away
+--      reading "Tutorial finished!".
 -- Hard-hides whenever the player is ALIVE in a round (InRound — the tutorial
 -- never blocks play), while the roll carousel is up (never talk over a
--- reveal), and while an unrelated window is open. Copy stays kid-simple:
--- one clause, ~5 words, no popups, no skip (steps done independently
--- auto-complete server-side).
+-- reveal), and (claim beat) while an unrelated window is open. Copy stays
+-- kid-simple: one clause, ~5 words, no popups, no skip.
 do
 	local HttpService = game:GetService("HttpService")
 
@@ -8462,6 +8362,24 @@ do
 	-- Bright "GO here" green: the hint text and the highlight ring now share it
 	-- (user request) so the one click target reads as a single green cue.
 	local GREEN = Color3.fromRGB(70, 255, 105)
+
+	-- The ability first-timers claim FREE (Config.ABILITY_SHOP.STARTER_FREE).
+	-- Owning it (the Owns_<starter> attribute the claim sets) is what flips step 2
+	-- from the "claim" beat to the "play a game" beat, so the whole section reads
+	-- the same key. Fallback matches the shipping Config; resolved async below.
+	local STARTER = "FastPunch"
+	task.spawn(function()
+		local br = ReplicatedStorage:WaitForChild("Bullrush", 30)
+		local cfg = br and br:WaitForChild("Config", 30)
+		local okC, mod = pcall(require, cfg)
+		if okC and typeof(mod) == "table" and typeof(mod.ABILITY_SHOP) == "table"
+			and type(mod.ABILITY_SHOP.STARTER_FREE) == "string" then
+			STARTER = mod.ABILITY_SHOP.STARTER_FREE
+		end
+	end)
+	local function ownsStarter(): boolean
+		return player:GetAttribute("Owns_" .. STARTER) == true
+	end
 
 	local bridge = nil -- RevengeViewBridge (Eligible/Viewing gates for step 1)
 	task.spawn(function()
@@ -8547,6 +8465,146 @@ do
 		p.ZIndex = 2
 		p.Parent = dimmer
 		dimParts[i] = p
+	end
+
+	-- Play-beat objective card (user request): once the free ability is CLAIMED
+	-- (Owns_<starter>), the claim halo/stall chrome gives way to a small lobby HUD
+	-- card — "Play a game using ability  0/1" — that pushes the first-timer to
+	-- actually PLAY a round. Lobby-only (hidden while alive in a round, like the
+	-- rest of the tour). The moment the server marks the tour DONE (their next
+	-- in-round death) it ticks to 1/1, flashes green and fades away reading
+	-- "Tutorial finished!". Reactive: the death + $ gift are server-owned.
+	local objCard = Instance.new("Frame")
+	objCard.Name = "TutorialObjective"
+	objCard.AnchorPoint = Vector2.new(0.5, 0)
+	-- Pinned to the VERY TOP of the screen (user request). The NotifGui stack is
+	-- top-center anchored at y=0.08 and grows DOWNWARD, so sitting ABOVE it (a small
+	-- fixed gap from the top edge) keeps this banner clear of the sticky intermission
+	-- countdown / transient notifs no matter how tall the stack gets — the card's
+	-- bottom (6px + 0.06 height) stays above 0.08 on any real viewport. tutGui
+	-- ignores the topbar inset; the card is centered so the topbar's own far
+	-- left/right buttons don't collide.
+	objCard.Position = UDim2.new(0.5, 0, 0, 6)
+	-- SCALE sizing like the rest of this UI (the nametag rule): the height tracks
+	-- the viewport, the width follows via an aspect ratio, and the label is
+	-- TextScaled — so it reads the same on a phone and a 4K monitor (no fixed px).
+	objCard.Size = UDim2.fromScale(0.34, 0.06)
+	objCard.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
+	objCard.BackgroundTransparency = 0.15
+	objCard.BorderSizePixel = 0
+	objCard.ZIndex = 6
+	objCard.Visible = false
+	local objAspect = Instance.new("UIAspectRatioConstraint")
+	objAspect.AspectRatio = 10 -- wide banner: width = 10 × height, tracks the height
+	objAspect.DominantAxis = Enum.DominantAxis.Height
+	objAspect.Parent = objCard
+	local objCorner = Instance.new("UICorner")
+	objCorner.CornerRadius = UDim.new(0.3, 0)
+	objCorner.Parent = objCard
+	local objStroke = Instance.new("UIStroke")
+	objStroke.Color = GOLD
+	objStroke.Thickness = 2
+	objStroke.Parent = objCard
+	-- UIScale drives the completion "pop" (a TextScaled label ignores TextSize).
+	local objScale = Instance.new("UIScale")
+	objScale.Scale = 1
+	objScale.Parent = objCard
+
+	-- One RichText label so the sizing is uniform (two TextScaled labels would
+	-- render at different sizes — the long sentence shrinks, the short counter
+	-- doesn't). The "0/1" counter stays a distinct colour via an inline <font> tag.
+	local COUNT_GOLD = "rgb(255,210,60)"
+	local COUNT_GREEN = "rgb(70,255,105)"
+	local function objMsg(lead: string, count: string, countRGB: string): string
+		return ("%s  <font color=\"%s\">%s</font>"):format(lead, countRGB, count)
+	end
+	local objLabel = Instance.new("TextLabel")
+	objLabel.Name = "Text"
+	objLabel.BackgroundTransparency = 1
+	objLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	objLabel.Position = UDim2.fromScale(0.5, 0.5)
+	objLabel.Size = UDim2.fromScale(0.92, 0.62)
+	objLabel.Font = Enum.Font.GothamBlack
+	objLabel.TextScaled = true
+	objLabel.RichText = true
+	objLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	objLabel.Text = objMsg("Play a game using ability", "0/1", COUNT_GOLD)
+	objLabel.ZIndex = 6
+	local objLabelStroke = Instance.new("UIStroke")
+	objLabelStroke.Color = Color3.fromRGB(0, 0, 0)
+	objLabelStroke.Thickness = 2.5
+	objLabelStroke.LineJoinMode = Enum.LineJoinMode.Round
+	objLabelStroke.Parent = objLabel
+	objLabel.Parent = objCard
+	objCard.Parent = tutGui
+
+	-- Play-beat state. objSawPhaseB gates the finish animation to a player who
+	-- actually reached the play beat this session (so a grandfathered/resumed
+	-- DONE save never triggers a spurious fade); objFinishing/objDone hand the
+	-- card fully over to the completion animation once it starts.
+	local objSawPhaseB = false
+	local objPendingFinish = false -- completion crossed; waiting on the respawn to play it
+	local objFinishing = false
+	local objDone = false
+
+	-- The play beat is still TutorialStep 2 — distinguished from the claim beat
+	-- purely by owning the starter ability.
+	local function phaseB(): boolean
+		local step = tonumber(player:GetAttribute("TutorialStep")) or 0
+		return step == 2 and ownsStarter()
+	end
+
+	-- Completion finale: tick 0/1 -> 1/1, go green, then fade the whole card away
+	-- reading "Tutorial finished!". Manual os.clock timing (Run-mode freezes
+	-- TweenService, like every other animation in this file). Forces the card
+	-- visible so it plays even if the step flipped while briefly hidden.
+	local function playFinish()
+		if objFinishing or objDone then
+			return
+		end
+		objFinishing = true
+		task.spawn(function()
+			objCard.Visible = true
+			objCard.BackgroundTransparency = 0.15
+			objStroke.Transparency = 0
+			objLabel.TextTransparency = 0
+			objLabelStroke.Transparency = 0
+			-- fill the counter to 1/1 and go green
+			objLabel.Text = objMsg("Tutorial finished!", "1/1", COUNT_GREEN)
+			objLabel.TextColor3 = GREEN
+			objStroke.Color = GREEN
+			-- Completion chime, synced to the card pop. "Correct" is the SFX-library
+			-- success cue (routed through the GameSFX mixer by playSfx) — deliberately
+			-- NOT the "winner!" round-win fanfare, so finishing the tour doesn't read
+			-- as winning a round. Missing/moderated sound -> silent no-op.
+			playSfx("Correct", 0.9, 1)
+			-- a quick scale pop (TextScaled ignores TextSize, so pop the card)
+			local t0 = os.clock()
+			while os.clock() - t0 < 0.2 do
+				local k = (os.clock() - t0) / 0.2
+				objScale.Scale = 1 + 0.12 * math.sin(k * math.pi)
+				RunService.RenderStepped:Wait()
+			end
+			objScale.Scale = 1
+			-- hold it on screen a good while
+			local hold0 = os.clock()
+			while os.clock() - hold0 < 2.6 do
+				RunService.RenderStepped:Wait()
+			end
+			-- fade the card out
+			local f0 = os.clock()
+			while os.clock() - f0 < 0.8 do
+				local a = (os.clock() - f0) / 0.8
+				objCard.BackgroundTransparency = 0.15 + (1 - 0.15) * a
+				objStroke.Transparency = a
+				objLabel.TextTransparency = a
+				objLabelStroke.Transparency = a
+				RunService.RenderStepped:Wait()
+			end
+			objCard.Visible = false
+			objDone = true
+			objFinishing = false
+		end)
 	end
 
 	-- World marker for step 2's "get to the stall" leg: a billboard over the
@@ -8740,7 +8798,10 @@ do
 	local function resolve(): (string?, GuiObject?, string?, string?)
 		local step = tonumber(player:GetAttribute("TutorialStep")) or 0
 		if step ~= 2 then
-			return nil -- only the claim-the-free-ability step has chrome now
+			return nil -- only the two-beat tour (step 2) has claim chrome
+		end
+		if ownsStarter() then
+			return nil -- claim beat done: the play-beat objective card takes over
 		end
 		if player:GetAttribute("InRound") == true then
 			return nil -- playing: the tutorial never blocks (or nags during) a round
@@ -8778,6 +8839,21 @@ do
 	-- tween freeze): the stroke breathes, the hint bobs beside its target.
 	RunService.RenderStepped:Connect(function()
 		local kind, target, text, side = resolve()
+
+		-- Play-beat objective card (lobby-only). Independent of the claim chrome
+		-- below, so it's driven here up front. Once the finish animation starts it
+		-- owns the card entirely (objFinishing/objDone).
+		if not (objDone or objFinishing) then
+			if phaseB()
+				and player:GetAttribute("InRound") ~= true
+				and not (rollFrame and rollFrame.Visible)
+				and not (bridge and bridge:GetAttribute("Viewing") == true) then
+				objSawPhaseB = true
+				objCard.Visible = true
+			else
+				objCard.Visible = false
+			end
+		end
 
 		if stallMarker then
 			stallMarker.Enabled = kind == "stall"
@@ -8853,6 +8929,43 @@ do
 			hint.Position = UDim2.fromOffset(hx - 10 - edgeBob, cy)
 		end
 	end)
+
+	-- Fire the play-beat finale on the live 2 -> DONE(3) crossing, but only for a
+	-- player who actually reached the play beat this session (objSawPhaseB) — a
+	-- resumed/grandfathered DONE save sets the attribute once on join with no
+	-- phase-B sighting, so it never triggers a spurious fade. The crossing lands
+	-- the instant they're eliminated, so WAIT for them to RESPAWN before playing
+	-- it (user request) — otherwise the card pops while they're still ragdolled
+	-- on the ground. Until then phaseB() is false (step is DONE), so the render
+	-- driver above keeps the card hidden.
+	player:GetAttributeChangedSignal("TutorialStep"):Connect(function()
+		local step = tonumber(player:GetAttribute("TutorialStep")) or 0
+		if not (step >= 3 and objSawPhaseB and not objDone and not objPendingFinish) then
+			return
+		end
+		objPendingFinish = true
+		task.spawn(function()
+			-- Wait until the player is ALIVE before the finale plays. The tour can
+			-- finish two ways: they DIED in the round (RoundService sets Health = 0
+			-- before the DONE crossing, so we wait out the respawn) or they WON /
+			-- survived (never died — already alive, plays almost at once). The 0.5s
+			-- lead lets a death's Health = 0 replicate first, so a winner stays alive
+			-- through it and a corpse never reads as "alive"; either way the card
+			-- never pops over a body on the ground.
+			local function aliveNow(): boolean
+				local char = player.Character
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+				return hum ~= nil and hum.Health > 0
+			end
+			task.wait(0.5)
+			local deadline = os.clock() + 30
+			while not aliveNow() and os.clock() < deadline do
+				task.wait(0.2)
+			end
+			task.wait(0.4) -- brief settle so it lands once they're on their feet
+			playFinish()
+		end)
+	end)
 end
 
 --------------------------------------------------------------- 20) enter bull cam
@@ -8863,7 +8976,8 @@ end
 -- join) is what made the old in-panel button miss the very first spectate. Wired
 -- straight to the RevengeViewBridge and refreshed on every Eligible/Viewing
 -- change AND once on wire, so a first-round spectate always lights it.
--- Visible while Eligible and NOT already Viewing; the SideUI Button1 is EXIT.
+-- Visible while Eligible, NOT already Viewing, AND the tutorial is finished
+-- (hidden mid-tour so a first-timer isn't pulled toward the cam); Button1 is EXIT.
 -- (Placed before §19 so §19's early return on a missing Frames.Sell can't skip it.)
 do
 	local template = SideUI:FindFirstChild("Left3")
@@ -8922,11 +9036,11 @@ do
 		end
 		local nameLabel = btn:FindFirstChild("Name")
 		if nameLabel and nameLabel:IsA("TextLabel") then
-			nameLabel.Text = "Become a Bull"
+			nameLabel.Text = "Launch a Bull"
 		end
 		btn.Parent = holder
 		addButtonFeedback(btn)
-		enterBullCamButton = btn -- §18 step-1 hint targets this
+		enterBullCamButton = btn -- upvalue for other sections (§18 no longer targets it)
 
 		-- Attention pulse: the holder breathes ±7% while shown. Drives holder.Size
 		-- (section 3's hover/press tweens ride the button's own UIScale, untouched);
@@ -8949,16 +9063,25 @@ do
 			if not (bridge and bridge:IsA("BindableEvent")) then
 				return -- BullrushClient absent; the button just stays hidden
 			end
+			local TUTORIAL_DONE = 3 -- mirrors TutorialService.DONE
 			local function refresh()
 				-- Up whenever the player may WATCH (Eligible) and isn't already in
 				-- the cam. Reading live attributes on every change AND once now means
 				-- a cold-join spectate that flips Eligible before/at wire time still
 				-- lights the button — the first-time miss the user hit.
+				-- ALSO hidden while the player is still being taught (TutorialStep in
+				-- 1..DONE-1, the free-ability claim step): a first-timer mid-tour isn't
+				-- pulled toward the bull cam. It appears once the tour is DONE, or for
+				-- anyone who never started it (step 0, e.g. a load-failed veteran).
+				local step = tonumber(player:GetAttribute("TutorialStep")) or 0
+				local midTutorial = step >= 1 and step < TUTORIAL_DONE
 				holder.Visible = bridge:GetAttribute("Eligible") == true
 					and bridge:GetAttribute("Viewing") ~= true
+					and not midTutorial
 			end
 			bridge:GetAttributeChangedSignal("Eligible"):Connect(refresh)
 			bridge:GetAttributeChangedSignal("Viewing"):Connect(refresh)
+			player:GetAttributeChangedSignal("TutorialStep"):Connect(refresh)
 			refresh()
 			btn.Activated:Connect(function()
 				bridge:Fire()
