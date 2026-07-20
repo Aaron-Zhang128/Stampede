@@ -61,9 +61,9 @@ end
 -- Degrades to silence if the library sound is missing.
 local IMPACT_SOUND = "punch7" -- lives in SoundService.GameSFX
 
-local function playImpactSound(root: BasePart)
+local function playImpactSound(root: BasePart, soundName: string?)
 	local group = SoundService:FindFirstChild("GameSFX")
-	local template = group and group:FindFirstChild(IMPACT_SOUND)
+	local template = group and group:FindFirstChild(soundName or IMPACT_SOUND)
 	if not (template and template:IsA("Sound")) then
 		return
 	end
@@ -156,11 +156,11 @@ local function playImpactVfx(root: BasePart)
 end
 
 -- Sound + visuals together: the full impact a landed shove makes on the victim.
-local function playImpactFx(root: BasePart?)
+local function playImpactFx(root: BasePart?, soundName: string?)
 	if not root then
 		return
 	end
-	playImpactSound(root)
+	playImpactSound(root, soundName)
 	playImpactVfx(root)
 end
 
@@ -172,7 +172,8 @@ end
 -- varies with frame time — bot shoves match player shoves exactly.
 local KNOCKBACK_NAME = "PushKnockback" -- same name PushClient uses on players
 
-local function shoveBot(proxy, direction: Vector3)
+local function shoveBot(proxy, direction: Vector3, knockbackMult: number?)
+	local mult = knockbackMult or 1
 	local character = proxy.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -184,7 +185,7 @@ local function shoveBot(proxy, direction: Vector3)
 	-- doesn't fight the burst.
 	proxy.busyUntil = math.max(proxy.busyUntil or 0, os.clock() + Config.PUSH.HITSTOP + Config.PUSH.TIME + 0.3)
 	humanoid:MoveTo(root.Position)
-	playImpactFx(root)
+	playImpactFx(root, if mult > 1 then "mega punch" else nil)
 
 	-- Hitstop: freeze at contact, then launch — mirrors PushClient. Makes the
 	-- shove read as a hit instead of a floaty glide. Bail if the bot died/despawned
@@ -208,9 +209,9 @@ local function shoveBot(proxy, direction: Vector3)
 	end
 
 	local spike = Vector3.new(
-		direction.X * Config.PUSH.SPEED,
-		Config.PUSH.UP,
-		direction.Z * Config.PUSH.SPEED
+		direction.X * Config.PUSH.SPEED * mult,
+		Config.PUSH.UP * mult,
+		direction.Z * Config.PUSH.SPEED * mult
 	)
 	root.AssemblyLinearVelocity = spike -- cover the substeps before the constraint engages
 
@@ -254,9 +255,9 @@ local function shoveBot(proxy, direction: Vector3)
 			vy = -Config.PUSH.UP - Workspace.Gravity * (ts - Config.PUSH.UP_TIME)
 		end
 		velocity.VectorVelocity = Vector3.new(
-			direction.X * Config.PUSH.SPEED * falloff,
-			vy,
-			direction.Z * Config.PUSH.SPEED * falloff
+			direction.X * Config.PUSH.SPEED * mult * falloff,
+			vy * mult,
+			direction.Z * Config.PUSH.SPEED * mult * falloff
 		)
 	end)
 end
@@ -282,13 +283,20 @@ function PushService.init()
 		if not canPush(pusher) then
 			return
 		end
+		local equipped = pusher:GetAttribute("EquippedAbility") or "Push"
+		if equipped ~= "Push" and equipped ~= "FastPunch" and equipped ~= "MegaPunch" then
+			return
+		end
 		local now = os.clock()
 		local last = lastPushAt[pusher]
 		-- Fast Punch is the same shove with the cooldown HALVED (Config.FAST_PUNCH.MULT).
 		local cooldown = Config.PUSH.COOLDOWN
 		if pusher:GetAttribute("EquippedAbility") == "FastPunch" then
 			cooldown *= (Config.FAST_PUNCH and Config.FAST_PUNCH.MULT) or 0.5
+		elseif equipped == "MegaPunch" then
+			cooldown = Config.MEGA_PUNCH.COOLDOWN
 		end
+		local knockbackMult = if equipped == "MegaPunch" then Config.MEGA_PUNCH.KNOCKBACK_MULT else 1
 		if last and now - last < cooldown then
 			return
 		end
@@ -347,13 +355,13 @@ function PushService.init()
 		if typeof(victim) == "Instance" then
 			-- Real player: they own their character, so their client applies
 			-- the burst.
-			Remotes.Pushed:FireClient(victim, flat.Unit)
-			playImpactFx(targetRoot)
+			Remotes.Pushed:FireClient(victim, flat.Unit, knockbackMult)
+			playImpactFx(targetRoot, if equipped == "MegaPunch" then "mega punch" else nil)
 			NotifyService.send(pusher, ("You shoved %s!"):format(victim.DisplayName), "green", 2)
 			NotifyService.send(victim, pusher.DisplayName .. " shoved you!", "red", 2)
 		else
 			-- Bot: server-owned rig, server drives the knockback.
-			shoveBot(victim, flat.Unit)
+			shoveBot(victim, flat.Unit, knockbackMult)
 			NotifyService.send(pusher, ("You shoved %s!"):format(victim.Name), "green", 2)
 		end
 	end)

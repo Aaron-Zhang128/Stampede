@@ -177,6 +177,7 @@ local function syncBullsAttribute(player)
 	local ok, bulls = pcall(DataHandler.GetStat, player, "Bulls")
 	if ok and bulls then
 		player:SetAttribute("Bulls", HttpService:JSONEncode(bulls))
+		player:SetAttribute("EquippedBull", DataHandler.GetEquippedBull(player))
 	end
 end
 

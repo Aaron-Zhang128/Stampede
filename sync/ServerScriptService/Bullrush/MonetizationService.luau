@@ -219,8 +219,9 @@ local PASS_BENEFITS: { [string]: { moneyBonus: number?, luck: number?, luckMult:
 				local ok, bulls = pcall(DataHandler.GetStat, player, "Bulls")
 				if ok and bulls then
 					player:SetAttribute("Bulls", HttpService:JSONEncode(bulls)) -- client inventory refresh
+					player:SetAttribute("EquippedBull", DataHandler.GetEquippedBull(player))
 				end
-				NotifyService.send(player, "Celestial Bull unlocked! Equip it in your Index.", "green", 6)
+				NotifyService.send(player, "Celestial Bull unlocked!", "green", 6)
 			end)
 		end,
 	},

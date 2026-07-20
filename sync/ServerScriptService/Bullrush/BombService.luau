@@ -518,7 +518,8 @@ local function dropMine(owner: Player)
 	if not root then
 		return
 	end
-	local pos = root.Position - Vector3.new(0, 2.6, 0)
+	local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+	local pos = root.Position - look * 2 - Vector3.new(0, 1.2, 0)
 
 	local mine = Instance.new("Part")
 	mine.Name = "Mine"
@@ -527,10 +528,11 @@ local function dropMine(owner: Player)
 	mine.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90)) -- lie flat as a disc
 	mine.Color = Color3.fromRGB(35, 32, 30)
 	mine.Material = Enum.Material.Metal
-	mine.Anchored = true
-	mine.CanCollide = false
+	mine.Anchored = false
+	mine.CanCollide = true
 	mine.CanTouch = true
 	mine.Parent = Workspace
+	pcall(function() mine:SetNetworkOwner(nil) end) -- deterministic server-owned fall
 	Debris:AddItem(mine, MINE.LIFETIME + 0.5)
 
 	-- Red detonator tip poking up from the disc's center so it clearly reads as a
@@ -541,12 +543,16 @@ local function dropMine(owner: Player)
 	tip.Size = Vector3.new(1, 1, 1)
 	tip.Color = Color3.fromRGB(210, 35, 35)
 	tip.Material = Enum.Material.Neon
-	tip.Anchored = true
+	tip.Anchored = false
 	tip.CanCollide = false
 	tip.CanTouch = false
 	tip.CanQuery = false
 	tip.CFrame = CFrame.new(pos + Vector3.new(0, 0.35, 0))
 	tip.Parent = mine
+	local tipWeld = Instance.new("WeldConstraint")
+	tipWeld.Part0 = mine
+	tipWeld.Part1 = tip
+	tipWeld.Parent = tip
 
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(255, 45, 45)
@@ -561,16 +567,27 @@ local function dropMine(owner: Player)
 	end)
 
 	local triggered = false
+	local landed = false
 	local armAt = os.clock() + MINE.ARM_DELAY
 	mine.Touched:Connect(function(hit: BasePart)
-		if triggered or os.clock() < armAt then
+		if triggered then
 			return
 		end
 		local model = hit:FindFirstAncestorWhichIsA("Model")
+		local hitParticipant = model and (Players:GetPlayerFromCharacter(model) or AIService.findByCharacter(model))
+		if not landed and hitParticipant ~= owner then
+			landed = true
+			mine.AssemblyLinearVelocity = Vector3.zero
+			mine.AssemblyAngularVelocity = Vector3.zero
+			mine.Anchored = true
+		end
+		if not landed or os.clock() < armAt then
+			return
+		end
 		if not model then
 			return
 		end
-		local participant = Players:GetPlayerFromCharacter(model) or AIService.findByCharacter(model)
+		local participant = hitParticipant
 		if not participant or participant == owner or not canUse(participant) then
 			return -- only a living OTHER participant sets it off
 		end

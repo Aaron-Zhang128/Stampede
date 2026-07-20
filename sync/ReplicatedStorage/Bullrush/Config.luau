@@ -459,6 +459,34 @@ Config.FAST_PUNCH = {
 	MULT = 0.5,                   -- punch cooldown multiplier vs PUSH.COOLDOWN (0.5 = twice as fast)
 }
 
+-- Mega Punch: the standard punch with triple horizontal and vertical knockback.
+-- It deliberately reuses the polished Push targeting, animation and hit feedback.
+Config.MEGA_PUNCH = {
+	KNOCKBACK_MULT = 3,
+	COOLDOWN = 8,
+}
+
+-- Jump Higher is passive for the equipped round. Both JumpPower and JumpHeight
+-- are supported so it works regardless of StarterPlayer.CharacterUseJumpPower.
+Config.JUMP_HIGHER = {
+	MULT = 2,
+}
+
+-- Double Jump grants one extra mid-air jump, refreshed whenever the player lands.
+Config.DOUBLE_JUMP = {
+	POWER_MULT = 1,
+}
+
+-- Banana Peel drops a bright, readable trap at the player's feet. The first
+-- other participant to step on it is knocked down briefly, then the peel vanishes.
+Config.BANANA_PEEL = {
+	COOLDOWN = 7,
+	ARM_DELAY = 0.65,
+	LIFETIME = 25,
+	RAGDOLL_TIME = 2.5,
+	UP = 22,
+}
+
 -- Mine: DROP a stationary mine at your feet. When another living player steps on it
 -- (after a short arm delay) it EXPLODES and RAGDOLLS everyone within RADIUS for
 -- RAGDOLL_TIME — a NON-lethal knockdown (they get back up; they stay ALIVE). Folded
@@ -498,9 +526,13 @@ Config.ABILITY_SHOP = {
 		ExtraLives = 1400,
 		Mine = 1500,
 		Shockwave = 1750,
+		JumpHigher = 600,
+		DoubleJump = 1100,
+		BananaPeel = 1250,
+		MegaPunch = 2500,
 	},
 	-- Card order in the shop / rotation roster (also the display order).
-	ORDER = { "Bomb", "Shockwave", "FreezePunch", "FastPunch", "Mine", "ExtraLives" },
+	ORDER = { "Bomb", "Shockwave", "FreezePunch", "FastPunch", "Mine", "ExtraLives", "JumpHigher", "DoubleJump", "BananaPeel", "MegaPunch" },
 }
 
 -- TESTING: fake players so multiplayer modes can be playtested alone. When
@@ -552,25 +584,6 @@ Config.DIFFICULTY = {
 	-- out over a launch window) rather than in distinct bursts.
 	START = { telegraph = 2.4, gap = 2.0, speed = 17, bulls = 1 },
 	FINAL = { telegraph = 0.9, gap = 0.35, speed = 62, bulls = 3 },
-}
-
--- Special bulls: rare cameo charges by NAMED catalog bulls inside normal waves
--- (Main.maybeSpecialBull). Sometimes a wave bull launches as a RARE/EPIC/
--- LEGENDARY bull from BullCatalog — rarity glow + name tag on the model, a
--- live tease of what the lucky boxes can drop (no broadcast card; ANNOUNCE
--- lists any rarities that should still get one).
--- Speed stays RELATIVE to the round: the special multiplies the wave's CURRENT
--- ramped speed by its rarity's SPEED_MULT, so an early-round legendary reads
--- fast-for-now instead of endgame-fast. Multipliers are deliberately big -
--- a special has to VISIBLY outrun the plain bulls beside it or the cameo
--- doesn't register (x1.15-1.45 didn't read in play).
-Config.SPECIAL_BULLS = {
-	ENABLED = true,
-	CHANCE = 0.08,            -- odds per launched wave bull (after the interval gate)
-	MIN_INTERVAL = 20,        -- server-wide seconds between specials, so they stay an event
-	WEIGHTS = { RARE = 60, EPIC = 30, LEGENDARY = 10 }, -- rarity split among specials
-	SPEED_MULT = { RARE = 1.3, EPIC = 1.5, LEGENDARY = 1.7 }, -- x the wave's current speed
-	ANNOUNCE = {}, -- no broadcast cards; specials read via glow + name tag alone
 }
 
 -- Game modes. Main picks one per round: weighted random among modes whose
@@ -687,28 +700,7 @@ Config.MODES = {
 		rampTime = 157,
 		moneyMult = 1.2,
 	},
-	{
-		-- Reverse Hashtag: the Hashtag map turned inside out. The two lines that
-		-- were trenches (rows/cols 4 & 8) are now the ONLY solid ground — a # of
-		-- 1-tile-wide walkways — and the rooms between them are pits. Players
-		-- tightrope the corridors; step off and you fall. startSize 9 makes each
-		-- corridor 9 tiles long, keeping the # centered/symmetric (rooms 2-3-2)
-		-- inside the 2..10 window. Bulls charge only the four # lanes, so with the
-		-- 2-bull cap at least one whole corridor axis is always bull-free to flee
-		-- onto. Scarce dodge room, so bulls stay a hair slower/roomier than base
-		-- and it pays the most. One gentle shrink (to 7x7) keeps the # readable
-		-- rather than collapsing to a degenerate 5x5 ring.
-		id = "REVHASH", name = "Hash", weight = 2, minPlayers = 1,
-		startSize = 9,
-		holeLines = { rows = { 4, 8 }, cols = { 4, 8 }, invert = true },
-		shrink = { times = { 60 }, aliveFractions = { 0.4 } },
-		rampTime = 157,
-		moneyMult = 1.3,
-		difficulty = {
-			START = { telegraph = 2.4, gap = 2.0, speed = 17, bulls = 1 },
-			FINAL = { telegraph = 1.0, gap = 0.5, speed = 55, bulls = 2 },
-		},
-	},
+	-- Hash (REVHASH) disabled for now; Boxes (HASHTAG) remains enabled.
 }
 
 -- Lobby "Update" notice board (Workspace.Update). The board shows the next

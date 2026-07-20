@@ -2164,6 +2164,14 @@
               ]
             },
             {
+              "name": "BananaPeelService",
+              "className": "ModuleScript",
+              "guid": "1519901",
+              "filePaths": [
+                "sync/ServerScriptService/Bullrush/BananaPeelService.luau"
+              ]
+            },
+            {
               "name": "BombService",
               "className": "ModuleScript",
               "guid": "14754",
@@ -16797,6 +16805,16 @@
               "name": "Zoom",
               "className": "Sound",
               "guid": "16412"
+            },
+            {
+              "name": "throw",
+              "className": "Sound",
+              "guid": "6964561"
+            },
+            {
+              "name": "banana peel throw",
+              "className": "Sound",
+              "guid": "6964721"
             }
           ]
         }
@@ -25608,6 +25626,18 @@
                       "guid": "16377",
                       "children": [
                         {
+                          "name": "BananaPeel",
+                          "className": "Frame",
+                          "guid": "2054610",
+                          "children": [
+                            {
+                              "name": "Frame",
+                              "className": "Frame",
+                              "guid": "2054611"
+                            }
+                          ]
+                        },
+                        {
                           "name": "Bomb",
                           "className": "Frame",
                           "guid": "13208",
@@ -25703,6 +25733,25 @@
                                   "name": "UIStroke",
                                   "className": "UIStroke",
                                   "guid": "18271"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "DoubleJump",
+                          "className": "Frame",
+                          "guid": "2054628",
+                          "children": [
+                            {
+                              "name": "Frame",
+                              "className": "Frame",
+                              "guid": "2054629",
+                              "children": [
+                                {
+                                  "name": "Decor",
+                                  "className": "Folder",
+                                  "guid": "2054631"
                                 }
                               ]
                             }
@@ -26015,6 +26064,23 @@
                                   "guid": "18281"
                                 }
                               ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "JumpHigher",
+                          "className": "Frame",
+                          "guid": "2054574"
+                        },
+                        {
+                          "name": "MegaPunch",
+                          "className": "Frame",
+                          "guid": "2054592",
+                          "children": [
+                            {
+                              "name": "Frame",
+                              "className": "Frame",
+                              "guid": "2054593"
                             }
                           ]
                         },
@@ -39563,6 +39629,14 @@
           "guid": "16433",
           "children": [
             {
+              "name": "BananaPeelClient",
+              "className": "LocalScript",
+              "guid": "1519904",
+              "filePaths": [
+                "sync/StarterPlayer/StarterPlayerScripts/BananaPeelClient.client.luau"
+              ]
+            },
+            {
               "name": "BombClient",
               "className": "LocalScript",
               "guid": "14380",
@@ -39608,6 +39682,14 @@
               "guid": "14379",
               "filePaths": [
                 "sync/StarterPlayer/StarterPlayerScripts/LobbyBullDisplays.client.luau"
+              ]
+            },
+            {
+              "name": "MobilityAbilities",
+              "className": "LocalScript",
+              "guid": "1519906",
+              "filePaths": [
+                "sync/StarterPlayer/StarterPlayerScripts/MobilityAbilities.client.luau"
               ]
             },
             {

@@ -167,6 +167,7 @@ local function grantBox(player, boxId: string): { [string]: any }
 			local ok, bulls = pcall(DataHandler.GetStat, player, "Bulls")
 			if ok and bulls then
 				player:SetAttribute("Bulls", HttpService:JSONEncode(bulls))
+				player:SetAttribute("EquippedBull", DataHandler.GetEquippedBull(player))
 			end
 			if bull.rarity == "EPIC" or bull.rarity == "LEGENDARY" then
 				NotifyService.broadcast(

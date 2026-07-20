@@ -207,7 +207,7 @@ RunService.Heartbeat:Connect(function()
 	-- Fast Punch reuses this whole system (same shove) with a HALVED cooldown, so it
 	-- lights the button + target the same way Push does.
 	local equipped = player:GetAttribute("EquippedAbility") or "Push"
-	local punchEquipped = equipped == "Push" or equipped == "FastPunch"
+	local punchEquipped = equipped == "Push" or equipped == "FastPunch" or equipped == "MegaPunch"
 	if not isParticipating() or not punchEquipped then
 		pushBridge:SetAttribute("Enabled", false)
 		if currentTarget then
@@ -217,9 +217,9 @@ RunService.Heartbeat:Connect(function()
 	end
 	pushBridge:SetAttribute("Enabled", true)
 	-- Keep the HUD cooldown sweep in step with whichever punch is equipped.
-	pushBridge:SetAttribute("CooldownDuration", equipped == "FastPunch"
-		and PUSH.COOLDOWN * ((Config.FAST_PUNCH and Config.FAST_PUNCH.MULT) or 0.5)
-		or PUSH.COOLDOWN)
+	pushBridge:SetAttribute("CooldownDuration", if equipped == "FastPunch" then
+		PUSH.COOLDOWN * ((Config.FAST_PUNCH and Config.FAST_PUNCH.MULT) or 0.5)
+		elseif equipped == "MegaPunch" then Config.MEGA_PUNCH.COOLDOWN else PUSH.COOLDOWN)
 
 	local root = localRoot() :: BasePart
 	local participant, character = findNearest(root.Position)
@@ -322,7 +322,7 @@ end
 
 local function attemptPush()
 	local equipped = player:GetAttribute("EquippedAbility") or "Push"
-	if equipped ~= "Push" and equipped ~= "FastPunch" then
+	if equipped ~= "Push" and equipped ~= "FastPunch" and equipped ~= "MegaPunch" then
 		return -- some other ability is equipped in the Ability Box
 	end
 	if not isParticipating() then
@@ -340,9 +340,9 @@ local function attemptPush()
 	Remotes.Push:FireServer(target) -- Player / bot rig Model, or nil on a miss
 	playShoveFeedback()
 	-- Fast Punch: same swing, half the cooldown.
-	readyAt = os.clock() + (equipped == "FastPunch"
-		and PUSH.COOLDOWN * ((Config.FAST_PUNCH and Config.FAST_PUNCH.MULT) or 0.5)
-		or PUSH.COOLDOWN)
+	readyAt = os.clock() + (if equipped == "FastPunch" then
+		PUSH.COOLDOWN * ((Config.FAST_PUNCH and Config.FAST_PUNCH.MULT) or 0.5)
+		elseif equipped == "MegaPunch" then Config.MEGA_PUNCH.COOLDOWN else PUSH.COOLDOWN)
 	pushBridge:SetAttribute("ReadyAt", readyAt)
 end
 
@@ -414,7 +414,8 @@ local function shakeCamera()
 	end)
 end
 
-Remotes.Pushed.OnClientEvent:Connect(function(direction: Vector3)
+Remotes.Pushed.OnClientEvent:Connect(function(direction: Vector3, knockbackMult: number?)
+	local mult = math.clamp(tonumber(knockbackMult) or 1, 1, Config.MEGA_PUNCH.KNOCKBACK_MULT)
 	local root = aliveRoot()
 	if not root then
 		return
@@ -466,7 +467,7 @@ Remotes.Pushed.OnClientEvent:Connect(function(direction: Vector3)
 		stale:Destroy()
 	end
 
-	local spike = Vector3.new(flat.X * PUSH.SPEED, PUSH.UP, flat.Z * PUSH.SPEED)
+	local spike = Vector3.new(flat.X * PUSH.SPEED * mult, PUSH.UP * mult, flat.Z * PUSH.SPEED * mult)
 	root.AssemblyLinearVelocity = spike -- cover the substeps before the constraint engages
 
 	local attachment = Instance.new("Attachment")
@@ -511,9 +512,9 @@ Remotes.Pushed.OnClientEvent:Connect(function(direction: Vector3)
 			vy = -PUSH.UP - Workspace.Gravity * (ts - PUSH.UP_TIME)
 		end
 		velocity.VectorVelocity = Vector3.new(
-			flat.X * PUSH.SPEED * falloff,
-			vy,
-			flat.Z * PUSH.SPEED * falloff
+			flat.X * PUSH.SPEED * mult * falloff,
+			vy * mult,
+			flat.Z * PUSH.SPEED * mult * falloff
 		)
 	end)
 end)

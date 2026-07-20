@@ -36,7 +36,7 @@ local AbilityService = {}
 
 -- Roster order = the order cards appear in the picker. Keep in sync with the
 -- client picker's ABILITY table and each ability service's equip gate.
-local ORDER = { "Push", "Bomb", "Speed", "ExtraLives", "Shockwave", "FreezePunch", "Mine", "FastPunch" }
+local ORDER = { "Push", "Bomb", "Speed", "ExtraLives", "Shockwave", "FreezePunch", "Mine", "FastPunch", "JumpHigher", "MegaPunch", "BananaPeel", "DoubleJump" }
 local VALID: { [string]: boolean } = {}
 for _, key in ORDER do
 	VALID[key] = true
@@ -68,12 +68,23 @@ local chooseRemote = ensureRemote("AbilityChoose") -- client -> server: key
 -- default so the picker really does hide what you don't own — flip to true only
 -- to smoke-test all abilities without buying them.
 local TEST_OWN_ALL = false
+-- Temporary Studio QA unlock for the four abilities currently under test. This
+-- only sets replicated session attributes; it never writes OwnedAbilities or
+-- touches the production PlayerData_v2 store.
+local STUDIO_TEST_ABILITIES = { "JumpHigher", "MegaPunch", "BananaPeel", "DoubleJump" }
+local STUDIO_TEST_SET: { [string]: boolean } = {}
+for _, key in STUDIO_TEST_ABILITIES do
+	STUDIO_TEST_SET[key] = true
+end
 
 function AbilityService.owns(player: Player, key: string): boolean
 	if DEFAULT_OWNED[key] then
 		return true
 	end
 	if TEST_OWN_ALL and RunService:IsStudio() then
+		return true
+	end
+	if RunService:IsStudio() and STUDIO_TEST_SET[key] then
 		return true
 	end
 	return player:GetAttribute("Owns_" .. key) == true
@@ -169,6 +180,18 @@ function AbilityService.init()
 			grantAll(p)
 		end
 		Players.PlayerAdded:Connect(grantAll)
+	end
+
+	if RunService:IsStudio() then
+		local function grantTestAbilities(player: Player)
+			for _, key in STUDIO_TEST_ABILITIES do
+				player:SetAttribute("Owns_" .. key, true)
+			end
+		end
+		for _, player in Players:GetPlayers() do
+			grantTestAbilities(player)
+		end
+		Players.PlayerAdded:Connect(grantTestAbilities)
 	end
 end
 

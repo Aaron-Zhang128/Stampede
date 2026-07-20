@@ -58,6 +58,7 @@ local BombService = require(script.Parent.BombService)
 local SpeedBoostService = require(script.Parent.SpeedBoostService)
 local ShockwaveService = require(script.Parent.ShockwaveService)
 local FreezePunchService = require(script.Parent.FreezePunchService)
+local BananaPeelService = require(script.Parent.BananaPeelService)
 local AbilityService = require(script.Parent.AbilityService)
 local AbilityShopService = require(script.Parent.AbilityShopService)
 local DataHandler = require(ServerScriptService.UserData.DataHandler)
@@ -86,6 +87,7 @@ BombService.init() -- throwable bomb ability: server-spawned bomb + outward blas
 SpeedBoostService.init() -- speed-boost ability: server-owned WalkSpeed buff + speed-line trails
 ShockwaveService.init() -- shockwave ability: self-centered AoE non-lethal ragdoll
 FreezePunchService.init() -- freeze-punch ability: freeze the nearest player solid
+BananaPeelService.init() -- banana-peel ability: one-use recoverable slip trap
 AbilityService.init() -- per-round ability selection (equip / ownership / lock)
 AbilityShopService.init() -- lobby ability shop: 5-min rotation + Money purchase + ownership
 
@@ -716,49 +718,10 @@ local function startBoundsWatcher(holeLines): () -> ()
 	end
 end
 
--- Special bulls (Config.SPECIAL_BULLS): sometimes a wave bull charges as a
--- NAMED catalog bull — rarity glow + name tag client-side —
--- so players see the box prizes alive on the grid. Rolled per launched bull,
--- gated by a server-wide interval so specials stay an event. Returns the
--- charge style for the clients plus the rarity's speed multiplier (applied to
--- the wave's CURRENT ramped speed, keeping specials relatively fast, never
--- absolutely unfair), or nil + 1 for a plain bull.
-local specialRng = Random.new()
-local lastSpecialAt = -math.huge
-local function maybeSpecialBull()
-	local cfg = Config.SPECIAL_BULLS
-	if not (cfg and cfg.ENABLED) then
-		return nil, 1
-	end
-	if os.clock() - lastSpecialAt < cfg.MIN_INTERVAL or specialRng:NextNumber() >= cfg.CHANCE then
-		return nil, 1
-	end
-	local total = 0
-	for _, w in cfg.WEIGHTS do
-		total += w
-	end
-	local pick = specialRng:NextNumber() * total
-	local rarity
-	for r, w in cfg.WEIGHTS do
-		rarity = r
-		pick -= w
-		if pick <= 0 then
-			break
-		end
-	end
-	-- Single-rarity weight table -> BullCatalog.roll picks uniformly among that
-	-- rarity's ROLLABLE bulls, so a special is always a bull players can unlock.
-	local bullId = BullCatalog.roll(specialRng, { [rarity] = 1 })
-	local bull = BullCatalog.get(bullId)
-	if not bull then
-		return nil, 1
-	end
-	lastSpecialAt = os.clock()
-	if cfg.ANNOUNCE[bull.rarity] then
-		NotifyService.broadcast(bull.name .. "!", "red", 3)
-	end
-	return { bullId = bullId, special = bull.rarity }, cfg.SPEED_MULT[bull.rarity] or 1
-end
+-- Normal waves use the catalog as their speed ladder. The continuous target
+-- from WaveDirector is snapped to the nearest bull, and that bull's exact speed
+-- drives both server collision and client rendering.
+local waveBullRng = Random.new()
 
 local function runWaves(soloRound: boolean, roundStart: number, mode)
 	local isTeams = mode.teams == true
@@ -808,7 +771,6 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 			end
 			-- Blocking: telegraph + sink per step. The bounds watcher keeps
 			-- running, so stragglers on doomed tiles still get eliminated.
-			NotifyService.broadcast("ARENA SHRINKING!", "red", Config.SHRINK.TELEGRAPH)
 			ShrinkService.advanceTo(targetStage)
 			EconomyService.noteStageSurvived(RoundService.getAlive()) -- stage bonus for the living
 			if roundDecided(soloRound, isTeams) then
@@ -833,6 +795,19 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 			minBulls = if intensity < 0.35 then 2 else 3
 		end
 		local waveData = WaveDirector.getWave(intensity, bounds, difficulty, occupied, minBulls, mode.holeLines)
+		-- Give every match two full introductory waves with the familiar default
+		-- bull before the catalog-speed progression begins. From wave 3 onward the
+		-- nearest catalog step owns both the model and exact charge speed.
+		local waveBullId, waveBull
+		if wave <= 2 then
+			waveBullId = "STARTER"
+			waveBull = BullCatalog.get(waveBullId)
+		else
+			waveBullId, waveBull = BullCatalog.forWaveSpeed(waveData.speed, waveBullRng)
+		end
+		-- Each skinned bull owns a curated mutation VFX that matches its theme;
+		-- STARTER has no mapping and remains visually clean.
+		local waveMutation = waveBull.themeMutation
 
 		setRoundState("ACTIVE", {
 			aliveCount = RoundService.aliveCount(),
@@ -869,13 +844,10 @@ local function runWaves(soloRound: boolean, roundStart: number, mode)
 				-- once the round is decided; charging bulls are cancelled by
 				-- the onEliminated hook the moment the field is settled.
 				if not decided and not forceEndRound then -- also skip once an admin /voting force-ends
-					-- Rolled at launch (not wave build) so the Epic+ broadcast
-					-- lands exactly as the special leaves the gate.
-					local style, speedMult = maybeSpecialBull()
-					BullService.charge(bull.lane, waveData.speed * speedMult, bounds,
+					BullService.charge(bull.lane, waveBull.speed, bounds,
 						RoundService.getAliveCached, function(victim)
 							RoundService.eliminate(victim, "BULL")
-						end, style)
+						end, { bullId = waveBullId, mutation = waveMutation })
 				end
 				airborne -= 1
 				-- nil (not 0) when the lane empties: WaveDirector's exclusion

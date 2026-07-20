@@ -173,12 +173,6 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 	local bull = BullRollService.getEquippedBull(thrower)
 
 	cooldownUntil[thrower] = now + Config.REVENGE.COOLDOWN
-	-- The worn mutation leads the name ("Radioactive El Diablo charging...")
-	local mutDef = bull.mutation and BullCatalog.getMutation(bull.mutation)
-	local throwName = if mutDef then mutDef.name .. " " .. bull.name else bull.name
-	NotifyService.send(thrower,
-		("%s charging down %s %d!"):format(
-			throwName, if axis == "row" then "row" else "column", index), "green")
 	ack(thrower, "THROW_OK", { cooldown = Config.REVENGE.COOLDOWN, lane = lane, bullId = bull.id })
 
 	task.spawn(function()
@@ -196,18 +190,16 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 			if wasAlive and thrower.Parent ~= nil and shouldReward(thrower, victim) then
 				local paid = RoundService.awardMoney(thrower, Config.REVENGE.MONEY_PER_HIT)
 				EconomyService.noteRevenge(thrower, paid) -- shows on the Summary tab
-				-- The kill is the headline; the money still lands silently (cash
-				-- popup + Summary tab report it). "kill" style plays the sting.
-				NotifyService.send(thrower,
-					("You killed %s"):format(victim.DisplayName or victim.Name), "kill")
 				ack(thrower, "HIT", {
 					victimName = victim.Name,
 					amount = paid,
 				})
 			end
 		end
+		local bullDef = BullCatalog.get(bull.id)
 		BullService.charge(lane, bull.speed, bounds, RoundService.getAliveCached, onKill,
-			{ throwerName = thrower.Name, bullId = bull.id, mutation = bull.mutation })
+			{ throwerName = thrower.Name, bullId = bull.id,
+				mutation = bullDef and bullDef.themeMutation or nil })
 	end)
 end
 

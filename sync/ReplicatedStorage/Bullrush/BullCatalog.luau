@@ -7,8 +7,9 @@
 	  id         stable save key (profile.Bulls[id] = true) - the table key below
 	  name       display name
 	  rarity     key into BullCatalog.Rarities
-	  speed      studs/s for the revenge bull launched from the bull-cam;
-	             the EQUIPPED bull's speed replaces Config.REVENGE.SPEED
+	  speed      studs/s whenever this bull charges. Main wave bulls select the
+	             closest catalog speed as difficulty ramps from 17 to 62; the
+	             EQUIPPED revenge bull uses the same value
 	  modelName  ReplicatedStorage.BullrushAssets.Bulls child to clone
 	             (BullService.charge); nil = the default BullTemplate.
 	             Models are per rarity TIER for now (user decision
@@ -40,44 +41,56 @@ BullCatalog.Rarities = {
 	LEGENDARY = { weight = 1.5, dupeRefund = 0.50, order = 5, color = Color3.fromRGB(255, 182, 24) },
 }
 
--- Placeholder roster: speeds only for now (Config.REVENGE.SPEED was 50; the
--- difficulty ramp tops out at 62, so LEGENDARY overtakes even endgame bulls).
+-- Catalog speeds share the main round's full 17..62 gameplay range. The roster
+-- follows the old relative speed order, except STARTER deliberately owns the
+-- 17-speed opening step so every round begins with the default Ranch Bull before
+-- progressing into skinned bulls. A bull's look remains an honest speed cue in
+-- both normal waves and revenge throws.
 BullCatalog.Bulls = {
 	-- Everyone owns and starts equipped with the starter (granted by the
 	-- default profile in DataHandler; old saves pick it up on load merge).
-	STARTER     = { name = "Ranch Bull",      rarity = "COMMON",    speed = 50, rollable = false },
+	STARTER     = { name = "Ranch Bull",      rarity = "COMMON",    speed = 17, rollable = false },
 
 	-- COMMON is the variety rarity: four distinct Meshy skins, each its own model
 	-- in BullrushAssets.Bulls (Bull_COMMON_*). Higher rarities share one tier
 	-- model each; STARTER (the granted starter) uses the default BullTemplate rig.
-	RED         = { name = "Red",             rarity = "COMMON",    speed = 48, modelName = "Bull_COMMON_RED" },
-	YELLOW      = { name = "Yellow",          rarity = "COMMON",    speed = 49, modelName = "Bull_COMMON_YELLOW" },
-	GREEN       = { name = "Green",           rarity = "COMMON",    speed = 51, modelName = "Bull_COMMON_GREEN" },
-	BLUE        = { name = "Blue",            rarity = "COMMON",    speed = 52, modelName = "Bull_COMMON_STEEL" },
+	RED         = { name = "Red",             rarity = "COMMON",    speed = 18, modelName = "Bull_COMMON_RED" },
+	YELLOW      = { name = "Yellow",          rarity = "COMMON",    speed = 19, modelName = "Bull_COMMON_YELLOW" },
+	GREEN       = { name = "Green",           rarity = "COMMON",    speed = 22, modelName = "Bull_COMMON_GREEN" },
+	BLUE        = { name = "Blue",            rarity = "COMMON",    speed = 23, modelName = "Bull_COMMON_STEEL" },
 
-	BRONZE      = { name = "Bronze",          rarity = "COMMON",    speed = 50, modelName = "Bull_BRONZE" },
+	BRONZE      = { name = "Bronze",          rarity = "COMMON",    speed = 20, modelName = "Bull_BRONZE" },
 
-	LONGHORN    = { name = "Longhorn",        rarity = "UNCOMMON",  speed = 55, modelName = "Bull_UNCOMMON" },
-	SILVER      = { name = "Silver",          rarity = "UNCOMMON",  speed = 56, modelName = "Bull_SILVER" },
-	ICE         = { name = "Ice",             rarity = "UNCOMMON",  speed = 57, modelName = "Bull_ICE" },
+	LONGHORN    = { name = "Longhorn",        rarity = "UNCOMMON",  speed = 28, modelName = "Bull_UNCOMMON" },
+	SILVER      = { name = "Silver",          rarity = "UNCOMMON",  speed = 30, modelName = "Bull_SILVER" },
+	ICE         = { name = "Ice",             rarity = "UNCOMMON",  speed = 31, modelName = "Bull_ICE" },
 
-	MIDNIGHT    = { name = "Midnight",        rarity = "RARE",      speed = 60, modelName = "Bull_RARE" },
-	GOLD        = { name = "Gold",            rarity = "RARE",      speed = 61, modelName = "Bull_GOLD" },
-	MAGMA       = { name = "Magma",           rarity = "RARE",      speed = 62, modelName = "Bull_MAGMA" },
+	MIDNIGHT    = { name = "Midnight",        rarity = "RARE",      speed = 36, modelName = "Bull_RARE",  themeMutation = "STAR" },
+	GOLD        = { name = "Gold",            rarity = "RARE",      speed = 38, modelName = "Bull_GOLD",  themeMutation = "GOLD" },
+	MAGMA       = { name = "Magma",           rarity = "RARE",      speed = 40, modelName = "Bull_MAGMA", themeMutation = "FIRE" },
 
-	DARK        = { name = "Dark",            rarity = "EPIC",      speed = 66, modelName = "Bull_DARK" },
-	CYBERPUNK   = { name = "Cyberpunk",       rarity = "EPIC",      speed = 67, modelName = "Bull_CYBERPUNK" },
+	DARK        = { name = "Dark",            rarity = "EPIC",      speed = 46, modelName = "Bull_DARK",      themeMutation = "BLACKHOLE" },
+	CYBERPUNK   = { name = "Cyberpunk",       rarity = "EPIC",      speed = 48, modelName = "Bull_CYBERPUNK", themeMutation = "LIGHTNING" },
 	-- The original EPIC, rollable AND the fortune-wheel prize (Config.SPINNER slice 1).
-	DIABLO      = { name = "El Diablo",       rarity = "EPIC",      speed = 68, modelName = "Bull_EPIC" },
+	DIABLO      = { name = "El Diablo",       rarity = "EPIC",      speed = 49, modelName = "Bull_EPIC", themeMutation = "FIRE" },
 
-	PHAROW      = { name = "Pharaoh",         rarity = "LEGENDARY", speed = 72, modelName = "Bull_PHAROW" },
-	GOLDEN      = { name = "The Golden Bull", rarity = "LEGENDARY", speed = 74, modelName = "Bull_LEGENDARY" },
-	LUX         = { name = "Lux",             rarity = "LEGENDARY", speed = 75, modelName = "Bull_LUX" },
+	PHAROW      = { name = "Pharaoh",         rarity = "LEGENDARY", speed = 56, modelName = "Bull_PHAROW",    themeMutation = "RADIOACTIVE" },
+	GOLDEN      = { name = "The Golden Bull", rarity = "LEGENDARY", speed = 59, modelName = "Bull_LEGENDARY", themeMutation = "GOLD" },
+	LUX         = { name = "Lux",             rarity = "LEGENDARY", speed = 60, modelName = "Bull_LUX",       themeMutation = "GOLD" },
 	-- Sold via the STRAWBERRY_ELEPHANT game pass ("Celestial Bull" on Roblox;
 	-- granted instantly on purchase); rollable too, so it also drops as a rare
 	-- LEGENDARY. Save key stays STRAWBERRY. modelName is a PLACEHOLDER (reuses the
 	-- generic legendary skin) until the real model lands.
-	STRAWBERRY  = { name = "Celestial Bull", rarity = "LEGENDARY", speed = 76, modelName = "Bull_LEGENDARY" },
+	STRAWBERRY  = { name = "Celestial Bull", rarity = "LEGENDARY", speed = 62, modelName = "Bull_LEGENDARY", themeMutation = "STAR" },
+}
+
+-- Stable speed order for normal wave progression. Entries sharing a speed are
+-- both eligible, giving the 20-speed step a little cosmetic variety without
+-- ever selecting a bull faster or slower than the chosen catalog step.
+local WAVE_BULL_ORDER = {
+	"STARTER", "RED", "YELLOW", "BRONZE", "GREEN", "BLUE",
+	"LONGHORN", "SILVER", "ICE", "MIDNIGHT", "GOLD", "MAGMA",
+	"DARK", "CYBERPUNK", "DIABLO", "PHAROW", "GOLDEN", "LUX", "STRAWBERRY",
 }
 
 -- Mutations: cosmetic particle auras a pull can land on top of the bull.
@@ -112,6 +125,7 @@ export type Bull = {
 	rarity: string,
 	speed: number,
 	modelName: string?,
+	themeMutation: string?,
 	rollable: boolean?,
 }
 
@@ -126,6 +140,31 @@ export type Mutation = {
 
 function BullCatalog.get(bullId: string): Bull?
 	return BullCatalog.Bulls[bullId]
+end
+
+-- Return the catalog bull nearest to the continuous difficulty target. Main
+-- then uses this bull's exact speed, turning the old smooth ramp into readable
+-- catalog-speed steps. Ties between different speeds prefer the slower step;
+-- duplicate bulls at the selected speed are chosen randomly for variety.
+function BullCatalog.forWaveSpeed(targetSpeed: number, rng: Random?): (string, Bull)
+	local bestDistance = math.huge
+	local bestSpeed = math.huge
+	local candidates = {}
+	for _, bullId in WAVE_BULL_ORDER do
+		local bull = BullCatalog.Bulls[bullId]
+		local distance = math.abs(bull.speed - targetSpeed)
+		if distance < bestDistance or (distance == bestDistance and bull.speed < bestSpeed) then
+			bestDistance = distance
+			bestSpeed = bull.speed
+			table.clear(candidates)
+			table.insert(candidates, bullId)
+		elseif distance == bestDistance and bull.speed == bestSpeed then
+			table.insert(candidates, bullId)
+		end
+	end
+	local index = if rng and #candidates > 1 then rng:NextInteger(1, #candidates) else 1
+	local bullId = candidates[index]
+	return bullId, BullCatalog.Bulls[bullId]
 end
 
 function BullCatalog.getMutation(mutId: string): Mutation?

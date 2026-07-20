@@ -217,7 +217,10 @@ local function shakeCamera()
 	end)
 end
 
-bombedRemote.OnClientEvent:Connect(function(direction: Vector3)
+-- Shared blast response for bombs and mines. Keeping both hazards on this one
+-- path prevents mines from leaving the humanoid in a locally simulated
+-- PlatformStand while its walk animation continues to run for other clients.
+local function applyBlast(direction: Vector3)
 	local root = aliveRoot()
 	if not root then
 		return
@@ -272,24 +275,25 @@ bombedRemote.OnClientEvent:Connect(function(direction: Vector3)
 		end
 		velocity.VectorVelocity = Vector3.new(flat.X * BOMB.SPEED * falloff, vy, flat.Z * BOMB.SPEED * falloff)
 	end)
-end)
+end
+
+bombedRemote.OnClientEvent:Connect(applyBlast)
 
 --==============================================================================
--- Stepped on a mine: NON-lethally ragdoll our OWN character (client-owned, so
--- network ownership holds — same as Shockwave) with the server's launch impulse,
--- plus a camera jolt, then stand back up after MINE.RAGDOLL_TIME. We stay ALIVE.
+-- Mines use the exact same proven blast response as bombs. The server's impulse
+-- supplies the outward direction; applyBlast owns the actual launch curve.
 --==============================================================================
 
-minedRemote.OnClientEvent:Connect(function(impulse: Vector3)
-	local character = player.Character
-	if not character then
+minedRemote.OnClientEvent:Connect(function(impulse: Vector3, duration: number?)
+	if typeof(impulse) ~= "Vector3" then
 		return
 	end
-	shakeCamera()
-	RagdollUtil.ragdoll(character, if typeof(impulse) == "Vector3" then impulse else nil)
-	task.delay(MINE.RAGDOLL_TIME, function()
-		if player.Character == character then
+	local character = player.Character
+	if character then
+		RagdollUtil.ragdoll(character, impulse)
+		task.delay(tonumber(duration) or Config.MINE.RAGDOLL_TIME, function()
 			RagdollUtil.recover(character)
-		end
-	end)
+		end)
+	end
+	applyBlast(impulse)
 end)

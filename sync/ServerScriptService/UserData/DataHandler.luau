@@ -1,3 +1,7 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local BullCatalog = require(ReplicatedStorage.Bullrush.BullCatalog)
+
 local DataHandler = {}
 
 DataHandler.Profiles = {}
@@ -271,7 +275,28 @@ end
 function DataHandler.AddBull(player, bullId)
 	local profile = DataHandler.Profiles[player.UserId]
 	if not profile then return end
+	if profile.Bulls[bullId] == true then return end
+
+	-- Auto-equip only when this unlock establishes a new personal-best rarity.
+	-- Compare before inserting it; another bull in the same tier must not replace
+	-- a bull the player deliberately equipped.
+	local previousBestOrder = 0
+	for ownedId, owned in profile.Bulls do
+		if owned == true then
+			local ownedBull = BullCatalog.get(ownedId)
+			local ownedRarity = ownedBull and BullCatalog.Rarities[ownedBull.rarity]
+			if ownedRarity then
+				previousBestOrder = math.max(previousBestOrder, ownedRarity.order)
+			end
+		end
+	end
+
 	profile.Bulls[bullId] = true
+	local newBull = BullCatalog.get(bullId)
+	local newRarity = newBull and BullCatalog.Rarities[newBull.rarity]
+	if newRarity and newRarity.order > previousBestOrder then
+		profile.EquippedBull = bullId
+	end
 end
 
 function DataHandler.HasBull(player, bullId)

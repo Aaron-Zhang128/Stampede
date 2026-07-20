@@ -52,6 +52,10 @@ local ABILITY_IMAGE = {
 	FreezePunch = "rbxassetid://107113469378932",
 	Mine = "rbxassetid://125888253465870",
 	FastPunch = "rbxassetid://140046707321452",
+	JumpHigher = "rbxassetid://98294737685219",
+	MegaPunch = "rbxassetid://74689380620944",
+	BananaPeel = "rbxassetid://77048335315294",
+	DoubleJump = "rbxassetid://90039385775911",
 }
 local Store = Frames:WaitForChild("Store")
 local storeContainer = Store:WaitForChild("StoreFrame"):WaitForChild("Container")
@@ -575,12 +579,16 @@ do
 		local ABILITY = {
 			Push = { label = "PUSH", image = GLOVE_IMAGE, ring = RING_GREEN, key = "F", bridge = "PushBridge", target = true },
 			Bomb = { label = "BOMB", glyph = "💣", ring = Color3.fromRGB(255, 150, 60), key = "F", bridge = "BombBridge" },
-			Speed = { label = "SPEED", glyph = "⚡", ring = Color3.fromRGB(120, 220, 255), key = "F", bridge = "SpeedBoostBridge" },
+			Speed = { label = "SPEED", image = ABILITY_IMAGE.Speed, ring = Color3.fromRGB(120, 220, 255), key = "F", bridge = "SpeedBoostBridge" },
 			ExtraLives = { label = "2 Lives", glyph = "❤️", ring = Color3.fromRGB(255, 90, 120), passive = true },
 			Shockwave = { label = "SHOCK", glyph = "🌀", ring = Color3.fromRGB(150, 205, 255), key = "F", bridge = "ShockwaveBridge" },
 			FreezePunch = { label = "FREEZE", glyph = "❄️", ring = Color3.fromRGB(150, 225, 255), key = "F", bridge = "FreezePunchBridge", target = true },
 			Mine = { label = "MINE", glyph = "🧨", ring = Color3.fromRGB(255, 90, 60), key = "F", bridge = "MineBridge" },
 			FastPunch = { label = "FAST", image = GLOVE_IMAGE, ring = Color3.fromRGB(255, 210, 80), key = "F", bridge = "PushBridge", target = true },
+			JumpHigher = { label = "HIGH JUMP", glyph = "⬆️", ring = Color3.fromRGB(90, 235, 150), passive = true },
+			MegaPunch = { label = "MEGA", glyph = "💥", ring = Color3.fromRGB(255, 85, 70), key = "F", bridge = "PushBridge", target = true },
+			BananaPeel = { label = "BANANA", glyph = "🍌", ring = Color3.fromRGB(255, 225, 35), key = "F", bridge = "BananaPeelBridge" },
+			DoubleJump = { label = "2X JUMP", glyph = "⬆⬆", ring = Color3.fromRGB(120, 205, 255), passive = true },
 		}
 		local function currentAbilityKey(): string
 			return player:GetAttribute("EquippedAbility") or "Push"
@@ -840,14 +848,18 @@ task.spawn(function()
 	local PICK = {
 		Push = { label = "Push", glyph = "🥊", image = "rbxassetid://125148837464247", rarity = "COMMON", blurb = "Push Players" },
 		Bomb = { label = "Explosive", glyph = "💣", rarity = "UNCOMMON", blurb = "Throw Bombs" },
-		Speed = { label = "Speed", glyph = "⚡", rarity = "COMMON", blurb = "Run Faster" },
+		Speed = { label = "Speed", image = ABILITY_IMAGE.Speed, rarity = "COMMON", blurb = "Run Faster" },
 		ExtraLives = { label = "2 Lives", glyph = "❤️", rarity = "EPIC", blurb = "Survive 2 Hits" },
 		Shockwave = { label = "Shockwave", glyph = "🌀", rarity = "LEGENDARY", blurb = "Knock Players Down" },
 		FreezePunch = { label = "Freeze Punch", glyph = "❄️", rarity = "RARE", blurb = "Freeze Players" },
 		Mine = { label = "Mine", glyph = "🧨", rarity = "EPIC", blurb = "Drop a Mine" },
 		FastPunch = { label = "Fast Punch", glyph = "👊", rarity = "UNCOMMON", blurb = "Punch Faster" },
+		JumpHigher = { label = "Jump Higher", glyph = "⬆️", rarity = "UNCOMMON", blurb = "Jump 2x Higher" },
+		MegaPunch = { label = "Mega Punch", glyph = "💥", rarity = "LEGENDARY", blurb = "3x Knockback" },
+		BananaPeel = { label = "Banana Peel", glyph = "🍌", rarity = "RARE", blurb = "Make Players Slip" },
+		DoubleJump = { label = "Double Jump", glyph = "⬆⬆", rarity = "RARE", blurb = "Jump Again Mid-air" },
 	}
-	local ORDER = { "Push", "Bomb", "Speed", "ExtraLives", "Shockwave", "FreezePunch", "Mine", "FastPunch" }
+	local ORDER = { "Push", "Bomb", "Speed", "ExtraLives", "Shockwave", "FreezePunch", "Mine", "FastPunch", "JumpHigher", "MegaPunch", "BananaPeel", "DoubleJump" }
 
 	-- Power-tier color code, on the SAME gradient the bull system uses
 	-- (BullCatalog.Rarities): Common grey → Uncommon green → Rare blue → Epic purple
@@ -3009,7 +3021,11 @@ task.spawn(function()
 	end
 
 	local function refresh()
-		local show = bridge:GetAttribute("Eligible") == true and lastAlive ~= nil
+		-- Keep this spectator-only even if the bridge briefly carries stale state
+		-- while InRound replication catches up at a round transition.
+		local show = bridge:GetAttribute("Eligible") == true
+			and player:GetAttribute("InRound") ~= true
+			and lastAlive ~= nil
 		if show then
 			if aliveCard and aliveCard.Parent then
 				if aliveLabel then
@@ -3037,6 +3053,7 @@ task.spawn(function()
 	end
 
 	bridge:GetAttributeChangedSignal("Eligible"):Connect(refresh)
+	player:GetAttributeChangedSignal("InRound"):Connect(refresh)
 
 	local elimRemote = remotes:FindFirstChild("Eliminated")
 	if elimRemote and elimRemote:IsA("RemoteEvent") then
@@ -3271,15 +3288,15 @@ if boostLabel then
 	refreshBoost()
 end
 
--- Bottom-right perk badges (SideUI.Boosts). The kit ships a VIP crown slot and a
--- Luck clover slot (its Amount label placeholders "+150%"); we drive them off the
--- player's live attributes: IsVIP for the crown, RollLuck (the total Epic/Legendary
--- roll multiplier MonetizationService replicates) for the clover. The container
--- (and each unearned slot) hides until a perk is actually active.
+-- Bottom-right perk readout (SideUI.Boosts). Replace the kit's placeholder text
+-- with the live VIP ownership state and total roll-luck multiplier replicated by
+-- MonetizationService. VIP stays hidden when unowned; when owned, its row says
+-- "VIP". Luck remains visible so players can always see their live multiplier.
 local boostsFrame = SideUI:FindFirstChild("Boosts")
 if boostsFrame then
 	local vipSlot = boostsFrame:FindFirstChild("VIP")
 	local luckSlot = boostsFrame:FindFirstChild("Luck")
+	local vipAmount = vipSlot and vipSlot:FindFirstChild("Amount", true)
 	local luckAmount = luckSlot and luckSlot:FindFirstChild("Icon")
 	luckAmount = luckAmount and luckAmount:FindFirstChild("Amount")
 
@@ -3289,19 +3306,23 @@ if boostsFrame then
 	end
 
 	local function refreshBoosts()
-		local isVip = player:GetAttribute("IsVIP") == true
-		local luck = tonumber(player:GetAttribute("RollLuck")) or 1
-		local hasLuck = luck > 1.0001
+		local vipValue = player:GetAttribute("IsVIP")
+		local luckValue = player:GetAttribute("RollLuck")
+		local isVip = vipValue == true
+		local luck = tonumber(luckValue) or 1
 		if vipSlot then
 			vipSlot.Visible = isVip
 		end
 		if luckSlot then
-			luckSlot.Visible = hasLuck
+			luckSlot.Visible = true
 		end
-		if luckAmount and hasLuck then
-			luckAmount.Text = fmtLuck(luck)
+		if vipAmount and vipAmount:IsA("TextLabel") then
+			vipAmount.Text = "VIP"
 		end
-		boostsFrame.Visible = isVip or hasLuck
+		if luckAmount and luckAmount:IsA("TextLabel") then
+			luckAmount.Text = if luckValue == nil then "..." else fmtLuck(luck)
+		end
+		boostsFrame.Visible = true
 	end
 
 	player:GetAttributeChangedSignal("IsVIP"):Connect(refreshBoosts)
@@ -5156,10 +5177,11 @@ do
 	-- viewport, NOT the card — the strip's UIListLayout drops Visible=false children
 	-- and would collapse the whole row, so the card keeps its slot.
 	local stripViews = {} -- { { card = Frame, view = ViewportFrame? }, ... }
-	local POWERUP_FILLERS = { "Bomb", "Shockwave", "FreezePunch", "FastPunch", "Mine", "ExtraLives" }
+	local POWERUP_FILLERS = { "Bomb", "Shockwave", "FreezePunch", "FastPunch", "Mine", "ExtraLives", "JumpHigher", "MegaPunch", "BananaPeel", "DoubleJump" }
 	local POWERUP_NAMES = {
 		Bomb = "Bomb", Shockwave = "Shockwave", FreezePunch = "Freeze Punch",
 		FastPunch = "Fast Punch", Mine = "Mine", ExtraLives = "Extra Lives",
+		JumpHigher = "Jump Higher", MegaPunch = "Mega Punch", BananaPeel = "Banana Peel", DoubleJump = "Double Jump",
 	}
 	local POWERUP_RARITIES = {
 		FreezePunch = "RARE",
@@ -5168,6 +5190,7 @@ do
 		ExtraLives = "EPIC",
 		Mine = "EPIC",
 		Shockwave = "LEGENDARY",
+		JumpHigher = "UNCOMMON", MegaPunch = "LEGENDARY", BananaPeel = "RARE", DoubleJump = "RARE",
 	}
 	local function buildStrip(headline)
 		winnerCard = nil
@@ -5817,12 +5840,16 @@ do
 	}
 	local ABILITY_SHOP_META = {
 		Bomb = { label = "Explosive", glyph = "💣", color = Color3.fromRGB(255, 150, 60), rarity = "UNCOMMON", blurb = "Throw Bombs" },
-		Speed = { label = "Speed", glyph = "⚡", color = Color3.fromRGB(120, 220, 255), rarity = "COMMON", blurb = "Run Faster" },
+		Speed = { label = "Speed", image = ABILITY_IMAGE.Speed, color = Color3.fromRGB(120, 220, 255), rarity = "COMMON", blurb = "Run Faster" },
 		ExtraLives = { label = "2 Lives", glyph = "❤️", color = Color3.fromRGB(255, 90, 120), rarity = "EPIC", blurb = "Survive 2 Hits" },
 		Shockwave = { label = "Shockwave", glyph = "🌀", color = Color3.fromRGB(150, 205, 255), rarity = "LEGENDARY", blurb = "Knock Players Down" },
 		FreezePunch = { label = "Freeze Punch", glyph = "❄️", color = Color3.fromRGB(150, 225, 255), rarity = "RARE", blurb = "Freeze Players" },
 		Mine = { label = "Mine", glyph = "🧨", color = Color3.fromRGB(255, 90, 60), rarity = "EPIC", blurb = "Drop a Mine" },
 		FastPunch = { label = "Fast Punch", glyph = "👊", color = Color3.fromRGB(255, 210, 80), rarity = "UNCOMMON", blurb = "Punch Faster" },
+		JumpHigher = { label = "Jump Higher", glyph = "⬆️", color = Color3.fromRGB(90, 235, 150), rarity = "UNCOMMON", blurb = "Jump 2x Higher" },
+		MegaPunch = { label = "Mega Punch", glyph = "💥", color = Color3.fromRGB(255, 85, 70), rarity = "LEGENDARY", blurb = "3x Knockback" },
+		BananaPeel = { label = "Banana Peel", glyph = "🍌", color = Color3.fromRGB(255, 225, 35), rarity = "RARE", blurb = "Make Players Slip" },
+		DoubleJump = { label = "Double Jump", glyph = "⬆⬆", color = Color3.fromRGB(120, 205, 255), rarity = "RARE", blurb = "Jump Again Mid-air" },
 	}
 	-- The pinned FREE starter card (first-timers, slot 1) wears this friendlier badge
 	-- instead of the ability's paid-rotation rarity. Mirrors Config.ABILITY_SHOP
@@ -5837,7 +5864,7 @@ do
 		end
 		local HttpService = game:GetService("HttpService")
 
-		-- Header: title + a real ability glyph in the kit icon slot.
+		-- Header: title + the same blue lightning art used by the Speed ability.
 		local header = shopFrame:FindFirstChild("Header")
 		local headerName = header and header:FindFirstChild("Name")
 		if headerName and headerName:IsA("TextLabel") then
@@ -5845,18 +5872,12 @@ do
 		end
 		local headerIcon = header and header:FindFirstChild("Icon")
 		if headerIcon and headerIcon:IsA("ImageLabel") then
-			headerIcon.Image = ""
+			headerIcon.Image = ABILITY_IMAGE.Speed
+			headerIcon.ImageColor3 = Color3.new(1, 1, 1)
 			local glyph = headerIcon:FindFirstChild("AbilityGlyph")
-			if not glyph then
-				glyph = Instance.new("TextLabel")
-				glyph.Name = "AbilityGlyph"
-				glyph.BackgroundTransparency = 1
-				glyph.Size = UDim2.fromScale(1, 1)
-				glyph.TextScaled = true
-				glyph.Font = KIT_FONT
-				glyph.Parent = headerIcon
+			if glyph then
+				glyph:Destroy()
 			end
-			glyph.Text = "⚡"
 		end
 
 		-- Grab one kit card as the template, then clear the rest (bull boxes).
@@ -5883,7 +5904,7 @@ do
 			timer.AnchorPoint = Vector2.new(0.5, 0)
 			timer.Position = UDim2.fromScale(0.5, 1.02) -- just BELOW the shop panel (was 0.135, awkward under the header)
 			timer.Size = UDim2.fromScale(0.8, 0.05)
-			timer.Font = Enum.Font.GothamMedium
+			timer.Font = KIT_FONT
 			timer.TextScaled = true
 			timer.TextColor3 = Color3.fromRGB(210, 215, 230)
 			timer.ZIndex = 5
@@ -6158,13 +6179,17 @@ do
 	-- AbilityService: Push + Speed free (FREE_SKILLS), the rest read Owns_<key>.
 	local SKILLS_META = {
 		{ key = "Push", label = "Push", image = "rbxassetid://125148837464247", color = Color3.fromRGB(85, 255, 127), rarity = "COMMON", blurb = "Push Players" },
-		{ key = "ExtraLives", label = "2 Lives", glyph = "❤️", color = Color3.fromRGB(255, 90, 120), rarity = "EPIC", blurb = "Survive 2 Hits" },
-		{ key = "Speed", label = "Speed", glyph = "⚡", color = Color3.fromRGB(120, 220, 255), rarity = "COMMON", blurb = "Run Faster" },
+		{ key = "Speed", label = "Speed", image = ABILITY_IMAGE.Speed, color = Color3.fromRGB(120, 220, 255), rarity = "COMMON", blurb = "Run Faster" },
 		{ key = "Bomb", label = "Explosive", glyph = "💣", color = Color3.fromRGB(255, 150, 60), rarity = "UNCOMMON", blurb = "Throw Bombs" },
-		{ key = "Shockwave", label = "Shockwave", glyph = "🌀", color = Color3.fromRGB(150, 205, 255), rarity = "LEGENDARY", blurb = "Knock Players Down" },
-		{ key = "FreezePunch", label = "Freeze Punch", glyph = "❄️", color = Color3.fromRGB(150, 225, 255), rarity = "RARE", blurb = "Freeze Players" },
-		{ key = "Mine", label = "Mine", glyph = "🧨", color = Color3.fromRGB(255, 90, 60), rarity = "EPIC", blurb = "Drop a Mine" },
 		{ key = "FastPunch", label = "Fast Punch", glyph = "👊", color = Color3.fromRGB(255, 210, 80), rarity = "UNCOMMON", blurb = "Punch Faster" },
+		{ key = "JumpHigher", label = "Jump Higher", glyph = "⬆️", color = Color3.fromRGB(90, 235, 150), rarity = "UNCOMMON", blurb = "Jump 2x Higher" },
+		{ key = "FreezePunch", label = "Freeze Punch", glyph = "❄️", color = Color3.fromRGB(150, 225, 255), rarity = "RARE", blurb = "Freeze Players" },
+		{ key = "DoubleJump", label = "Double Jump", glyph = "⬆⬆", color = Color3.fromRGB(120, 205, 255), rarity = "RARE", blurb = "Jump Again Mid-air" },
+		{ key = "BananaPeel", label = "Banana Peel", glyph = "🍌", color = Color3.fromRGB(255, 225, 35), rarity = "RARE", blurb = "Make Players Slip" },
+		{ key = "ExtraLives", label = "2 Lives", glyph = "❤️", color = Color3.fromRGB(255, 90, 120), rarity = "EPIC", blurb = "Survive 2 Hits" },
+		{ key = "Mine", label = "Mine", glyph = "🧨", color = Color3.fromRGB(255, 90, 60), rarity = "EPIC", blurb = "Drop a Mine" },
+		{ key = "Shockwave", label = "Shockwave", glyph = "🌀", color = Color3.fromRGB(150, 205, 255), rarity = "LEGENDARY", blurb = "Knock Players Down" },
+		{ key = "MegaPunch", label = "Mega Punch", glyph = "💥", color = Color3.fromRGB(255, 85, 70), rarity = "LEGENDARY", blurb = "3x Knockback" },
 	}
 
 	-- Push + Speed are the free defaults (mirror AbilityService.DEFAULT_OWNED); the rest
@@ -6271,7 +6296,11 @@ do
 				g.Parent = preview
 			end
 			local glyph = preview:FindFirstChild("Glyph")
-			local art = ABILITY_IMAGE[meta.key] or meta.image
+			-- Shop2 cards are physical designer-owned instances. Prefer an image placed
+			-- directly on that card so Studio edits are not erased at runtime; shared
+			-- ABILITY_IMAGE/meta art remains the fallback for an empty preview.
+			local physicalArt = if preview.Image ~= "" then preview.Image else nil
+			local art = physicalArt or ABILITY_IMAGE[meta.key] or meta.image
 			if art then
 				preview.Image = art
 				-- always the real icon; locked just greys + fades it
@@ -9118,7 +9147,9 @@ do
 		end
 		local camGui = Instance.new("ScreenGui")
 		camGui.Name = "EnterBullCamGui"
-		camGui.DisplayOrder = 100 -- same band as the FREE button; below the loading screen
+		-- Keep the standalone control beneath Main so modal frames (especially the
+		-- fortune wheel) always render and receive input above it.
+		camGui.DisplayOrder = gui.DisplayOrder - 1
 		camGui.ResetOnSpawn = false
 		camGui.IgnoreGuiInset = false
 		camGui.Parent = gui.Parent

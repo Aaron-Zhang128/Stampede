@@ -66,6 +66,11 @@ end
 local lastDashAt = -math.huge
 local dashing = false
 
+local function dashAllowed(): boolean
+	-- Double Jump replaces the normal second-press dash with its own mid-air jump.
+	return player:GetAttribute("EquippedAbility") ~= "DoubleJump"
+end
+
 local function playWhoosh(pitch: number, volume: number)
 	local sound = Instance.new("Sound")
 	pcall(function()
@@ -171,7 +176,7 @@ local function landingPuff(root: BasePart)
 end
 
 local function dash()
-	if dashing or os.clock() - lastDashAt < COOLDOWN then
+	if not dashAllowed() or dashing or os.clock() - lastDashAt < COOLDOWN then
 		return
 	end
 	local humanoid, root = aliveParts()
@@ -216,7 +221,7 @@ local function dash()
 	connection = RunService.Heartbeat:Connect(function()
 		local _nowHumanoid, nowRoot = aliveParts()
 		-- nowRoot ~= root catches death/respawn mid-dash.
-		if nowRoot ~= root or os.clock() - lastDashAt >= DASH_TIME then
+		if not dashAllowed() or nowRoot ~= root or os.clock() - lastDashAt >= DASH_TIME then
 			connection:Disconnect()
 			dashing = false
 			if lungeTrack and lungeTrack.IsPlaying then
@@ -266,6 +271,13 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 UserInputService.JumpRequest:Connect(function()
+	if not dashAllowed() then
+		-- Don't retain a first-tap timestamp that could trigger a dash immediately
+		-- after switching away from Double Jump.
+		lastJumpAt = -math.huge
+		releasedSincePress = false
+		return
+	end
 	local now = os.clock()
 	if releasedSincePress and now - lastJumpAt <= DOUBLE_TAP_WINDOW then
 		lastJumpAt = -math.huge -- consume the pair so a 3rd press starts fresh
@@ -274,4 +286,9 @@ UserInputService.JumpRequest:Connect(function()
 		lastJumpAt = now -- (re)arm as the first press of a potential double-tap
 	end
 	releasedSincePress = false -- next press only counts after a fresh release
+end)
+
+player:GetAttributeChangedSignal("EquippedAbility"):Connect(function()
+	lastJumpAt = -math.huge
+	releasedSincePress = true
 end)

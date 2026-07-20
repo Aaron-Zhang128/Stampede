@@ -1702,7 +1702,7 @@ local mutationRigs = ReplicatedStorage:FindFirstChild("Mutations")
 
 -- The model to charge: the bull's catalog modelName (per-bull skins in
 -- ReplicatedStorage.BullrushAssets.Bulls, same Root+Body build as
--- BullTemplate), or BullTemplate for wave bulls / missing models.
+-- BullTemplate), or BullTemplate for missing models.
 local function bullTemplateFor(bullId: string?): Model
 	if bullId and bullCatalog and type(bullCatalog.get) == "function" then
 		local ok, def = pcall(bullCatalog.get, bullId)
@@ -1809,10 +1809,13 @@ local function spawnBullVisual(data)
 	local body = bull:FindFirstChild("Body")
 	local baseBodySize = if body and body:IsA("BasePart") then body.Size else nil
 
-	-- Styled bulls read as EVENTS. Revenge (style.throwerName): red glow + the
+	-- Mutation VFX can ride on progression bulls without turning them into an
+	-- event. Glow/name UI remains reserved for revenge and explicitly special
+	-- bulls.
+	-- Revenge (style.throwerName): red glow + the
 	-- thrower's name so victims know who to blame (and the thrower can spot
-	-- THEIR bull in a stampede). Special wave bulls (style.special, a rarity
-	-- key from Main.maybeSpecialBull): rarity-colored glow + the bull's own
+	-- THEIR bull in a stampede). Event bulls (style.special, a rarity key):
+	-- rarity-colored glow + the bull's own
 	-- name, so the lucky-box prizes get seen alive on the grid.
 	if style then
 		-- Stamp the thrower so boostOwnRevengeBull (ChildAdded on the folder)
@@ -1823,7 +1826,9 @@ local function spawnBullVisual(data)
 		if style.mutation then
 			attachBullMutationVfx(body :: BasePart?, style.mutation)
 		end
+	end
 
+	if style and (style.throwerName or style.special) then
 		-- Specials wear their rarity's color (catalog missing -> legendary
 		-- gold); revenge keeps the original red.
 		local special = if type(style.special) == "string" then style.special else nil
@@ -2400,10 +2405,9 @@ if revengeAckRemote then
 			playHapticPulse("GameplayCollision")
 			playLibSfx("Confirm", 0.9)
 		elseif kind == "HIT" then
-			-- Server sends the "You killed X" kill card; this is the BIG payoff:
-			-- a center-screen burst + shake so a trample never goes unnoticed.
+			-- The center-screen trample burst confirms the bull hit.
 			-- Money is deliberately NOT shown here (it still lands silently — the
-			-- cash popup + Summary tab report it); the kill is the headline.
+			-- cash popup + Summary tab report it).
 			local victim = if typeof(data) == "table" then tostring(data.victimName or "someone") else "someone"
 			showHitPopup(("TRAMPLED %s!"):format(victim))
 			addTrauma(0.35)

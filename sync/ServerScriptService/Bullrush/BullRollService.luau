@@ -107,6 +107,7 @@ local function refreshInventoryAttribute(player)
 	local ok, bulls = pcall(DataHandler.GetStat, player, "Bulls")
 	if ok and bulls then
 		player:SetAttribute("Bulls", HttpService:JSONEncode(bulls))
+		player:SetAttribute("EquippedBull", DataHandler.GetEquippedBull(player))
 	end
 	local okMuts, muts = pcall(DataHandler.GetStat, player, "BullMutations")
 	if okMuts and muts then
