@@ -98,12 +98,11 @@ Config.PRODUCTS = {
 	LUCKY_SECRET = 3609137453,    -- "Lucky Block" (20 R$)  -> Secret tier
 	LUCKY_ALIEN = 3609137528,     -- "Lucky Secret" (80 R$) -> Alien tier
 	LUCKY_GOD = 3609137618,       -- "Lucky God" (200 R$)   -> GOD tier
-	-- OP Lucky Block: a ROBUX elite BULL ROLL (Config.BULLS.OP_ROLL, Epic/Legendary
-	-- only) revealed on the bull carousel - NOT a wheel spin. Handled by
-	-- BullRollService; X3/X10 roll 3/10 elite bulls. Sold on the Store "Exclusive" card.
-	OP_LUCKY = 3609162473,        -- "OP Lucky Block" (99 R$)      -> 1 elite bull roll
-	OP_LUCKY_X3 = 3609162516,     -- "OP Lucky Block X3" (249 R$)  -> 3 elite bull rolls
-	OP_LUCKY_X10 = 3609162604,    -- "OP Lucky Block X10" (699 R$) -> 10 elite bull rolls
+	-- OP Lucky Block: ROBUX powerup rolls revealed through the shared carousel.
+	-- X3/X10 award 3/10 powerups; duplicate ownership refunds in-game Money.
+	OP_LUCKY = 3609162473,        -- "OP Lucky Block" (99 R$)      -> 1 powerup roll
+	OP_LUCKY_X3 = 3609162516,     -- "OP Lucky Block X3" (249 R$)  -> 3 powerup rolls
+	OP_LUCKY_X10 = 3609162604,    -- "OP Lucky Block X10" (699 R$) -> 10 powerup rolls
 	SERVER_LUCK = 3609144868,     -- "Server Luck" product: boosts the WHOLE server's Epic/Legendary roll odds for Config.LUCK.SERVER.duration (re-buy adds time)
 	-- Money Packs (Store "Cash" section): buy Robux -> get in-game Money. Amounts
 	-- live in Config.MONEY_PACKS; handled by MonetizationService.
@@ -277,18 +276,17 @@ Config.BULLS = {
 	},
 	ROBUX_BOX = "MEGA",           -- Robux rolls (BULL_ROLL/BULL_ROLL_10) open this box
 
-	-- OP Lucky Block: a ROBUX-only ELITE bull roll (Store "Exclusive" card). Every
-	-- pull is Epic or Legendary - no commons/uncommons/rares in the pool - and the
-	-- reveal reuses the bull carousel (BullRollService grants; not the wheel). The
-	-- bundles map to the card's x1/x3/x10 buy buttons in order. cost = the dupe
-	-- refund basis (Robux-bought, so no Money is charged); mutationChance is the
-	-- richest in the game. See [[fortune-wheel]] tiers for the wheel-based blocks.
+	-- OP Lucky Block: a ROBUX-only POWERUP roll (Store "Exclusive" card). The
+	-- reveal reuses the existing roll carousel. A new pull permanently unlocks the
+	-- ability; a duplicate refunds that ability's normal in-game shop price.
 	OP_ROLL = {
-		box = {
-			name = "OP Bull", tag = "OP", color = Color3.fromRGB(255, 90, 210),
-			cost = 10000,                          -- dupe refund basis only
-			weights = { EPIC = 70, LEGENDARY = 30 }, -- elite pool: Epic or Legendary only
-			mutationChance = 0.30,
+		powerups = {
+			{ key = "FreezePunch", name = "Freeze Punch", rarity = "RARE",      weight = 24 },
+			{ key = "FastPunch",   name = "Fast Punch",   rarity = "UNCOMMON",  weight = 24 },
+			{ key = "Bomb",        name = "Bomb",         rarity = "UNCOMMON",  weight = 22 },
+			{ key = "ExtraLives",  name = "Extra Lives",  rarity = "EPIC",      weight = 15 },
+			{ key = "Mine",        name = "Mine",         rarity = "EPIC",      weight = 10 },
+			{ key = "Shockwave",   name = "Shockwave",    rarity = "LEGENDARY", weight = 5 },
 		},
 		bundles = { -- Exclusive-card buy buttons 1/2/3, in this order
 			{ product = "OP_LUCKY",     count = 1 },
@@ -495,11 +493,11 @@ Config.ABILITY_SHOP = {
 	-- a solid round nets ~$100-200, so these land at ~3-6 rounds each instead of 5-20.
 	PRICES = {
 		FreezePunch = 500,
-		FastPunch = 600,
-		Bomb = 650,
-		ExtraLives = 800,
-		Mine = 850,
-		Shockwave = 1000,
+		FastPunch = 750,
+		Bomb = 900,
+		ExtraLives = 1400,
+		Mine = 1500,
+		Shockwave = 1750,
 	},
 	-- Card order in the shop / rotation roster (also the display order).
 	ORDER = { "Bomb", "Shockwave", "FreezePunch", "FastPunch", "Mine", "ExtraLives" },

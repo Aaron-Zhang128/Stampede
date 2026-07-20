@@ -2,7 +2,7 @@ local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
-local DataStore = DataStoreService:GetDataStore("PlayerData_v200000")
+local DataStore = DataStoreService:GetDataStore("PlayerData_v2")
 local DataHandler = require(game.ServerScriptService.UserData.DataHandler)
 
 -- Onboarding funnel logger. Loaded defensively: a missing/broken Analytics module

@@ -119,22 +119,6 @@ local function openFrame(frame)
 	tween(scale, POP_IN, { Scale = 1 })
 end
 
--- Close whatever lobby window is open (shop, etc.) the moment a round BEGINS, so
--- the shop tab never hangs over the gameplay once the game starts.
-task.spawn(function()
-	local bullrush = ReplicatedStorage:WaitForChild("Bullrush", 30)
-	local remotes = bullrush and bullrush:FindFirstChild("Remotes")
-	local stateRemote = remotes and remotes:WaitForChild("RoundState", 30)
-	if not (stateRemote and stateRemote:IsA("RemoteEvent")) then
-		return
-	end
-	stateRemote.OnClientEvent:Connect(function(state)
-		if state == "ACTIVE" and currentFrame then
-			closeFrame(currentFrame)
-		end
-	end)
-end)
-
 -- The container itself must be visible or every window opens invisibly (its
 -- children toggle, it doesn't) — force it in case an Explorer click hid it.
 Frames.Visible = true
@@ -1880,29 +1864,72 @@ task.spawn(function()
 		end
 	end
 
-	-- OP Lucky Block lives on the featured "Exclusive" card at the top: its 3 buy
-	-- buttons are the x1 / x3 / x10 elite BULL rolls (Config.BULLS.OP_ROLL). Buying
-	-- prompts the Robux product; the receipt rolls elite bulls (BullRollService)
-	-- and the bull carousel auto-opens. Prices/labels are already set in the kit.
+	-- OP Lucky Block lives on the featured "Exclusive" card at the top. Its x1/x3/x10
+	-- products roll permanent powerups and reuse the standard roll carousel.
 	local opRoll = cfg.BULLS and cfg.BULLS.OP_ROLL
 	local exclusive = storeContainer:FindFirstChild("Exclusive")
 	local exBuys = exclusive and exclusive:FindFirstChild("BuyButtons")
 	if opRoll and exBuys then
 		for i, bundle in ipairs(opRoll.bundles or {}) do
-			wireBuyButton(exBuys:FindFirstChild(tostring(i)), bundle.product)
+			local button = exBuys:FindFirstChild(tostring(i))
+			wireBuyButton(button, bundle.product)
+			local info = button and button:FindFirstChild("Info")
+			local priceLabel = info and info:FindFirstChild("Price")
+			local productId = tonumber(cfg.PRODUCTS[bundle.product]) or 0
+			if priceLabel and priceLabel:IsA("TextLabel") and productId > 0 then
+				task.spawn(function()
+					local ok, product = pcall(function()
+						return Marketplace:GetProductInfo(productId, Enum.InfoType.Product)
+					end)
+					if ok and product and product.PriceInRobux and priceLabel.Parent then
+						priceLabel.Text = tostring(product.PriceInRobux)
+					end
+				end)
+			end
 		end
 	end
 
-	-- Paint the Exclusive card's outcome slots with the ACTUAL elite bulls this
-	-- crate can roll instead of the kit's placeholder brainrot art. The pool =
-	-- rollable bulls whose rarity is weighted in OP_ROLL.box.weights (EPIC +
-	-- LEGENDARY only). Each slot becomes a real ViewportFrame render of the bull
-	-- model (same 3/4-front recipe as the Celestial card / index cards) plus its
-	-- TRUE odds: BullCatalog.roll picks a rarity by weight then a uniform bull
-	-- within it, so a bull's chance = rarityWeight/totalWeight / bullsInThatRarity.
+	-- Paint the Exclusive card with the configured powerup pool and exact weights.
+	-- The legacy bull branch below remains as a compatibility fallback for an older
+	-- OP_ROLL config that still supplies box.weights.
 	local outcomes = exclusive and exclusive:FindFirstChild("Outcomes")
 	local weights = opRoll and opRoll.box and opRoll.box.weights
 	local okCat, BullCatalog = pcall(require, bullrush:WaitForChild("BullCatalog", 30))
+	if outcomes and opRoll and typeof(opRoll.powerups) == "table" then
+		local slots = {}
+		for _, child in outcomes:GetChildren() do
+			if child:IsA("Frame") then table.insert(slots, child) end
+		end
+		table.sort(slots, function(a, b) return a.Name < b.Name end)
+		local rarityColors = {
+			UNCOMMON = Color3.fromRGB(58, 224, 104),
+			RARE = Color3.fromRGB(46, 158, 255),
+			EPIC = Color3.fromRGB(196, 78, 255),
+			LEGENDARY = Color3.fromRGB(255, 182, 24),
+		}
+		local totalWeight = 0
+		for _, entry in opRoll.powerups do totalWeight += tonumber(entry.weight) or 0 end
+		for i, slot in ipairs(slots) do
+			local entry = opRoll.powerups[i]
+			slot.Visible = entry ~= nil
+			if entry then
+				local chance = totalWeight > 0 and (tonumber(entry.weight) or 0) / totalWeight * 100 or 0
+				local chanceLabel = slot:FindFirstChild("Chance")
+				if chanceLabel and chanceLabel:IsA("TextLabel") then
+					chanceLabel.Text = string.format("%d%%", math.floor(chance + 0.5))
+				end
+				local rateLabel = slot:FindFirstChild("Rate")
+				if rateLabel and rateLabel:IsA("TextLabel") then rateLabel.Text = entry.name end
+				local stroke = slot:FindFirstChild("UIStroke")
+				if stroke then stroke.Color = rarityColors[entry.rarity] or Color3.new(1, 1, 1) end
+				local icon = slot:FindFirstChild("Icon")
+				if icon and icon:IsA("ImageLabel") then
+					icon.Image = ABILITY_IMAGE[entry.key] or ""
+					icon.ImageColor3 = Color3.new(1, 1, 1)
+				end
+			end
+		end
+	end
 	if outcomes and okCat and typeof(BullCatalog) == "table" and typeof(weights) == "table" then
 		local bullsFolder = ReplicatedStorage:FindFirstChild("BullrushAssets")
 		bullsFolder = bullsFolder and bullsFolder:FindFirstChild("Bulls")
@@ -4517,6 +4544,7 @@ end
 -- results grid. All motion is manual RenderStepped math, never a TweenService
 -- loop (Run-mode tween freeze — see the marquee/ambient sections).
 do
+	local MarketplaceService = game:GetService("MarketplaceService")
 	-- resolved async (remotes + Config + Catalog) at the bottom of this block
 	local BullCatalog = nil
 	local ackRemote = nil
@@ -4524,7 +4552,9 @@ do
 	local BOXES = nil             -- Config.BULLS.BOXES once Config resolves
 	local rarityGradient = nil    -- Config.rarityGradient(col) -> shared rarity text ramp
 	local lastBoxId = nil         -- box behind the current reveal (ROLL AGAIN re-buys it)
-	local productIds = { BULL_ROLL = 0, BULL_ROLL_10 = 0 }
+	local productIds = {}
+	local activeRobuxProductKey = "BULL_ROLL"
+	local priceRequestToken = 0
 	local modelsFolder = nil      -- ReplicatedStorage.BullrushAssets.Bulls (tier skins)
 	local fallbackModel = nil     -- ...BullrushAssets.BullTemplate (default look)
 
@@ -4988,8 +5018,9 @@ do
 	local function makeCard(bullId, size, opts)
 		opts = opts or {}
 		local z = opts.zIndex or 1
-		local bull = BullCatalog and BullCatalog.get(bullId) or nil
-		local rarity = (bull and bull.rarity) or "COMMON"
+		local abilityKey = opts.abilityKey
+		local bull = not abilityKey and BullCatalog and BullCatalog.get(bullId) or nil
+		local rarity = opts.rarity or (bull and bull.rarity) or "COMMON"
 		local col = rarityColor(rarity)
 		-- per-tier ramp built from the tier color, same juicy shape as the notif
 		-- text (NOTIF_TEXT_TINTS): bright highlight at the top of the glyphs, the
@@ -5046,10 +5077,23 @@ do
 			local rarStroke = Instance.new("UIStroke"); rarStroke.Thickness = 2.5; rarStroke.Parent = iconFrame
 			tierGradient(90).Parent = rarStroke -- lit-top -> shaded-bottom tier border
 		end
-		buildBullPreview(iconFrame, bull, z, opts.shadow)
+		if abilityKey then
+			local icon = Instance.new("ImageLabel")
+			icon.Name = "AbilityPreview"
+			icon.BackgroundTransparency = 1
+			icon.AnchorPoint = Vector2.new(0.5, 0.5)
+			icon.Position = UDim2.fromScale(0.5, 0.5)
+			icon.Size = UDim2.fromScale(0.82, 0.82)
+			icon.Image = ABILITY_IMAGE[abilityKey] or ""
+			icon.ImageColor3 = if opts.shadow then Color3.fromRGB(35, 35, 42) else Color3.new(1, 1, 1)
+			icon.ZIndex = z
+			icon.Parent = iconFrame
+		else
+			buildBullPreview(iconFrame, bull, z, opts.shadow)
+		end
 		iconFrame.Parent = card
 
-		local nameLabel = kitLabel((bull and bull.name) or "???", INK)
+		local nameLabel = kitLabel(opts.name or (bull and bull.name) or "???", INK)
 		nameLabel.Size = UDim2.new(1, -10, 0.15, 0)
 		nameLabel.Position = UDim2.new(0, 5, 0.64, 0)
 		nameLabel.ZIndex = z
@@ -5112,7 +5156,20 @@ do
 	-- viewport, NOT the card — the strip's UIListLayout drops Visible=false children
 	-- and would collapse the whole row, so the card keeps its slot.
 	local stripViews = {} -- { { card = Frame, view = ViewportFrame? }, ... }
-	local function buildStrip(headline) -- headline = the winning result {bullId, mutation?}
+	local POWERUP_FILLERS = { "Bomb", "Shockwave", "FreezePunch", "FastPunch", "Mine", "ExtraLives" }
+	local POWERUP_NAMES = {
+		Bomb = "Bomb", Shockwave = "Shockwave", FreezePunch = "Freeze Punch",
+		FastPunch = "Fast Punch", Mine = "Mine", ExtraLives = "Extra Lives",
+	}
+	local POWERUP_RARITIES = {
+		FreezePunch = "RARE",
+		FastPunch = "UNCOMMON",
+		Bomb = "UNCOMMON",
+		ExtraLives = "EPIC",
+		Mine = "EPIC",
+		Shockwave = "LEGENDARY",
+	}
+	local function buildStrip(headline)
 		winnerCard = nil
 		table.clear(stripViews)
 		for _, c in ipairs(strip:GetChildren()) do
@@ -5122,11 +5179,17 @@ do
 		end
 		for i = 1, STRIP_LEN do
 			local isWinner = i == WINNER_INDEX
-			local id = isWinner and headline.bullId or randomFiller()
+			local isPowerup = headline.abilityKey ~= nil
+			local id = if isWinner then (headline.abilityKey or headline.bullId)
+				else (if isPowerup then POWERUP_FILLERS[math.random(1, #POWERUP_FILLERS)] else randomFiller())
 			-- Locked bulls scroll past as silhouettes; the winner always reveals in
 			-- full colour (it's the payoff — and by now the server has granted it).
-			local card = makeCard(id, UDim2.fromOffset(CARD_W, CARD_H),
-				if isWinner then { mutation = headline.mutation }
+			local card = makeCard(id, UDim2.fromOffset(CARD_W, CARD_H), if isPowerup then {
+				abilityKey = id,
+				name = if isWinner then headline.name else POWERUP_NAMES[id],
+				rarity = if isWinner then headline.rarity else POWERUP_RARITIES[id],
+				shadow = not isWinner and player:GetAttribute("Owns_" .. id) ~= true,
+			} elseif isWinner then { mutation = headline.mutation }
 				else { shadow = not isOwnedBull(id) })
 			card.LayoutOrder = i
 			card.Parent = strip
@@ -5158,6 +5221,22 @@ do
 	-- in section 6 — it is no longer a roll-rarity banner.)
 
 	local function announce(results, headline)
+		if headline.abilityKey then
+			if #results <= 1 then
+				if headline.isNew then
+					pushNotif(("New powerup: %s!"):format(headline.name or headline.abilityKey), "green", 5)
+				else
+					pushNotif(("%s again — +%s Money"):format(headline.name or headline.abilityKey,
+						comma(headline.refund or 0)), "green", 4)
+				end
+			else
+				local newCount = 0
+				for _, r in results do if r.isNew then newCount += 1 end end
+				pushNotif(("%dx powerup roll: %d new! Best: %s"):format(#results, newCount,
+					headline.name or headline.abilityKey), "green", 5)
+			end
+			return
+		end
 		local h = BullCatalog and BullCatalog.get(headline.bullId) or nil
 		local hname = (h and h.name) or headline.bullId
 		-- a mutation drop outranks the bull news in the card copy
@@ -5193,8 +5272,10 @@ do
 		for i, r in ipairs(results) do
 			local badge = r.isNew and "NEW" or ("+" .. comma(r.refund or 0))
 			local badgeColor = r.isNew and Color3.fromRGB(70, 180, 80) or Color3.fromRGB(190, 150, 55)
-			local mini = makeCard(r.bullId, UDim2.fromScale(1, 1),
-				{ badge = badge, badgeColor = badgeColor, zIndex = 21, mutation = r.mutation })
+			local mini = makeCard(r.abilityKey or r.bullId, UDim2.fromScale(1, 1), {
+				abilityKey = r.abilityKey, name = r.name, rarity = r.rarity,
+				badge = badge, badgeColor = badgeColor, zIndex = 21, mutation = r.mutation,
+			})
 			mini.LayoutOrder = i
 			mini.Parent = gridHolder
 		end
@@ -5219,6 +5300,32 @@ do
 				or ("ROLL AGAIN  $%s"):format(comma(box.cost))) or "ROLL AGAIN")
 		-- dim the plate while a roll is in flight so it reads as busy
 		rollButton.ImageTransparency = state and 0.35 or 0
+	end
+
+	-- Robux-funded reveals cannot be re-rolled for cash. Show one centered gold
+	-- button that repeats the exact product that produced the current result and
+	-- paint it from Roblox's live product price.
+	local function setPurchaseMode(data)
+		local isRobux = data and data.source == "ROBUX"
+		rollButton.Visible = not isRobux
+		robuxButton.Position = if isRobux then UDim2.new(0.5, 0, 1, 0) else UDim2.new(0.69, 0, 1, 0)
+		robuxButton.Size = if isRobux then UDim2.new(0.5, 0, 0.2, 0) else UDim2.new(0.36, 0, 0.2, 0)
+		activeRobuxProductKey = if isRobux and typeof(data.productKey) == "string"
+			then data.productKey else "BULL_ROLL"
+		local productId = tonumber(productIds[activeRobuxProductKey]) or 0
+		priceRequestToken += 1
+		local token = priceRequestToken
+		if robuxLabel then robuxLabel.Text = "BUY  \u{E002}" end
+		if productId > 0 then
+			task.spawn(function()
+				local ok, info = pcall(function()
+					return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
+				end)
+				if token == priceRequestToken and ok and info and robuxLabel then
+					robuxLabel.Text = tostring(info.PriceInRobux or "BUY") .. " \u{E002}"
+				end
+			end)
+		end
 	end
 
 	local function animateReveal(results)
@@ -5372,7 +5479,10 @@ do
 	-- ack with source="ROBUX" drives the same reveal). No product id yet ->
 	-- "coming soon" card, so the button is safe to ship before publishing.
 	robuxButton.Activated:Connect(function()
-		local pid = tonumber(productIds.BULL_ROLL) or 0
+		if rolling then
+			return
+		end
+		local pid = tonumber(productIds[activeRobuxProductKey]) or 0
 		if pid <= 0 then
 			pushNotif("Robux rolls are coming soon!", "red", 3)
 			return
@@ -5787,6 +5897,13 @@ do
 		local function paintCard(card, key, meta, price, opts)
 			opts = opts or {} -- { rarity, costText } overrides for the pinned FREE starter card
 			local owned = player:GetAttribute("Owns_" .. key) == true
+			local rarity = opts.rarity or meta.rarity or "COMMON"
+			local rarityCol = ABILITY_RARITY_COLOR[rarity] or ABILITY_RARITY_COLOR.COMMON
+			local rarityRamp = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, rarityCol:Lerp(Color3.new(1, 1, 1), 0.55)),
+				ColorSequenceKeypoint.new(0.45, rarityCol),
+				ColorSequenceKeypoint.new(1, rarityCol:Lerp(Color3.fromRGB(15, 15, 15), 0.5)),
+			})
 
 			local locked = card:FindFirstChild("Locked")
 			if locked then
@@ -5802,21 +5919,15 @@ do
 			-- owned/permanent status — the green Buy button already shows OWNED / price.
 			local tagLabel = info and info:FindFirstChild("Rarity")
 			if tagLabel and tagLabel:IsA("TextLabel") then
-				local rarity = opts.rarity or meta.rarity or "COMMON"
 				tagLabel.Text = ABILITY_RARITY_NAME[rarity] or rarity
 				tagLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- white so the gradient shows at full value
-				local col = ABILITY_RARITY_COLOR[rarity] or ABILITY_RARITY_COLOR.COMMON
 				local g = tagLabel:FindFirstChildWhichIsA("UIGradient")
 				if not g then
 					g = Instance.new("UIGradient")
 					g.Parent = tagLabel
 				end
 				g.Rotation = 90
-				g.Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, col:Lerp(Color3.new(1, 1, 1), 0.55)),
-					ColorSequenceKeypoint.new(0.45, col),
-					ColorSequenceKeypoint.new(1, col:Lerp(Color3.fromRGB(15, 15, 15), 0.5)),
-				})
+				g.Color = rarityRamp
 			end
 
 			-- Icon slot: the ability's emoji glyph (no image art for abilities);
@@ -5829,9 +5940,15 @@ do
 					img.Visible = false
 				end
 				local stroke = iconFrame:FindFirstChildWhichIsA("UIStroke")
-				local strokeGrad = stroke and stroke:FindFirstChildWhichIsA("UIGradient")
-				if strokeGrad then
-					strokeGrad.Color = ColorSequence.new(meta.color)
+				if stroke then
+					stroke.Color = Color3.new(1, 1, 1) -- neutral base; gradient owns the visible colour
+					local strokeGrad = stroke:FindFirstChildWhichIsA("UIGradient")
+					if not strokeGrad then
+						strokeGrad = Instance.new("UIGradient")
+						strokeGrad.Parent = stroke
+					end
+					strokeGrad.Rotation = 90
+					strokeGrad.Color = rarityRamp
 				end
 				-- Prefer the shared ability ART image; fall back to the emoji glyph.
 				local art = iconFrame:FindFirstChild("AbilityArt")
@@ -6286,8 +6403,9 @@ do
 				end
 			end
 			if typeof(config.PRODUCTS) == "table" then
-				productIds.BULL_ROLL = tonumber(config.PRODUCTS.BULL_ROLL) or 0
-				productIds.BULL_ROLL_10 = tonumber(config.PRODUCTS.BULL_ROLL_10) or 0
+				for key, id in config.PRODUCTS do
+					productIds[key] = tonumber(id) or 0
+				end
 			end
 		end
 		setRolling(false) -- paints the button label now that the box cost is known
@@ -6316,6 +6434,7 @@ do
 				if currentFrame ~= rollFrame then
 					openFrame(rollFrame)
 				end
+				setPurchaseMode(data)
 				setRolling(true)
 				animateReveal(data.results)
 			elseif kind == "DENIED" then

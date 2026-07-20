@@ -16619,7 +16619,7 @@
     {
       "name": "SoundService",
       "className": "SoundService",
-      "guid": "7317",
+      "guid": "8148",
       "children": [
         {
           "name": "BackgroundMusic",
@@ -45005,7 +45005,7 @@
         {
           "name": "Camera",
           "className": "Camera",
-          "guid": "2378529"
+          "guid": "179044"
         },
         {
           "name": "ColorCorrection",

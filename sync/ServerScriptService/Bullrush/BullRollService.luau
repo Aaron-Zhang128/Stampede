@@ -158,7 +158,7 @@ end
 -- (a few frames, up to ~1s worst case) + the 4.6s carousel + latency.
 local REVEAL_DELAY = 5.5
 
-local function grantRolls(player, count: number, source: string, boxId: string, box)
+local function grantRolls(player, count: number, source: string, boxId: string, box, productKey: string?)
 	local results = {}
 	local refundTotal = 0
 	local broadcasts = {}
@@ -209,6 +209,7 @@ local function grantRolls(player, count: number, source: string, boxId: string, 
 		boxId = boxId,
 		money = DataHandler.GetStat(player, "Money"),
 		source = source,
+		productKey = productKey,
 	})
 
 	-- The visible half lands with the carousel. Safe if the player leaves
@@ -225,6 +226,81 @@ local function grantRolls(player, count: number, source: string, boxId: string, 
 			-- of a notif card (Main.client's Notify handler routes it there);
 			-- the rarity tints the line in that rarity's text gradient
 			NotifyService.broadcast(b.text, "chat", nil, b.rarity)
+		end
+	end
+	if typeof(player) == "Instance" then
+		task.delay(REVEAL_DELAY, commitReveal)
+	else
+		commitReveal()
+	end
+	return results
+end
+
+-- OP Lucky Block powerups use the same ROLLED acknowledgement and reveal delay
+-- as bulls, but grant permanent ability ownership. Duplicate pulls refund the
+-- ability's normal Money-shop price.
+local function grantPowerupRolls(player, count: number, opRoll, productKey: string)
+	local pool = opRoll.powerups or {}
+	local totalWeight = 0
+	for _, entry in pool do
+		totalWeight += math.max(0, tonumber(entry.weight) or 0)
+	end
+	if totalWeight <= 0 then
+		warn("[BullRoll] OP powerup pool is empty")
+		return nil
+	end
+
+	local results = {}
+	local refundTotal = 0
+	local newlyOwned = {}
+	for _ = 1, count do
+		local roll = rng:NextNumber(0, totalWeight)
+		local chosen = pool[#pool]
+		for _, entry in pool do
+			roll -= math.max(0, tonumber(entry.weight) or 0)
+			if roll <= 0 then
+				chosen = entry
+				break
+			end
+		end
+
+		local key = chosen.key
+		local isNew = not DataHandler.HasAbility(player, key)
+		local refund = 0
+		if isNew then
+			DataHandler.AddAbility(player, key)
+			newlyOwned[key] = true
+		else
+			refund = tonumber(Config.ABILITY_SHOP.PRICES[key]) or 0
+			refundTotal += refund
+		end
+		table.insert(results, {
+			abilityKey = key,
+			name = chosen.name or key,
+			rarity = chosen.rarity or "EPIC",
+			isNew = isNew,
+			refund = refund,
+		})
+	end
+
+	if refundTotal > 0 then
+		DataHandler.AddStatQuiet(player, "Money", refundTotal)
+	end
+	ack(player, "ROLLED", {
+		results = results,
+		boxId = "OP",
+		money = DataHandler.GetStat(player, "Money"),
+		source = "ROBUX",
+		contentType = "POWERUP",
+		productKey = productKey,
+	})
+
+	local function commitReveal()
+		if typeof(player) == "Instance" then
+			for key in newlyOwned do
+				player:SetAttribute("Owns_" .. key, true)
+			end
+			DataHandler.SyncStat(player, "Money")
 		end
 	end
 	if typeof(player) == "Instance" then
@@ -353,7 +429,7 @@ end
 --==============================================================================
 
 function BullRollService.init()
-	local function makeHandler(count: number)
+	local function makeHandler(count: number, productKey: string)
 		return function(receipt, player)
 			if not player or not profileReady(player) then
 				-- Buyer left / data can't save: let Roblox retry the receipt
@@ -365,27 +441,27 @@ function BullRollService.init()
 			if not (boxId and box) then
 				boxId, box = next(Config.BULLS.BOXES)
 			end
-			grantRolls(player, count, "ROBUX", boxId, box)
+			grantRolls(player, count, "ROBUX", boxId, box, productKey)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 	end
-	MonetizationService.registerProduct(Config.PRODUCTS.BULL_ROLL, makeHandler(1))
-	MonetizationService.registerProduct(Config.PRODUCTS.BULL_ROLL_10, makeHandler(10))
+	MonetizationService.registerProduct(Config.PRODUCTS.BULL_ROLL, makeHandler(1, "BULL_ROLL"))
+	MonetizationService.registerProduct(Config.PRODUCTS.BULL_ROLL_10, makeHandler(10, "BULL_ROLL_10"))
 
-	-- OP Lucky Block: ROBUX elite bull rolls (Epic/Legendary-only pool). The box
-	-- isn't in BOXES (Robux-only, no Money card), so grant its table directly;
-	-- boxId "OP" is opaque to the client (its ROLLED handler ignores unknown ids).
+	-- OP Lucky Block: ROBUX powerup rolls. Results keep the shared ROLLED contract
+	-- so the existing carousel and multi-result grid present them.
 	local opRoll = Config.BULLS.OP_ROLL
-	if opRoll and opRoll.box then
+	if opRoll and opRoll.powerups then
 		for _, bundle in opRoll.bundles or {} do
 			local count = bundle.count
-			local productId = tonumber(Config.PRODUCTS[bundle.product]) or 0
+			local productKey = bundle.product
+			local productId = tonumber(Config.PRODUCTS[productKey]) or 0
 			if productId > 0 then
 				MonetizationService.registerProduct(productId, function(_receipt, player)
 					if not player or not profileReady(player) then
 						return Enum.ProductPurchaseDecision.NotProcessedYet
 					end
-					grantRolls(player, count, "ROBUX", "OP", opRoll.box)
+					grantPowerupRolls(player, count, opRoll, productKey)
 					return Enum.ProductPurchaseDecision.PurchaseGranted
 				end)
 			end
@@ -406,7 +482,7 @@ function BullRollService.init()
 				if not player or not profileReady(player) then
 					return Enum.ProductPurchaseDecision.NotProcessedYet
 				end
-				grantRolls(player, 1, "ROBUX", tierId, tier)
+				grantRolls(player, 1, "ROBUX", tierId, tier, tier.product)
 				return Enum.ProductPurchaseDecision.PurchaseGranted
 			end)
 		end
