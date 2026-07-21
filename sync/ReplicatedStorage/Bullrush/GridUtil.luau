@@ -55,8 +55,8 @@
 	- RevengeThrow:FireServer(lane) -- a round SPECTATOR (eliminated
 	  participant or anyone outside the round: late/first joiners, AFK
 	  sitters) sends a revenge bull down the lane it selected from the
-	  overhead bull-cam (arrow keys / HUD arrows cycle a ring of every lane
-	  entry point; see BullrushClient). RevengeService re-validates
+	  overhead bull-cam (arrow keys / HUD arrows cycle the north and west lane
+	  entry points; see BullrushClient). RevengeService re-validates
 	  everything server-side (only players ALIVE in the round are barred),
 	  so spoofing it earns nothing. The bull launched is the thrower's
 	  EQUIPPED bull (see BullRoll below): catalog speed, not REVENGE.SPEED.

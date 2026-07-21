@@ -328,6 +328,29 @@ local FRAME_MAP = {
 	Skill = "Shop2",
 }
 
+-- Player-facing terminology is "Skills" everywhere. Keep the legacy Ability*
+-- instance/remote names as an internal compatibility contract for saved data and
+-- older place objects, but normalize any designer-owned labels at runtime.
+local UI_COPY_REBRAND = {
+	["Hatch a Bull"] = "Launch Faster Bulls",
+	["Hatch a Bull!"] = "Launch Faster Bulls",
+	["Upgrades and Boosts"] = "Buy Skills",
+	["Upgrades & Boosts"] = "Buy Skills",
+	["Ability Shop"] = "Skill Shop",
+}
+local function applyCopyRebrand(descendant)
+	if descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+		local replacement = UI_COPY_REBRAND[descendant.Text]
+		if replacement then
+			descendant.Text = replacement
+		end
+	end
+end
+for _, descendant in ipairs(gui:GetDescendants()) do
+	applyCopyRebrand(descendant)
+end
+gui.DescendantAdded:Connect(applyCopyRebrand)
+
 for _, d in ipairs(SideUI:GetDescendants()) do
 	if d:IsA("GuiButton") and not handled[d] then
 		if d.Name == "Button1" then
@@ -918,7 +941,7 @@ task.spawn(function()
 	title.Font = Enum.Font.GothamBlack
 	title.TextScaled = true
 	title.TextColor3 = Color3.fromRGB(255, 255, 255)
-	title.Text = "CHOOSE YOUR ABILITY"
+	title.Text = "CHOOSE YOUR SKILL"
 	title.Parent = backdrop
 	local titleStroke = Instance.new("UIStroke")
 	titleStroke.Color = Color3.fromRGB(0, 0, 0)
@@ -5247,7 +5270,7 @@ do
 		if headline.abilityKey then
 			if #results <= 1 then
 				if headline.isNew then
-					pushNotif(("New powerup: %s!"):format(headline.name or headline.abilityKey), "green", 5)
+					pushNotif(("New skill: %s!"):format(headline.name or headline.abilityKey), "green", 5)
 				else
 					pushNotif(("%s again — +%s Money"):format(headline.name or headline.abilityKey,
 						comma(headline.refund or 0)), "green", 4)
@@ -5255,7 +5278,7 @@ do
 			else
 				local newCount = 0
 				for _, r in results do if r.isNew then newCount += 1 end end
-				pushNotif(("%dx powerup roll: %d new! Best: %s"):format(#results, newCount,
+				pushNotif(("%dx skill roll: %d new! Best: %s"):format(#results, newCount,
 					headline.name or headline.abilityKey), "green", 5)
 			end
 			return
@@ -5868,7 +5891,7 @@ do
 		local header = shopFrame:FindFirstChild("Header")
 		local headerName = header and header:FindFirstChild("Name")
 		if headerName and headerName:IsA("TextLabel") then
-			headerName.Text = "Ability Shop"
+			headerName.Text = "Skill Shop"
 		end
 		local headerIcon = header and header:FindFirstChild("Icon")
 		if headerIcon and headerIcon:IsA("ImageLabel") then
@@ -6137,7 +6160,7 @@ do
 				local endsAt = bullrush:GetAttribute("AbilityShopEndsAt")
 				if type(endsAt) == "number" then
 					local remaining = math.max(0, math.floor(endsAt - workspace:GetServerTimeNow()))
-					timer.Text = string.format("New abilities in %d:%02d", math.floor(remaining / 60), remaining % 60)
+					timer.Text = string.format("New skills in %d:%02d", math.floor(remaining / 60), remaining % 60)
 				else
 					timer.Text = ""
 				end
@@ -6370,7 +6393,7 @@ do
 				btn.Activated:Connect(function()
 					playClick()
 					if not ownsSkill(meta.key) and pushNotif then
-						pushNotif("Unlock " .. meta.label .. " in the Ability Shop!", "white", 2.5)
+						pushNotif("Unlock " .. meta.label .. " in the Skill Shop!", "white", 2.5)
 					end
 				end)
 			end
@@ -8296,7 +8319,7 @@ do
 end
 
 ---------------------------------------------------------------- 17) level bar
--- Bottom-center XP bar, always on: a green "LVL N" pill plus a fill that shows
+-- Bottom-center XP bar (currently disabled): a green "LVL N" pill plus a fill that shows
 -- progress into the current level. Wears the HUD money look (the Cash
 -- counter's lime -> pure-green ramp + deep-green stroke) so "XP" visibly IS
 -- money earned. Renders straight off the replicated Level/XP attributes
@@ -8475,7 +8498,8 @@ do
 			and typeof(cfg.LEVELS.XP_TO_NEXT) == "table" then
 			levelsCfg = cfg.LEVELS
 			repaint()
-			xpGui.Enabled = true
+			-- XP progression remains active, but its HUD bar is intentionally off.
+			xpGui.Enabled = false
 		end
 	end)
 end
@@ -8494,7 +8518,7 @@ local enterBullCamButton = nil
 --      (Shop1 has no HUD button — the stall's ShopPrompt is its only door), then
 --      a pulsing gold ring + ~5-word hint on the FREE ability card's claim button
 --      once the window is open.
---   play beat (step 2, starter OWNED): a lobby-only "Play a game using ability
+--   play beat (step 2, starter OWNED): a lobby-only "Play a game using a skill
 --      0/1" objective card that pushes them to actually PLAY a round. Once the
 --      server marks the tour DONE (they finished a round — died OR won it) and
 --      the player is back ALIVE, it ticks to 1/1, flashes green and fades away
@@ -8973,7 +8997,7 @@ do
 			if buy and buy:IsA("GuiButton") then
 				-- pinned to the button's RIGHT (user request): the default
 				-- half-screen rule would tuck it left, over the card art
-				return "ui", buy, "Claim your FREE ability!", "right"
+				return "ui", buy, "Claim your FREE skill!", "right"
 			end
 			return nil -- card still building
 		end
@@ -9006,7 +9030,7 @@ do
 		if stallMarker then
 			stallMarker.Enabled = kind == "stall"
 			if kind == "stall" and stallLabel then
-				stallLabel.Text = "Grab your FREE ability!"
+				stallLabel.Text = "Grab your FREE skill!"
 				stallLabel.TextTransparency = 0.15 - 0.15 * math.sin(os.clock() * 4)
 			end
 		end

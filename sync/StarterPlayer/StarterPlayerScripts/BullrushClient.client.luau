@@ -893,8 +893,8 @@ local revengeWasCooling = false -- edge-detects the cooldown lapping for the rea
 
 --==============================================================================
 -- Revenge lane selection — tile tint layer. While the overhead bull-cam is up
--- (see below), the eliminated cycle a clockwise ring of every lane entry
--- point around the ACTIVE window; the selected lane's tiles tint green with
+-- (see below), the eliminated cycle through the north and west lane entries
+-- around the ACTIVE window; the selected lane's tiles tint green with
 -- the ENTRY tile brightest (that's where the bull spawns). Selection state +
 -- inputs live with the bull-cam sections below; this layer only owns the ring
 -- math and the tile colors. The local viewer's OWN selected lane outranks the
@@ -906,7 +906,7 @@ local revengeWasCooling = false -- edge-detects the cooldown lapping for the rea
 local SELECT_COLOR = Color3.fromRGB(70, 200, 100)
 local SELECT_ENTRY_COLOR = Color3.fromRGB(180, 255, 200) -- the bull spawns off this edge
 
-local selectionRing: { GridUtil.Lane } = {} -- clockwise entry points, screen order
+local selectionRing: { GridUtil.Lane } = {} -- north entries, then west entries
 local selectionIndex = 0 -- 0 = nothing selected yet this session
 -- selectionTinted is declared up by tilePulse — the danger loop reads it
 
@@ -929,11 +929,10 @@ local function holeLinesForMode(modeId): any
 	return nil
 end
 
--- Clockwise ring in SCREEN order under the bull-cam (screen-up = north = row
--- rowMin): top edge left->right, right edge top->bottom, bottom edge
--- right->left, left edge bottom->top. direction points the bull INTO the
--- window, so the ring covers both ends of every row and column — the same
--- lane set the old clickable marker ring offered.
+-- One entry side per axis keeps selection predictable under the fixed bull-cam:
+-- columns launch south from the north edge and rows launch east from the west
+-- edge. Offering the opposite ends duplicated every lane and made the arrow
+-- controls appear reversed when selection moved onto the south edge.
 local function buildSelectionRing(window: GridUtil.Bounds): { GridUtil.Lane }
 	local ring = {}
 	-- Skip any lane that runs over holes (Hashtag trench / Reverse-# pit): a bull
@@ -947,13 +946,9 @@ local function buildSelectionRing(window: GridUtil.Bounds): { GridUtil.Lane }
 	for col = window.colMin, window.colMax do
 		add({ axis = "col", index = col, direction = 1 }) -- north edge, heading south
 	end
+	-- Rows stay in screen order from top to bottom, so the right HUD arrow
+	-- advances downward and the left arrow moves upward.
 	for row = window.rowMin, window.rowMax do
-		add({ axis = "row", index = row, direction = -1 }) -- east edge, heading west
-	end
-	for col = window.colMax, window.colMin, -1 do
-		add({ axis = "col", index = col, direction = -1 }) -- south edge, heading north
-	end
-	for row = window.rowMax, window.rowMin, -1 do
 		add({ axis = "row", index = row, direction = 1 }) -- west edge, heading east
 	end
 	return ring
@@ -1865,23 +1860,57 @@ local function spawnBullVisual(data)
 			tagText = style.throwerName
 		end
 		local root = bull.PrimaryPart or bull:FindFirstChild("Root")
-		if tagText and root then
+		local throwerUserId = tonumber(style.throwerUserId)
+		local hasThrowerIcon = not special and throwerUserId ~= nil and throwerUserId > 0
+		if (tagText or hasThrowerIcon) and root then
 			local tag = Instance.new("BillboardGui")
 			tag.Name = if special then "SpecialTag" else "RevengeTag"
-			tag.Size = UDim2.new(0, if special then 200 else 130, 0, 26)
-			tag.StudsOffset = Vector3.new(0, 4, 0)
+			tag.Size = if special then UDim2.fromOffset(200, 26) else UDim2.fromOffset(64, 72)
+			tag.StudsOffset = Vector3.new(0, if special then 4 else 5.5, 0)
 			tag.AlwaysOnTop = true
 			tag.MaxDistance = if special then 320 else 220
-			local label = Instance.new("TextLabel")
-			label.BackgroundTransparency = 1
-			label.Size = UDim2.fromScale(1, 1)
-			label.Font = Enum.Font.GothamBlack
-			label.TextScaled = true
-			label.TextColor3 = accent
-			label.TextStrokeColor3 = Color3.fromRGB(25, 0, 0)
-			label.TextStrokeTransparency = 0.3
-			label.Text = tagText
-			label.Parent = tag
+			if hasThrowerIcon then
+				local icon = Instance.new("ImageLabel")
+				icon.Name = "PlayerIcon"
+				icon.BackgroundColor3 = Color3.fromRGB(25, 0, 0)
+				icon.BorderSizePixel = 0
+				icon.AnchorPoint = Vector2.new(0.5, 0)
+				icon.Position = UDim2.fromScale(0.5, 0)
+				icon.Size = UDim2.fromOffset(52, 52)
+				icon.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150"):format(throwerUserId)
+				local corner = Instance.new("UICorner")
+				corner.CornerRadius = UDim.new(1, 0)
+				corner.Parent = icon
+				local stroke = Instance.new("UIStroke")
+				stroke.Color = accent
+				stroke.Thickness = 3
+				stroke.Parent = icon
+				icon.Parent = tag
+
+				local nameLabel = Instance.new("TextLabel")
+				nameLabel.Name = "PlayerName"
+				nameLabel.BackgroundTransparency = 1
+				nameLabel.Position = UDim2.fromOffset(0, 54)
+				nameLabel.Size = UDim2.new(1, 0, 0, 16)
+				nameLabel.Font = Enum.Font.GothamBlack
+				nameLabel.TextScaled = true
+				nameLabel.TextColor3 = Color3.new(1, 1, 1)
+				nameLabel.TextStrokeColor3 = Color3.fromRGB(25, 0, 0)
+				nameLabel.TextStrokeTransparency = 0.25
+				nameLabel.Text = style.throwerName or ""
+				nameLabel.Parent = tag
+			else
+				local label = Instance.new("TextLabel")
+				label.BackgroundTransparency = 1
+				label.Size = UDim2.fromScale(1, 1)
+				label.Font = Enum.Font.GothamBlack
+				label.TextScaled = true
+				label.TextColor3 = accent
+				label.TextStrokeColor3 = Color3.fromRGB(25, 0, 0)
+				label.TextStrokeTransparency = 0.3
+				label.Text = tagText
+				label.Parent = tag
+			end
 			tag.Parent = root
 		end
 	end

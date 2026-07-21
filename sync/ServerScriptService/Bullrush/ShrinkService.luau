@@ -54,12 +54,38 @@ local function tilePartPosition(row: number, col: number): Vector3
 end
 
 local WALL_THICKNESS = 1 -- matches the built Walls parts (X/Z depth)
+-- Mega Punch peaks at 3 * 120 = 360 studs/s. A one-stud wall can fit entirely
+-- between two physics positions at that speed, letting a character tunnel
+-- through it. Keep the authored wall visually thin, but back it with collision
+-- extending outward from the same inner face. This is deliberately deeper than
+-- one low-rate physics step at the current maximum knockback.
+local WALL_COLLIDER_DEPTH = 24
 
 local function getWall(name: string): BasePart?
 	local arena = Workspace:FindFirstChild("BullrushArena")
 	local walls = arena and arena:FindFirstChild("Walls")
 	local wall = walls and walls:FindFirstChild(name)
 	return if wall and wall:IsA("BasePart") then wall else nil
+end
+
+local function getWallCollider(wall: BasePart): BasePart
+	local walls = wall.Parent
+	local name = wall.Name .. "Collider"
+	local existing = walls and walls:FindFirstChild(name)
+	if existing and existing:IsA("BasePart") then
+		return existing
+	end
+
+	local collider = Instance.new("Part")
+	collider.Name = name
+	collider.Anchored = true
+	collider.CanCollide = true
+	collider.CanQuery = false
+	collider.CanTouch = false
+	collider.CastShadow = false
+	collider.Transparency = 1
+	collider.Parent = walls
+	return collider
 end
 
 -- Snap the four guard walls flush to the active window: inner faces on the
@@ -86,6 +112,25 @@ local function updateWalls(b: GridUtil.Bounds)
 			-- Pure physics fence: must never soak up mouse rays, or the
 			-- bull-cam's clicks can't reach the revenge markers just outside.
 			wall.CanQuery = false
+
+			-- Place an invisible anti-tunnelling backing on the OUTSIDE of the
+			-- visible wall. Its inner face stays exactly flush with the playable
+			-- boundary, so it does not consume any arena space.
+			local collider = getWallCollider(wall)
+			local northSouth = sizeZ == WALL_THICKNESS
+			local outwardX = if name == "WallWest" then -1 elseif name == "WallEast" then 1 else 0
+			local outwardZ = if name == "WallNorth" then -1 elseif name == "WallSouth" then 1 else 0
+			collider.Size = Vector3.new(
+				if northSouth then sizeX else WALL_COLLIDER_DEPTH,
+				wall.Size.Y,
+				if northSouth then WALL_COLLIDER_DEPTH else sizeZ
+			)
+			collider.Position = Vector3.new(
+				x + outwardX * (WALL_COLLIDER_DEPTH - WALL_THICKNESS) / 2,
+				wall.Position.Y,
+				z + outwardZ * (WALL_COLLIDER_DEPTH - WALL_THICKNESS) / 2
+			)
+			collider.CollisionGroup = wall.CollisionGroup
 		end
 	end
 

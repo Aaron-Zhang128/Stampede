@@ -123,6 +123,12 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 	then
 		return
 	end
+	-- Bull-cam exposes only two canonical entry sides: north for columns and
+	-- west for rows. Enforce that contract here too so a stale or modified
+	-- client cannot restore the confusing opposite-side launches.
+	if direction ~= 1 then
+		return
+	end
 	-- Any ROUND SPECTATOR may throw (2026-07-13 widening): eliminated
 	-- participants plus everyone watching from outside the round — late/first
 	-- joiners, AFK sitters. Only players still ALIVE on the grid are barred.
@@ -198,7 +204,7 @@ function RevengeService.requestThrow(thrower: Player, laneData: any)
 		end
 		local bullDef = BullCatalog.get(bull.id)
 		BullService.charge(lane, bull.speed, bounds, RoundService.getAliveCached, onKill,
-			{ throwerName = thrower.Name, bullId = bull.id,
+			{ throwerName = thrower.Name, throwerUserId = thrower.UserId, bullId = bull.id,
 				mutation = bullDef and bullDef.themeMutation or nil })
 	end)
 end
